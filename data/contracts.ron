@@ -71,6 +71,14 @@
 // and whose top rungs keep asking for one more line — it now has a second
 // rail.
 //
+// THREE SAUCES SINCE THE MUSTARD TIER (2026-09-26). The tier at the very
+// bottom of this file is the same idea one step on: BBQ was a branch off the
+// ketchup line, so a BBQ order is a claim on capacity the player already
+// owns, while mustard is a whole second line from raw, so a mustard order is
+// a claim on floor, belt and crew that do not exist yet. Its mixed order
+// (`deli_chain`) therefore asks for something `grill_pub` cannot — two lines
+// running at once rather than one line split two ways.
+//
 // BALANCE NOTE (rewritten 2026-09-11, when the board grew from four
 // contracts to nine — the growth tier was written against the three-contract
 // board and merged with the board-of-offers' fourth on 2026-09-12). The
@@ -82,13 +90,23 @@
 //   starter tier   (corner_shop + diner_supply + market_stall)  ~3.9 / 1000
 //   growth tier    (the six orders below them)                 ~19.2 / 1000
 //   BBQ tier       (the four below those, in VAT output)        ~7.0 / 1000
-//   whole board                                                ~30.0 / 1000
+//   mustard tier   (the four at the bottom)                     ~5.1 / 1000
+//   whole board                                                ~35.2 / 1000
 //
 // The BBQ tier is quoted in vat output rather than in boxes because that is
 // the only unit the two sauces share: it asks for 2.5 boxed_ketchup and ~4.5
 // boxed_bbq per 1000 ticks, and every one of those BBQ boxes eats a ketchup
 // the same vats had to make. Counting it any other way understates what a
 // mixed order costs to serve, which is the whole point of it.
+//
+// The mustard tier's ~5.1 is ~4.1 `boxed_mustard` plus 1.0 `boxed_ketchup`
+// per 1000, and those mustard boxes are NOT interchangeable with the numbers
+// above them: a mustard line's bottleneck is a 360-tick vat rather than a
+// 240-tick one, so one mustard line is ~2.7 boxes per 1000 where a ketchup
+// line is ~4.0. In lines' worth — the only unit that compares the two
+// honestly — the tier is about **one and a half mustard lines plus a quarter
+// of a ketchup line**, which takes the whole board from about seven and a
+// quarter lines' worth of demand to about **nine**.
 //
 // The starter tier is deliberately just inside ONE line's capacity — but
 // only `corner_shop` is `starter: true` (auto-active from tick 0, per the
@@ -121,6 +139,23 @@
 // capacity to reach it, and a player who cannot yet fill it loses that
 // window's payout and, after `strikes` misses in a row, the contract.
 //
+// MUSTARD RUNS 44 TO 52 PER BOX, between the two, for the same reason: a box
+// of mustard costs 17 in raws (`data/ingredients.ron`) against ketchup's 11
+// and BBQ's 23, so the third-of-revenue band puts its rungs between the
+// other two sauces' rungs. Each payout below shows the arithmetic it came
+// from.
+//
+// **WHY A MUSTARD LINE IS WORTH BUILDING AT ALL, given those rates.** Per
+// tick of the vat that limits it, a mustard order pays 44/360 to 52/360 =
+// 0.12 to 0.14, and a ketchup order pays 24/240 to 40/240 = 0.10 to 0.17. So
+// a mustard line beats serving the starter tier with more ketchup and loses
+// to `export_pallet` — which is exactly the decision the tier is for. The
+// reason to build one is not a better rate, it is that the ketchup rungs are
+// FINITE: once the good ones are served, another ketchup line has nothing
+// left to sell to (see the unsold-stock note at the end of this header),
+// while the mustard tier is four unserved orders. Capacity is worth what
+// there is demand for.
+//
 // PRIORITY ORDER IS SMALLEST FIRST, on purpose. When several orders fall
 // due on the same tick (every 60 000 ticks every cadence on the board lines
 // up), the starter orders are filled before the growth tier gets a look
@@ -129,16 +164,19 @@
 // out of whatever the small ones left. Within the growth tier the order
 // again runs small to large.
 //
-// Signing fees are sized against the reference line's 1087 bill and the
+// Signing fees are sized against the reference line's 959 bill and the
 // 3000 starting balance: the mid-tier orders cost a window or two of their
 // own payout, the top rungs are a real capital decision. All placeholders
 // per GAMEPLAY.md §10; change them here and in the prose above together.
 //
 // A box that no contract has ordered is still ingredients turned into
-// unsold stock (`data/ingredients.ron`, ~11 per box of ketchup and ~23 per
-// box of BBQ), so a line built beyond the board's demand is still a loss —
-// and converting ketchup nobody ordered into BBQ nobody ordered doubles the
-// loss rather than hedging it. The board grew twice; the rule did not.
+// unsold stock (`data/ingredients.ron`, ~11 per box of ketchup, ~17 per box
+// of mustard and ~23 per box of BBQ), so a line built beyond the board's
+// demand is still a loss — and converting ketchup nobody ordered into BBQ
+// nobody ordered doubles the loss rather than hedging it. A second line
+// makes that easier to do by accident, not harder: mustard shares `vinegar`
+// with ketchup, so an overbuilt mustard line spends the ketchup line's
+// money as well as its own. The board grew three times; the rule did not.
 (
     schema_version: 2,
     contracts: [
@@ -366,6 +404,120 @@
             cadence_ticks: 5000,
             payout: 650,
             price: 1000,
+            strikes: 2,
+        ),
+
+        // --- The mustard tier ---
+        // The third sauce's orders, and the first demand on the board that
+        // cannot be served by re-plumbing the factory the player already has.
+        // A BBQ order asks them to split one line's output; these ask them to
+        // own a second line, five machines and two hoppers from nothing
+        // (`data/shop.ron`), which is why the whole tier waits behind
+        // `data/unlocks.ron`'s `mustard_sauce` gate rather than sitting on the
+        // board from tick 0.
+        //
+        // LISTED LAST, so the priority rule in the header is again
+        // undisturbed: a player with no mustard line never sees a mustard
+        // order skim the shared pool ahead of the orders they did build for,
+        // and within the tier the order runs small to large.
+        //
+        // THE EXISTING ORDERS ARE UNTOUCHED, for the reason the BBQ tier
+        // records: new demand arrives as new offers, never as an amendment to
+        // a live order a player was serving perfectly well.
+        //
+        // EVERY PAYOUT BELOW IS DERIVED, not chosen. A box of mustard costs
+        // 17 in raws — 4 seed at 2, 1 turmeric at 5, 2 vinegar at 2
+        // (`data/ingredients.ron`) — and the header's margin rule puts
+        // ingredients at roughly a third of revenue, which is the 44-52 band.
+        // Each comment shows its own arithmetic, and the rate rises with
+        // commitment inside the sauce: 44, then 46, then 52.
+
+        // The tutorial order for the third sauce, and `smokehouse_trial`'s
+        // counterpart: two boxes on a slow cadence, cheap to sign, and THREE
+        // strikes — as `hot_dog_stand` below has, where the two larger orders
+        // of the tier get two. Same call as
+        // `corner_shop` and the BBQ trial — this is the first order for a
+        // line the player has never built, and a line built from nothing will
+        // miss a window or two while the belt is still going down.
+        //
+        // PAYOUT: 2 boxes x 44 = 88. 44 is the bottom of the mustard band
+        // (17 in raws is 39% of it), and it is the tier's worst rate per box,
+        // which is where a tutorial order belongs — `corner_shop` pays 25 on
+        // a board whose best ketchup rung is 40.
+        Contract(
+            id: "deli_counter",
+            name: "Deli Counter",
+            mix: [("boxed_mustard", 2)],
+            cadence_ticks: 2500,
+            payout: 88,
+            price: 200,
+            strikes: 3,
+        ),
+        // One more box on a slightly slower cadence for a slightly better
+        // rate: the rung that pays for keeping the new line fed rather than
+        // watching one window. Three strikes as well, because a player is
+        // likely to sign both of these before the line is finished.
+        //
+        // PAYOUT: 3 boxes x 46 = 138. One step up the band from
+        // `deli_counter`'s 44, for one more box per window.
+        Contract(
+            id: "hot_dog_stand",
+            name: "Hot Dog Stand",
+            mix: [("boxed_mustard", 3)],
+            cadence_ticks: 3000,
+            payout: 138,
+            price: 300,
+            strikes: 3,
+        ),
+        // **THE SECOND MIXED ORDER, AND THE REASON THE MUSTARD COOK IS 360
+        // TICKS.** Three ketchup and two mustard is what a factory that has
+        // finished one line of each produces on its own: the ketchup vat
+        // makes one box per 240 ticks, the mustard vat one per 360, and
+        // 240:360 is 3:2. So the obvious two-line build serves this order
+        // without the player tuning anything — the same teaching `grill_pub`
+        // carries, one rung up, except that here the two rates come from two
+        // separate factories rather than one factory divided.
+        //
+        // `data/recipes.ron`'s `mustard` entry states the same arithmetic
+        // from the other end. That cook time and this mix move together or
+        // not at all.
+        //
+        // PAYOUT: 3 ketchup x 36 + 2 mustard x 48 = 108 + 96 = 204. The 36 is
+        // the mid-tier ketchup rate (`wholesale_grocer`, and what `grill_pub`
+        // pays for its ketchup half); the 48 is a mid-band mustard rate, one
+        // step above `hot_dog_stand`'s 46 because this order is harder to
+        // serve than either single-sauce rung. It lands just under
+        // `grill_pub`'s 210 for five boxes, which is correct: BBQ is the
+        // dearer case to make, so the same-sized BBQ mix must out-pay the
+        // mustard one. Its blended 40.8 per box is not a rung on the mustard
+        // ladder — a mixed order's per-box rate averages two sauces and says
+        // nothing about commitment, per the header's qualifier.
+        Contract(
+            id: "deli_chain",
+            name: "Deli Chain",
+            mix: [("boxed_ketchup", 3), ("boxed_mustard", 2)],
+            cadence_ticks: 3000,
+            payout: 204,
+            price: 350,
+            strikes: 2,
+        ),
+        // The mustard pallet, and the top of this tier: eight boxes every
+        // 5000 ticks is about three mustard lines' output held back for the
+        // window, because a 360-tick vat makes ~2.7 boxes per 1000 ticks and
+        // this asks for 1.6. `export_pallet`'s counterpart on the mustard
+        // side.
+        //
+        // PAYOUT: 8 boxes x 52 = 416. 52 is the top of the mustard band (17
+        // in raws is 33% of it, the same fraction `export_pallet` leaves on
+        // ketchup), and it is the best mustard rate on the board because it
+        // is the hardest mustard order to fill.
+        Contract(
+            id: "sandwich_franchise",
+            name: "Sandwich Franchise",
+            mix: [("boxed_mustard", 8)],
+            cadence_ticks: 5000,
+            payout: 416,
+            price: 800,
             strikes: 2,
         ),
     ],

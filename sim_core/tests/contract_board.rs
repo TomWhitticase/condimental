@@ -84,6 +84,86 @@ fn a_new_game_starts_with_exactly_the_boards_starters_and_offers_the_rest() {
     );
 }
 
+/// **THE MUSTARD COOK AND THE MUSTARD MIXED ORDER ARE ONE DECISION**, and
+/// this is the assertion that keeps them one. `data/recipes.ron` cooks
+/// mustard for 360 ticks against ketchup's 240 so that a factory with one
+/// finished line of each settles at three cases of ketchup to two of
+/// mustard, and `deli_chain` asks for exactly that mix. Stated as ids and
+/// numbers: the order asks for the same number of **vat-ticks** from each
+/// line, 3 x 240 = 2 x 360 = 720, so the obvious two-line factory serves it
+/// without tuning. Change either number and this fails.
+///
+/// `grill_pub`'s 3 + 2 is the same shape for a different reason and is
+/// deliberately not checked here: BBQ's vat drinks the ketchup vat's output,
+/// so its ratio comes from the draw rate rather than from two independent
+/// cooks, and `tests/bbq_branch.rs` measures it on a running factory. Two
+/// independent lines can be multiplied out on paper; a branch cannot.
+#[test]
+fn the_mustard_mixed_order_asks_for_the_same_vat_ticks_from_each_line() {
+    let recipes = recipes();
+    let ketchup_cook = recipes.get("ketchup").expect("the shipped cook").time_ticks;
+    let mustard_cook = recipes.get("mustard").expect("the shipped cook").time_ticks;
+    assert_eq!((ketchup_cook, mustard_cook), (240, 360));
+
+    let board = ContractRegistry::bundled();
+    let mixed = board
+        .get("deli_chain")
+        .expect("the mustard tier's mixed order");
+    let cases = |id: &str| -> u64 {
+        mixed
+            .mix
+            .iter()
+            .find(|(item, _)| item == id)
+            .map(|(_, count)| u64::from(*count))
+            .unwrap_or_else(|| panic!("{} asks for no {id}", mixed.id))
+    };
+    assert_eq!(
+        cases("boxed_ketchup") * ketchup_cook,
+        cases("boxed_mustard") * mustard_cook,
+        "{} asks for {} ketchup and {} mustard, which is not what a 240-tick vat and a \
+         360-tick vat make in the same window — the cook in data/recipes.ron and this mix \
+         move together or not at all",
+        mixed.id,
+        cases("boxed_ketchup"),
+        cases("boxed_mustard")
+    );
+}
+
+/// Every payout in the mustard tier is derived from what a case costs to
+/// make, and the rate per case rises with what the order commits the player
+/// to — the ordering the shipped board already has, asserted rather than
+/// described. A case of mustard costs 17 in raws (`tests/cookbook.rs` walks
+/// that back to the market), the board's margin rule puts ingredients at
+/// roughly a third of revenue, and 44/46/52 is that band.
+#[test]
+fn the_mustard_tier_pays_by_the_case_and_pays_better_the_more_it_asks() {
+    let board = ContractRegistry::bundled();
+    let rate = |id: &str| -> f64 {
+        let contract = board.get(id).unwrap_or_else(|| panic!("no contract {id}"));
+        let cases: u32 = contract.mix.iter().map(|(_, count)| count).sum();
+        contract.payout.to_num::<f64>() / f64::from(cases)
+    };
+    // 2 x 44 = 88, 3 x 46 = 138, 8 x 52 = 416.
+    assert_eq!(rate("deli_counter"), 44.0);
+    assert_eq!(rate("hot_dog_stand"), 46.0);
+    assert_eq!(rate("sandwich_franchise"), 52.0);
+    // 3 x 36 + 2 x 48 = 204 over five cases: a mixed order is priced per
+    // side, so its blended rate sits below both, which is why the board's
+    // header excludes it from the ladder.
+    assert!((rate("deli_chain") - 40.8).abs() < 0.001);
+
+    let mustard = board
+        .get("deli_counter")
+        .expect("the tier's trial order")
+        .payout
+        .to_num::<f64>()
+        / 2.0;
+    assert!(
+        mustard > 17.0 * 2.0,
+        "the worst rate in the tier still has to beat twice what the case cost"
+    );
+}
+
 #[test]
 fn the_sign_contract_command_parses_from_json_and_buys_an_offer_out_of_money() {
     let mut world = world();

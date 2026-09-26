@@ -116,9 +116,9 @@ use super::unlocks::{UnlockRegistry, UnlockSnapshot};
 ///
 /// - The shipped six-stage line — [`super::reference::reference_chain`],
 ///   which prices its own bill out of `data/shop.ron` rather than
-///   hardcoding it — costs exactly **1087**. A new player can therefore
+///   hardcoding it — costs exactly **959**. A new player can therefore
 ///   build the whole thing outright if that is what they want to do, and
-///   still have about **1900** left for the mistakes, the second line and
+///   still have about **2000** left for the mistakes, the second line and
 ///   the belt they laid the wrong way round.
 /// - That is deliberately **more than 2.5x** the bill rather than exactly
 ///   it. A balance that only just covers the line is a puzzle with one
@@ -127,7 +127,7 @@ use super::unlocks::{UnlockRegistry, UnlockSnapshot};
 ///
 /// **Why it is not 200 any more.** 200 was this constant's first value, and
 /// it was chosen to be "a first move, not a factory" — a hopper (40), a
-/// crusher (75) and seventeen belt tiles (85). Against a 1087 bill and a
+/// crusher (75) and seventeen belt tiles (85). Against a 959 bill and a
 /// chain whose first *sellable* product is six machines downstream, that
 /// turned out not to be a slow start but a dead one: money only ever arrives
 /// through contract deliveries, deliveries need the line, and the line could

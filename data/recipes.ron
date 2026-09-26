@@ -15,13 +15,18 @@
 // from what ends up adjacent to what. So the order is not *geometry* — but
 // it is still content that three things read.
 //
-// (1) `validate_chain` checks that the recipes form ONE CONNECTED GRAPH. It
-// floods outward from the first entry, and a recipe sharing no ingredient id
-// with the rest is a construction-time panic — so a typo'd id is still
-// caught at load rather than showing up as a machine that silently never
-// starts. **It no longer requires that *consecutive* entries chain**, which
-// is what let the BBQ branch exist at all: a fork is legal, a second
-// disconnected line is not.
+// (1) `validate_chain` checks that every part of this file is content a
+// player can **reach**: each connected component of the recipe graph has to
+// hold at least one recipe that can be started — its machine is for sale in
+// `data/shop.ron` and everything it consumes is obtainable, where
+// "obtainable" grows outwards from what `data/ingredients.ron` prices. So a
+// typo'd input id is still caught at load rather than showing up as a
+// machine that silently never starts. **It does not demand that the graph be
+// one component** (issue #42): it once required consecutive entries to
+// chain, then that every recipe be reachable from the first, and the file
+// outgrew both. A fork is legal, and so is a whole second line that shares
+// nothing — which is what mayonnaise will be (GAMEPLAY.md §2) and what the
+// mustard tier below nearly is.
 //
 // (2) An item that some recipe consumes and no recipe produces is by
 // definition a *raw ingredient*, which is what a hopper holds and what
@@ -45,24 +50,39 @@
 // by what you plumb into it.
 //
 // **WHY THE ORDER BELOW IS SAFE.** The tiebreak only bites when one
-// machine's current inputs satisfy two of its kind's recipes at once, and on
-// the shipped content that cannot happen: every pair of recipes sharing a
-// machine kind takes **completely disjoint input ids**.
+// machine's inputs satisfy two of its kind's recipes at once, and on the
+// shipped content that cannot happen — because **every recipe on a kind
+// needs at least one id that no other recipe on that kind needs**:
 //
-//   mixer        tomato_paste + sugar + vinegar  vs  spice_mix + molasses + ketchup
-//   cooking_vat  ketchup_mix                     vs  bbq_mix + liquid_smoke
-//   bottler      ketchup                         vs  bbq
-//   packer       bottled_ketchup                 vs  bottled_bbq
+//   crusher      tomato  /  mustard_seed
+//   mixer        tomato_paste + sugar + vinegar
+//                  /  spice_mix + molasses + ketchup
+//                  /  mustard_meal + turmeric + vinegar
+//   cooking_vat  ketchup_mix  /  bbq_mix + liquid_smoke  /  mustard_mix
+//   bottler      ketchup  /  bbq  /  mustard
+//   packer       bottled_ketchup  /  bottled_bbq  /  bottled_mustard
 //
-// A mixer fed the BBQ branch's ingredients cannot satisfy `ketchup_mix` —
-// it has no paste, no sugar and no vinegar — and a mixer on the ketchup line
-// cannot satisfy `bbq_mix`. So file order never actually decides anything
-// here, and reordering this file could not change what any machine makes.
-// `recipe.rs`'s `recipes_on_a_kind_take_disjoint_inputs` pins that, because
-// it is the property that keeps "no picker" honest: the day two recipes on
-// one kind DO overlap, the player gets a machine whose output depends on a
-// file order they cannot see, and that is the point at which this design
-// needs revisiting rather than a quiet tiebreak.
+// A machine only ever holds what the player plumbed into it, so a mixer
+// plumbed for one of those three rows is missing something each of the other
+// two demands: fed paste and sugar it cannot satisfy `mustard_mix` (no meal,
+// no turmeric), and fed meal and turmeric it cannot satisfy `ketchup_mix`.
+// File order therefore still decides nothing, and reordering this file could
+// not change what any machine makes.
+//
+// **THAT USED TO BE THE STRONGER CLAIM "completely disjoint input ids", AND
+// MUSTARD IS WHY IT IS NOT.** The mustard mixer draws the same bought
+// `vinegar` the ketchup mixer does (that sharing is the point of the tier —
+// see the mustard note below), so one pair of recipes on one kind now
+// overlaps in one id. Disjointness was only ever a *proxy* for the property
+// above, and a conservative one: two recipes could always be satisfied at
+// once by a machine holding the union of their inputs, disjoint or not, so
+// what keeps "no picker" honest is that no plumbing for one recipe is also
+// plumbing for another. `recipe.rs`'s
+// `each_recipe_on_a_kind_needs_something_the_others_do_not` pins exactly
+// that. The day two recipes on one kind DO become mutually satisfiable —
+// one's inputs a subset of the other's — a player gets a machine whose
+// output depends on a file order they cannot see, and that is the point at
+// which this design needs revisiting rather than a quiet tiebreak.
 //
 // FLUIDS, BOTH WAYS (schema_version 3). Milestone 6 added the optional
 // `fluid_inputs` field — (fluid id, whole units) drawn per craft from the
@@ -125,6 +145,15 @@
 // the shipped line's 240-tick bottleneck at all. A player who never builds
 // a BBQ branch sees exactly the timings they saw before. See that recipe's
 // own note for why 600 specifically.
+//
+// **The mustard cook sits between the two at 360**, and it is the only one
+// of the three whose number is argued from a *ratio to another line* rather
+// than from the work in the pot. A mustard line is a whole second line from
+// raw, and its own bottleneck is its vat, so a factory running one finished
+// ketchup line and one finished mustard line settles at 240:360 — three
+// cases of ketchup to two of mustard, which is the mix `deli_chain` asks
+// for in `data/contracts.ron`. That makes it load-bearing exactly the way
+// 600 is; see the `mustard` entry below for the whole argument.
 //
 // WHAT WAS REMOVED. This file used to carry a sixth stage, `aged_ketchup`
 // on an `aging_rack`, added by ARCHITECTURE.md §9 milestone 7 to prove the
@@ -359,6 +388,129 @@
             icon: "item_box_bbq",
             inputs: [("bottled_bbq", 1)],
             outputs: [("boxed_bbq", 1)],
+            machine: "packer",
+            time_ticks: 40,
+        ),
+
+        // --- Mustard: the third sauce, and the first whole SECOND LINE ---
+        //
+        // Five more stages, no new machine kind — again — but where the BBQ
+        // entries above hang off the middle of the ketchup line, these ones
+        // start at a hopper of their own and run all the way to the dock.
+        // Doing "a branch off a sauce" twice would teach nothing new; a
+        // second line teaches the thing a branch cannot, which is that a
+        // factory is a floor with a finite amount of room, belt and crew on
+        // it.
+        //
+        // **What is actually new is one shared id: `vinegar`.** The mustard
+        // mixer drinks the same bought fluid the ketchup mixer does, out of
+        // one ledger and one storage allowance, so this is the first time two
+        // products compete for a raw rather than for floor space. A player
+        // who pipes one tank to both mixers starves whichever one is
+        // downstream, and a player who buys for one line has not bought for
+        // the other. `data/ingredients.ron`'s header note (point 6) is the
+        // same claim seen from the shop's side.
+        //
+        // It is also why this is *nearly* a disconnected component of the
+        // recipe graph and not quite one: nothing here consumes anything the
+        // ketchup entries produce, but `vinegar` ties the two mixers
+        // together, so `validate_chain` still sees one graph. Mayonnaise
+        // (GAMEPLAY.md §2) is the one that will finally be an island.
+
+        // Crush, the mustard side: seed in, meal out, 80 ticks — the same
+        // machine doing the same work as `tomato_paste`, so the same number.
+        // This is the second recipe on the crusher and the reason the kind
+        // needed more than one at all.
+        Recipe(
+            id: "mustard_meal",
+            blurb: "Seed in, coarse meal out. The crusher does not care that it is not a tomato: it is the same mechanical work, and it is again the only machine on this line eating a raw solid with nothing upstream of it.",
+            icon: "item_meal_pail",
+            inputs: [("mustard_seed", 4)],
+            outputs: [("mustard_meal", 1)],
+            machine: "crusher",
+            time_ticks: 80,
+        ),
+        // Mix, the mustard side: meal and turmeric on two belt lanes,
+        // vinegar down a pipe, liquid mix out of the outlet face. 90 ticks,
+        // like both other blends — same machine, same work, and a third
+        // blend time would be a number with no story.
+        //
+        // This is the entry that costs this file its old "every pair of
+        // recipes on a kind takes completely disjoint inputs" claim, because
+        // `vinegar` appears here and in `ketchup_mix`. See the header note:
+        // the property that actually keeps a machine's output predictable is
+        // that each recipe on a kind needs something the others do not, and
+        // this one needs meal and turmeric, which no other mixer recipe
+        // touches.
+        Recipe(
+            id: "mustard_mix",
+            blurb: "Meal and turmeric arrive on two belt lanes and vinegar arrives down a pipe — the same three-way feed the ketchup mixer takes, off the same tank. The first raw two sauces fight over is this one, and the fight happens in the shop rather than on the floor.",
+            inputs: [("mustard_meal", 1), ("turmeric", 1)],
+            fluid_inputs: [("vinegar", 2)],
+            outputs: [],
+            fluid_outputs: [("mustard_mix", 1)],
+            machine: "mixer",
+            time_ticks: 90,
+        ),
+        // The mustard cook. Liquid in, liquid out, no belt on the machine —
+        // the ketchup cook's shape on a second vat.
+        //
+        // **360 IS LOAD-BEARING, AND LIKE 600 IT IS A RATIO RATHER THAN A
+        // FLAVOUR NOTE.** A mustard line's bottleneck is this vat, exactly as
+        // a ketchup line's is its own, so a factory that has finished one of
+        // each produces one case per 240 ticks on the ketchup side and one
+        // per 360 on this one. That settles at **3 cases of ketchup to 2 of
+        // mustard** — which is the mix `deli_chain` asks for in
+        // `data/contracts.ron`, for precisely the reason `grill_pub` is a
+        // 3 + 2 order on the BBQ side. The obvious two-line factory serves
+        // the mustard tier's mixed order without tuning anything.
+        //
+        // So this number and that contract's mix move together or not at
+        // all: change the cook and `deli_chain` stops describing what a
+        // factory naturally makes, and both files' comments become false.
+        // Same rule as the crush/blend/cook ordering and the BBQ 600 above.
+        //
+        // Why longer than ketchup's cook at all: it is the one process time
+        // on this line that is not simply copied from the ketchup stage
+        // doing the same job, and it has to not be, or two finished lines
+        // would settle at 1:1 and a mixed order would have nothing to say.
+        // Longer than ketchup and far shorter than BBQ also puts mustard
+        // where it belongs on the board — a second line is more sauce than a
+        // branch is, but it is not the premium product.
+        Recipe(
+            id: "mustard",
+            tagline: "The third sauce, and the first one that is a factory of its own rather than a branch off one.",
+            blurb: "A longer cook than ketchup's and a far shorter one than BBQ's, which is what makes a two-line factory settle at roughly three cases of ketchup to two of mustard — the shape of the mixed order on the mustard tier of the board. Liquid in, liquid out, and not a belt in sight.",
+            inputs: [],
+            fluid_inputs: [("mustard_mix", 1)],
+            outputs: [],
+            fluid_outputs: [("mustard", 1)],
+            machine: "cooking_vat",
+            time_ticks: 360,
+        ),
+        // Bottling, the mustard side: 60 ticks, the third bottler recipe and
+        // the same trade as the other two — the pipe run ends here and the
+        // product goes back on a belt as a solid.
+        Recipe(
+            id: "bottled_mustard",
+            blurb: "The third bottler recipe and the same trade as the other two: the pipe run ends, and the product goes back on a belt as something you can pick up. A belt of mustard has to be tellable from a belt of ketchup at a glance, so it gets its own bottle rather than a tinted one.",
+            icon: "item_bottle_mustard",
+            inputs: [],
+            fluid_inputs: [("mustard", 1)],
+            outputs: [("bottled_mustard", 1)],
+            machine: "bottler",
+            time_ticks: 60,
+        ),
+        // Packing, the mustard side: 40 ticks, and `boxed_mustard` is the
+        // third thing this factory can sell. Every line's cases ride
+        // ordinary belt into the same dock, and the delivery pool still does
+        // not care which sauce is in one.
+        Recipe(
+            id: "boxed_mustard",
+            blurb: "The third thing this factory can sell, and the first that arrives at the dock without a single tomato behind it. Three lines, one delivery pool: only the contract board knows the difference.",
+            icon: "item_box_mustard",
+            inputs: [("bottled_mustard", 1)],
+            outputs: [("boxed_mustard", 1)],
             machine: "packer",
             time_ticks: 40,
         ),

@@ -23,10 +23,10 @@
 //
 // WHAT COUNTS AS RAW. An id here is an item or fluid that some recipe in
 // `data/recipes.ron` *consumes* and no recipe *produces* — tomato, sugar,
-// spice mix and molasses on the solid side, vinegar and liquid smoke on the
-// fluid side. Everything else in the chain (tomato paste, the liquid mixes,
-// the cooked sauces, bottles, boxes) is made by the factory and therefore is
-// never bought. **Finished ketchup is the clearest case**: the BBQ mixer
+// spice mix, molasses, mustard seed and turmeric on the solid side, vinegar
+// and liquid smoke on the fluid side. Everything else in the chain (tomato
+// paste, mustard meal, the liquid mixes, the cooked sauces, bottles, boxes)
+// is made by the factory and therefore is never bought. **Finished ketchup is the clearest case**: the BBQ mixer
 // consumes it, so it looks like an input, but the cooking vat produces it,
 // so it is not raw and has no price here — a BBQ branch buys ketchup by
 // building enough line to make it. `IngredientCatalog::
@@ -68,6 +68,25 @@
 //      roughly 40% more revenue for one extra mixer, one extra vat and four
 //      more heads; good enough to be the obvious next move, not so good
 //      that a ketchup-only board becomes a mistake.
+//
+//   5. **One boxed mustard inherits nothing, because mustard is a second
+//      line from raw rather than a branch off a sauce.** It costs 4 mustard
+//      seed + 1 turmeric + 2 vinegar to make, i.e. 8 + 5 + 4 = **17 per
+//      box** — between a box of ketchup's 11 and a box of BBQ's 23, and all
+//      of it bought rather than half of it cooked in-house. Its contracts
+//      pay 44-52 per box (`data/contracts.ron`), which lands it in the same
+//      third-of-revenue band the other two sauces sit in. The shape inside
+//      the bill is ketchup's, not BBQ's: a cheap bulk solid eaten four at a
+//      time is the biggest line, a refined solid taken one per batch is the
+//      smallest, and the fluid is in between.
+//   6. **`vinegar` is the first raw two products drink**, and that is the
+//      one genuinely new thing on this shelf. Every other id here belongs
+//      to exactly one sauce, so a shipment of it was only ever a bet on how
+//      much of that sauce to make. Vinegar bought for the mustard mixer is
+//      vinegar the ketchup mixer does not get — out of one ledger, one
+//      storage allowance (`data/storage.ron`) and one balance — so the
+//      market is where two lines first compete, before a single pipe is
+//      laid.
 //
 // That recursion is also why the BBQ raws are priced where they are rather
 // than by their own flavour logic: the three of them come to 12, which is
@@ -113,13 +132,14 @@
         // the factory already makes (`data/recipes.ron`). What it buys is
         // the three things that turn ketchup into something else.
 
-        // The dearest raw in the game, and the one that carries the flavour:
-        // a blended spice is bought already ground and mixed, so it prices
-        // like a refined good rather than produce. One per batch.
+        // Tied with turmeric for the dearest raw on the shelf, and the one
+        // that carries BBQ's flavour: a blended spice is bought already
+        // ground and mixed, so it prices like a refined good rather than
+        // produce. One per batch.
         IngredientEntry(
             id: "spice_mix",
             price: 5,
-            blurb: "Bought already ground and blended, which is why it prices like a refined good rather than like produce. The dearest raw in the game, and the one that makes BBQ taste of anything.",
+            blurb: "Bought already ground and blended, which is why it prices like a refined good rather than like produce. Nothing on the shelf costs more by the unit, and nothing else makes BBQ taste of anything.",
             icon: "item_spice_mix",
         ),
         // The sweetener BBQ uses where ketchup uses sugar — unrefined, so a
@@ -139,6 +159,38 @@
             price: 3,
             blurb: "The second raw fluid, and the reason a BBQ branch needs a fluid tank of its own: the cook draws it straight into the vat alongside the piped mix.",
             icon: "item_liquid_smoke",
+        ),
+
+        // --- Mustard's two raws ---
+        // The third sauce is a whole second line from raw, not a branch off
+        // ketchup, so it buys its own bulk solid instead of inheriting one.
+        // There are two of these and not three: mustard's acid is the
+        // `vinegar` priced above, bought out of the same ledger the ketchup
+        // mixer drinks from, which is point 6 of the note at the top of this
+        // file and the whole reason this tier is here.
+
+        // Mustard's bulk produce, and the second thing the crusher eats.
+        // Priced like tomatoes rather than like a spice — cheap by the unit,
+        // taken several to the pail — so it is the biggest line on a mustard
+        // line's bill for the same reason tomato is on ketchup's. A shade
+        // above tomato per unit because a seed is shipped dry and keeps,
+        // where produce is shipped wet and does not.
+        IngredientEntry(
+            id: "mustard_seed",
+            price: 2,
+            blurb: "Mustard's bulk produce, bought by the sack and taken several to the pail — cheap by the unit and the biggest line on the bill, exactly as tomatoes are on a ketchup line. It keeps, too, which is more than can be said for a tomato.",
+            icon: "item_mustard_seed",
+        ),
+        // The flavour raw, priced like BBQ's spice mix and used the same way:
+        // bought already milled, one per batch, and worth more per unit than
+        // anything it is blended with. It is doing two jobs at once, which is
+        // what justifies the price — the colour a player recognises a case of
+        // mustard by, and the bite behind it.
+        IngredientEntry(
+            id: "turmeric",
+            price: 5,
+            blurb: "Bought already milled, so it prices like a refined good rather than like produce, and the mixer takes very little of it per batch. It is doing two jobs for that money: the colour you recognise a case of mustard by, and the bite behind it.",
+            icon: "item_turmeric",
         ),
     ],
 )

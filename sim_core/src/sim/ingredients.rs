@@ -834,6 +834,8 @@ mod tests {
                 "spice_mix".to_string(),
                 "molasses".to_string(),
                 "liquid_smoke".to_string(),
+                "mustard_seed".to_string(),
+                "turmeric".to_string(),
             ],
             "the shipped chain's raw ingredients — if this changed deliberately, price the \
              new one in data/ingredients.ron"

@@ -133,7 +133,9 @@ fn a_hopper_stands_at_the_head_of_its_own_feed_lane_one_per_raw_ingredient() {
             "tomato".to_string(),
             "sugar".to_string(),
             "spice_mix".to_string(),
-            "molasses".to_string()
+            "molasses".to_string(),
+            "mustard_seed".to_string(),
+            "turmeric".to_string()
         ],
         "raw = consumed by some recipe, produced by none — read out of data/recipes.ron, \
          never named in Rust. This is the whole FILE's list, which is why it is longer than \

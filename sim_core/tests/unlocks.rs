@@ -196,6 +196,146 @@ fn the_gate_is_shut_one_delivery_short_and_open_on_the_threshold() {
     assert_eq!(bbq.name, "BBQ Sauce");
 }
 
+/// A world whose delivery counter reads `deliveries` and which has run for no
+/// ticks at all — the counter is saved state, so rewriting it in a save is a
+/// legitimate way to reach a threshold, and
+/// `the_counter_and_the_gates_it_opens_survive_a_save_round_trip` is what
+/// proves the gates a loaded counter derives are the same ones a *run* one
+/// does. The BBQ gate's ten deliveries are worth simulating; the mustard
+/// gate's twenty-five are half an hour of factory for a claim about a number
+/// in a content file.
+fn world_at_deliveries(deliveries: u32) -> World {
+    let text = reference_chain_with_budget(recipes(), 1_000).to_save_ron();
+    let rewritten: Vec<String> = text
+        .lines()
+        .map(|line| match line.split_once("lifetime_deliveries:") {
+            Some((head, tail)) => {
+                let trailing: String = tail
+                    .chars()
+                    .skip_while(|c| c.is_ascii_digit() || c.is_whitespace())
+                    .collect();
+                format!("{head}lifetime_deliveries: {deliveries}{trailing}")
+            }
+            None => line.to_string(),
+        })
+        .collect();
+    let world = World::from_save_ron(&rewritten.join("\n"), recipes())
+        .expect("a save with a rewritten counter must load");
+    assert_eq!(
+        world.lifetime_deliveries(),
+        deliveries,
+        "the fixture has to actually be at the counter it claims"
+    );
+    world
+}
+
+/// The third sauce's gate: it holds back its own two raws and its own four
+/// orders, it holds back nothing else, and it opens on its own threshold —
+/// which is a later one than the BBQ tier's, because a whole second line
+/// costs more than a branch does.
+///
+/// `vinegar` is the id this test exists to watch. Mustard drinks it and so
+/// does the shipped ketchup line, so it must NOT be in the gate's list: a
+/// gate on it would lock the starting factory out of its own ingredient.
+#[test]
+fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
+    let unlocks = UnlockRegistry::bundled();
+    let mustard = unlocks
+        .get("mustard_sauce")
+        .expect("data/unlocks.ron must ship the mustard_sauce gate")
+        .clone();
+    let bbq = unlocks.get("bbq_sauce").expect("the shipped gate").clone();
+    assert!(
+        mustard.after_deliveries > bbq.after_deliveries,
+        "the third sauce is held back longer than the second: {} vs {}",
+        mustard.after_deliveries,
+        bbq.after_deliveries
+    );
+    assert!(
+        !mustard.ingredients.contains(&"vinegar".to_string()),
+        "gating vinegar would lock the ketchup line out of its own ingredient"
+    );
+
+    // Nothing of the tier is reachable in a fresh world, and the market and
+    // the board agree with the rule the simulation is enforcing.
+    let shut = world_at_deliveries(0);
+    let market = shut.ingredients_snapshot();
+    let board = shut.economy_snapshot();
+    for id in &mustard.ingredients {
+        assert!(!shut.ingredient_unlocked(id), "'{id}' must start locked");
+        assert!(
+            !market.entries.iter().any(|e| &e.id == id),
+            "'{id}' must not be listed in the market at nought deliveries"
+        );
+    }
+    for id in &mustard.contracts {
+        assert!(!shut.contract_unlocked(id), "'{id}' must start locked");
+        assert!(
+            !board.board.iter().any(|o| &o.id == id),
+            "'{id}' must not be offered at nought deliveries"
+        );
+    }
+    assert!(
+        shut.ingredient_unlocked("vinegar"),
+        "the first line's own fluid is on sale from the first tick"
+    );
+
+    // One short of the threshold the tier is still shut, while the tier
+    // BELOW it is open — which is what makes this gate its own and not a
+    // side effect of the BBQ one.
+    let nearly = world_at_deliveries(mustard.after_deliveries - 1);
+    for id in &mustard.ingredients {
+        assert!(
+            !nearly.ingredient_unlocked(id),
+            "'{id}' must still be locked one delivery short"
+        );
+    }
+    for id in &mustard.contracts {
+        assert!(
+            !nearly.contract_unlocked(id),
+            "'{id}' must still be locked one delivery short"
+        );
+    }
+    for id in bbq.ingredients.iter().chain(bbq.contracts.iter()) {
+        assert!(
+            nearly.ingredient_unlocked(id) || nearly.contract_unlocked(id),
+            "the BBQ tier's '{id}' opened long ago and stays open"
+        );
+    }
+
+    // And on the threshold, every id in the gate's two lists, at once.
+    let open = world_at_deliveries(mustard.after_deliveries);
+    let market = open.ingredients_snapshot();
+    let board = open.economy_snapshot();
+    for id in &mustard.ingredients {
+        assert!(
+            open.ingredient_unlocked(id),
+            "'{id}' must be on sale on the threshold delivery"
+        );
+        assert!(
+            market.entries.iter().any(|e| &e.id == id),
+            "'{id}' must be listed in the market the tick the gate opens"
+        );
+    }
+    for id in &mustard.contracts {
+        assert!(
+            open.contract_unlocked(id),
+            "'{id}' must be on the board on the threshold delivery"
+        );
+        assert!(
+            board.board.iter().any(|o| &o.id == id),
+            "'{id}' must be offered the tick the gate opens"
+        );
+    }
+    let announced = board
+        .unlocks
+        .iter()
+        .find(|u| u.id == "mustard_sauce")
+        .expect("the snapshot must carry the gate, so the HUD can announce it");
+    assert!(announced.open);
+    assert_eq!(announced.name, "Mustard");
+}
+
 /// A gate is enforced by the simulation, not by a panel that chose not to
 /// draw a row. Refusing the command is what makes it a rule.
 #[test]

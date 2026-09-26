@@ -468,7 +468,7 @@ fn a_fresh_world_is_empty_and_holds_only_starting_money() {
 /// needs a line that reaches the dock, and the shipped line is
 /// `sim::reference_chain`. So if a new game cannot afford that line, the
 /// core loop GAMEPLAY.md §1 describes cannot close from a cold start at all
-/// — which is exactly what 200 against a 1087 bill meant. This test is the
+/// — which is exactly what 200 against a 959 bill meant. This test is the
 /// check that keeps that from happening again silently.
 ///
 /// It prices the chain **dynamically**, out of `data/shop.ron`, by summing

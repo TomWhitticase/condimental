@@ -60,16 +60,25 @@ fn sauce<'a>(book: &'a CookbookSnapshot, id: &str) -> &'a sim_core::sim::cookboo
         .unwrap_or_else(|| panic!("no sauce page for {id}"))
 }
 
+/// Three sauces, and the book tells the two *kinds* of sauce apart without
+/// being told which is which: the tier is the depth of the recipe graph, so a
+/// sauce that starts at a hopper of its own is tier 0 however late it was
+/// added, and only a sauce that drinks another one is deeper. Mustard is the
+/// third sauce and the second tier-0 one — the proof that the difference
+/// between "a second line" and "a branch" is content rather than a flag.
 #[test]
-fn the_shipped_content_makes_exactly_two_sauces_and_the_second_is_built_on_the_first() {
+fn the_shipped_content_makes_three_sauces_and_only_one_of_them_is_a_branch() {
     let book = book();
     let ids: Vec<&str> = book.sauces.iter().map(|s| s.id.as_str()).collect();
-    assert_eq!(ids, vec!["boxed_ketchup", "boxed_bbq"]);
+    assert_eq!(ids, vec!["boxed_ketchup", "boxed_mustard", "boxed_bbq"]);
     assert_eq!(sauce(&book, "boxed_ketchup").tier, 0);
+    assert_eq!(sauce(&book, "boxed_mustard").tier, 0);
     assert_eq!(sauce(&book, "boxed_bbq").tier, 1);
 
-    // One arrow, and it names the form that actually crosses: BBQ's mixer
-    // draws the vat's `ketchup`, not a case of it.
+    // Still one arrow, and mustard is not on either end of it: a line from
+    // raw has nothing pointing into it. BBQ's does, and it names the form
+    // that actually crosses — BBQ's mixer draws the vat's `ketchup`, not a
+    // case of it.
     assert_eq!(book.edges.len(), 1);
     let edge = &book.edges[0];
     assert_eq!(edge.from, "boxed_ketchup");
@@ -138,6 +147,10 @@ fn a_case_costs_what_walking_the_chain_back_to_the_market_says_it_costs() {
     // one whole ketchup. Every case of BBQ contains a case of ketchup's
     // worth of ingredients, which is the point the page is making.
     assert_eq!(sauce(&book, "boxed_bbq").cost_per_unit, 23.0);
+    // 4 mustard_seed @2 + 1 turmeric @5 + 2 vinegar @2 — dearer than a case
+    // of ketchup and cheaper than a case of BBQ, which is the whole of why
+    // the mustard tier pays between them.
+    assert_eq!(sauce(&book, "boxed_mustard").cost_per_unit, 17.0);
 }
 
 #[test]
@@ -283,7 +296,7 @@ fn every_machine_kind_has_a_page_and_the_line_reads_in_chain_order() {
         .expect("the vat has a page");
     assert_eq!((vat.width_tiles, vat.height_tiles), (2, 2));
     assert_eq!(vat.price, Some(200.0));
-    assert_eq!(vat.makes, vec!["ketchup", "bbq"]);
+    assert_eq!(vat.makes, vec!["ketchup", "bbq", "mustard"]);
     assert_eq!(vat.crew.len(), 1);
     assert_eq!(vat.crew[0].category, "manufacturing");
     assert_eq!(
@@ -316,7 +329,9 @@ fn every_bought_ingredient_has_a_page_saying_what_it_is_for() {
             "vinegar",
             "spice_mix",
             "molasses",
-            "liquid_smoke"
+            "liquid_smoke",
+            "mustard_seed",
+            "turmeric"
         ],
         "data/ingredients.ron's own order — the market lists them in it too"
     );
@@ -327,15 +342,30 @@ fn every_bought_ingredient_has_a_page_saying_what_it_is_for() {
         assert!(page.price > 0.0);
     }
 
+    // THE ONE INGREDIENT TWO SAUCES BUY. Every other raw on the shelf feeds
+    // one product; vinegar goes into the ketchup mixer and the mustard mixer
+    // both, so its page names two sauces and a player reading it learns that
+    // the two lines compete in the shop. Derived from `data/recipes.ron`, so
+    // this is also what fails if mustard ever stops drinking it.
     let vinegar = &book.ingredients[2];
     assert!(vinegar.fluid, "vinegar is a tank, not a hopper");
-    assert_eq!(vinegar.used_in, vec!["boxed_ketchup"]);
+    assert_eq!(vinegar.used_in, vec!["boxed_ketchup", "boxed_mustard"]);
     assert!(!vinegar.locked);
 
     let smoke = &book.ingredients[5];
     assert!(smoke.fluid);
     assert!(smoke.locked);
     assert_eq!(smoke.gate.as_ref().map(|g| g.after_deliveries), Some(10));
+
+    // Mustard's two raws are solids, they belong to one sauce, and they are
+    // held back further than BBQ's — the gate is in `data/unlocks.ron` and
+    // the page only reports it.
+    for page in &book.ingredients[6..] {
+        assert!(!page.fluid, "{} rides a belt out of a hopper", page.id);
+        assert_eq!(page.used_in, vec!["boxed_mustard"]);
+        assert!(page.locked);
+        assert_eq!(page.gate.as_ref().map(|g| g.after_deliveries), Some(25));
+    }
 }
 
 /// The prose the pages are written in comes out of the content files, and
@@ -376,5 +406,26 @@ fn a_sauce_page_says_what_the_board_pays_for_a_case_of_it() {
     assert!(
         bbq.pay_low.unwrap() > bbq.cost_per_unit,
         "every sauce has to be worth making"
+    );
+
+    // Mustard's band, read off `data/contracts.ron` the same way: the low is
+    // `deli_chain`'s blended 204 over five cases, the high is
+    // `sandwich_franchise`'s 416 over eight.
+    let mustard = sauce(&book, "boxed_mustard");
+    // 204 over five cases is 40.8, which fixed point (ARCHITECTURE.md §3.2)
+    // cannot hold exactly, so the page is read to the penny rather than
+    // compared for equality. The other three rungs are whole numbers.
+    let low = mustard
+        .pay_low
+        .expect("the board pays for a case of mustard");
+    assert!((low - 40.8).abs() < 0.001, "pay_low read {low}");
+    assert_eq!(mustard.pay_high, Some(52.0));
+    assert!(
+        low > mustard.cost_per_unit,
+        "every sauce has to be worth making"
+    );
+    assert!(
+        mustard.contracts.contains(&"Deli Chain".to_string()),
+        "the mixed order belongs to both of its sauces' pages"
     );
 }
