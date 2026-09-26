@@ -2186,6 +2186,19 @@ var _hover_meter: Panel
 var _hover_load_meter: Panel # the machine-load epic: share of the window spent working
 var _hover_input_row: Dictionary = {}
 var _hover_output_row: Dictionary = {}
+## A dock's places, one cell each — occupied cells carry the case's icon,
+## free ones are an empty socket (`_draw_places_grid`). One Control drawing
+## its own cells, not a node per cell, because the hover is rebuilt from the
+## snapshot every frame.
+var _hover_places_grid: Control
+## The grid's layout, not its content: how many places there are comes off the
+## dock's snapshot (`places`), so a dock of a different size draws more or
+## fewer rows and nothing here changes.
+const HOVER_PLACES_COLUMNS := 8
+const HOVER_PLACE_CELL := 22.0 * UI_SCALE
+const HOVER_PLACE_GAP := 3.0 * UI_SCALE
+const HOVER_PLACE_FILLED := Color(0.30, 0.26, 0.18, 0.98)
+const HOVER_PLACE_FILLED_BORDER := Color(0.85, 0.63, 0.11, 0.95)
 ## The tooltip's meter is a fixed width: the panel's own width is decided by
 ## its longest sentence, and a bar that grew and shrank with the text would
 ## read as part of the measurement rather than as a scale.
@@ -4258,15 +4271,16 @@ func _update_dock_stock(dock_states: Dictionary, current_tick := 0) -> void:
 
 
 ## A dock's (item, quantity) pairs flattened into one case per unit, in
-## snapshot order and at most DOCK_STOCK_SLOTS of them, so a dock holding two
-## sauces shows a mixed stack rather than only its first product.
-func _dock_cases(contents: Array) -> Array[String]:
+## snapshot order and at most `cap` of them, so a dock holding two sauces
+## shows a mixed stack rather than only its first product. The deck caps at
+## DOCK_STOCK_SLOTS; the hover's places grid passes the dock's own `places`.
+func _dock_cases(contents: Array, cap := DOCK_STOCK_SLOTS) -> Array[String]:
 	var waiting: Array[String] = []
 	for pair in contents:
 		if not (pair is Array) or pair.size() < 2:
 			continue
 		for _i in range(int(pair[1])):
-			if waiting.size() >= DOCK_STOCK_SLOTS:
+			if waiting.size() >= cap:
 				return waiting
 			waiting.append(String(pair[0]))
 	return waiting
@@ -14030,6 +14044,17 @@ func _build_hover_tooltip(hud: CanvasLayer) -> void:
 	_hover_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_child(_hover_label)
 
+	# A dock's places as a grid of sockets, straight under the words that
+	# count them — the owner's 2026-09-26 ask: see at a glance what each dock
+	# holds and how much room it has left. Sized per hover in
+	# `_apply_hover_panel_state`, off the snapshot's own `places`.
+	_hover_places_grid = Control.new()
+	_hover_places_grid.name = "HoverPlacesGrid"
+	_hover_places_grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hover_places_grid.visible = false
+	_hover_places_grid.draw.connect(_draw_places_grid.bind(_hover_places_grid))
+	column.add_child(_hover_places_grid)
+
 	# A machine's craft progress, a hopper's or tank's level, a pipe's fill —
 	# the same bar the configuration panel puts a hopper's level on, at the
 	# cursor. Fixed width, because the panel's own width is decided by its
@@ -16143,22 +16168,32 @@ func _hover_text_at_tile(tile: Vector2i, yielded := 0) -> String:
 ## A tile only gets a meter if it has a genuine CEILING to measure against
 ## (the section header on `_build_meter` states the rule): a machine's elapsed
 ## ticks against its recipe's required ticks, a hopper's or tank's contents
-## against its capacity, a pipe segment's level against a full bore. A belt, a
-## splitter and the dock have no such quantity — a dock's own buffer is empty
-## by design and its lifetime total has no ceiling at all — so they get no bar
-## rather than a made-up one.
+## against its capacity, a pipe segment's level against a full bore. A belt and
+## a splitter have no such quantity, so they get no bar rather than a made-up
+## one. A dock's ceiling is PLACES, one case each, so it gets the places grid
+## (`places`: `{"places", "cells"}`) instead of a bar — a bar would say how
+## full it is and not what with.
 ##
 ## Pure given the polled snapshots, exactly like the text half, so a test can
 ## drive it with a tile and no framebuffer.
 func _hover_panel_state(tile: Vector2i) -> Dictionary:
-	var state := {"meter": {}, "load_meter": {}, "inputs": [], "outputs": [], "has_buffers": false}
+	var state := {"meter": {}, "load_meter": {}, "inputs": [], "outputs": [], "has_buffers": false, "places": {}}
 	var placement := _placement_at_tile(tile)
 	if placement.is_empty():
 		return state
 	var kind := String(placement.get("kind", ""))
 	var key := _tile_key(_placement_origin(placement))
 	match kind:
-		BELT_KIND, SPLITTER_KIND, DOCK_KIND:
+		BELT_KIND, SPLITTER_KIND:
+			return state
+		DOCK_KIND:
+			var dock: Dictionary = _dock_states.get(key, {})
+			var places := int(dock.get("places", 0))
+			if places > 0:
+				state["places"] = {
+					"places": places,
+					"cells": _dock_cases(dock.get("contents", []), places),
+				}
 			return state
 		HOPPER_KIND:
 			var hopper: Dictionary = _hopper_states.get(key, {})
@@ -16873,6 +16908,15 @@ func _hover_yield_rungs(size: Vector2, anchor: Vector2, sheds: Array[float]) -> 
 ## testable, this half only touches nodes. `yielded` is how far down the
 ## hover's yield ladder this frame went (`_hover_yield_rungs`).
 func _apply_hover_panel_state(state: Dictionary, yielded := 0) -> void:
+	var places: Dictionary = state.get("places", {})
+	if _hover_places_grid != null:
+		_hover_places_grid.visible = not places.is_empty()
+		if not places.is_empty():
+			var count := int(places.get("places", 0))
+			_hover_places_grid.set_meta("places", count)
+			_hover_places_grid.set_meta("cells", places.get("cells", []))
+			_hover_places_grid.custom_minimum_size = _places_grid_size(count)
+			_hover_places_grid.queue_redraw()
 	var meter: Dictionary = state.get("meter", {})
 	if _hover_meter != null:
 		_hover_meter.visible = not meter.is_empty()
@@ -16895,6 +16939,44 @@ func _apply_hover_panel_state(state: Dictionary, yielded := 0) -> void:
 		return
 	_update_hover_buffers(_hover_input_row, state.get("inputs", []))
 	_update_hover_buffers(_hover_output_row, state.get("outputs", []))
+
+
+## The drawn size of a places grid of `count` cells: HOVER_PLACES_COLUMNS
+## wide (fewer if there are fewer places), as many rows as that takes.
+func _places_grid_size(count: int) -> Vector2:
+	if count <= 0:
+		return Vector2.ZERO
+	var cols := mini(count, HOVER_PLACES_COLUMNS)
+	var rows := ceili(float(count) / float(HOVER_PLACES_COLUMNS))
+	return Vector2(
+		cols * HOVER_PLACE_CELL + (cols - 1) * HOVER_PLACE_GAP,
+		rows * HOVER_PLACE_CELL + (rows - 1) * HOVER_PLACE_GAP
+	)
+
+
+## Draws the hover's places grid off the metadata `_apply_hover_panel_state`
+## left on it: an occupied place is a lit socket holding its case's own icon —
+## the icon the market, the larder and the clipboard name the item by — and a
+## free place is an empty socket in the meter's track colours, so "how much
+## room" and "room for what" are one picture. Filled in snapshot order, left
+## to right, top row first.
+func _draw_places_grid(grid: Control) -> void:
+	var count := int(grid.get_meta("places", 0))
+	var cells: Array = grid.get_meta("cells", [])
+	var border := maxf(1.0, _ui_px(1.5))
+	var inset := _ui_px(2.0)
+	for i in range(count):
+		var cell := Vector2(i % HOVER_PLACES_COLUMNS, floori(float(i) / HOVER_PLACES_COLUMNS))
+		var rect := Rect2(cell * (HOVER_PLACE_CELL + HOVER_PLACE_GAP), Vector2.ONE * HOVER_PLACE_CELL)
+		if i < cells.size():
+			grid.draw_rect(rect, HOVER_PLACE_FILLED)
+			var icon := _icon_for(String(cells[i]))
+			if icon != null:
+				grid.draw_texture_rect(icon, rect.grow(-inset), false)
+			grid.draw_rect(rect, HOVER_PLACE_FILLED_BORDER, false, border)
+		else:
+			grid.draw_rect(rect, METER_TRACK_COLOR)
+			grid.draw_rect(rect, METER_BORDER_COLOR, false, border)
 
 
 ## Where a panel that points at something in the WORLD goes — the hover

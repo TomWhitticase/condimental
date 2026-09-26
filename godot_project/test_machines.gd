@@ -268,6 +268,51 @@ func _run_checks() -> void:
 	if not stocked_hover.contains("3 / %d places" % places) or not stocked_hover.contains("Boxed Ketchup"):
 		_fail("the hover must say what stands on THIS dock, got: '%s'" % stocked_hover)
 		return
+	# --- and draws this dock's places as a grid of sockets -----------------
+	# One cell per place off the snapshot's own `places`, the first `used` of
+	# them occupied in snapshot order — the owner's 2026-09-26 ask.
+	dock_state["contents"] = [["boxed_ketchup", 3], ["boxed_bbq", 2]]
+	dock_state["used"] = 5
+	var grid_state: Dictionary = main._hover_panel_state(Vector2i(5, 0))
+	var grid: Dictionary = grid_state.get("places", {})
+	if int(grid.get("places", 0)) != places:
+		_fail("the dock hover's grid should have the dock's %d places, got %s" % [places, grid])
+		return
+	var cells: Array = grid.get("cells", [])
+	if cells.size() != int(dock_state["used"]):
+		_fail("the grid filled %d cells for a dock using %d places" % [cells.size(), int(dock_state["used"])])
+		return
+	if cells != ["boxed_ketchup", "boxed_ketchup", "boxed_ketchup", "boxed_bbq", "boxed_bbq"]:
+		_fail("the grid's cells should follow the dock's contents in order, got %s" % cells)
+		return
+	main._apply_hover_panel_state(grid_state)
+	var grid_node: Control = main._hover_places_grid
+	if not grid_node.visible or int(grid_node.get_meta("places", 0)) != places:
+		_fail("the places grid did not show for a hovered dock")
+		return
+	var rows := ceili(float(places) / main.HOVER_PLACES_COLUMNS)
+	var want_height: float = rows * main.HOVER_PLACE_CELL + (rows - 1) * main.HOVER_PLACE_GAP
+	if not is_equal_approx(grid_node.custom_minimum_size.y, want_height):
+		_fail("the grid should be %d rows tall for %d places, got %s" % [rows, places, grid_node.custom_minimum_size])
+		return
+	# The size is the snapshot's, not a constant: half the places, half the rows.
+	dock_state["places"] = main.HOVER_PLACES_COLUMNS * 2
+	main._apply_hover_panel_state(main._hover_panel_state(Vector2i(5, 0)))
+	if not is_equal_approx(grid_node.custom_minimum_size.y, 2 * main.HOVER_PLACE_CELL + main.HOVER_PLACE_GAP):
+		_fail("a dock of %d places should draw two rows, got %s" % [int(dock_state["places"]), grid_node.custom_minimum_size])
+		return
+	dock_state["places"] = places
+	# A dock with every place taken fills every cell, and no more.
+	dock_state["contents"] = [["boxed_ketchup", places + 5]]
+	var packed: Array = main._hover_panel_state(Vector2i(5, 0))["places"]["cells"]
+	if packed.size() != places:
+		_fail("a dock reporting more than its places overfilled the grid: %d cells" % packed.size())
+		return
+	# Nothing but a dock gets the grid.
+	main._apply_hover_panel_state({"meter": {}, "load_meter": {}, "inputs": [], "outputs": [], "has_buffers": false})
+	if grid_node.visible:
+		_fail("the places grid stayed up for a tile that is not a dock")
+		return
 	dock_state["contents"] = saved_contents
 	dock_state["used"] = saved_used
 	dock_state["full"] = true
@@ -353,5 +398,5 @@ func _run_checks() -> void:
 		_fail("the tile just past the vat's footprint still resolved to it")
 		return
 
-	print("MACHINES_OK: all %d priced kinds resolve to distinct bespoke models, a hopper/machine/dock render at the sim's own tiles with a live product level and a deck following its own dock's stock, and the 2x2 vat spans its whole footprint and answers hover from a non-origin tile" % kinds)
+	print("MACHINES_OK: all %d priced kinds resolve to distinct bespoke models, a hopper/machine/dock render at the sim's own tiles with a live product level and a deck following its own dock's stock, a places grid in its hover, and the 2x2 vat spans its whole footprint and answers hover from a non-origin tile" % kinds)
 	quit(0)
