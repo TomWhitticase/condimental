@@ -156,8 +156,8 @@
         // fluid tank), so it cannot be placed in "recipes.ron order" the way
         // every entry above it is. It is listed last because that is where
         // it stands on the floor: the packer's boxes run down one more belt
-        // and into it, and it ships them into the shared delivery pool every
-        // tick without the player doing anything.
+        // and into it, and it holds them until a contract collects, without
+        // the player doing anything.
         //
         // Priced between the two other no-recipe buffers and the cheap
         // machines: a loading bay with a conveyor head is more than the

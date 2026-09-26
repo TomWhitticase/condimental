@@ -46,7 +46,7 @@
 #      and the delivery dock that now ends
 #      the line (its own bespoke model at the tile the simulation reports, the
 #      one belt in the world that belongs to no stage drawn from its snapshot,
-#      the goods on its deck following the economy's shared delivery pool, its
+#      the goods on its deck following that dock's own stock, its
 #      own hover branch — and the removed **C** collect-product control being
 #      gone from both the legend and the key handler), and the "Real
 #      Placement" epic's ticket 2 (an EMPTY starting world rendering correctly,

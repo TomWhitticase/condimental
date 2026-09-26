@@ -401,13 +401,13 @@
             time_ticks: 60,
         ),
         // Packing, the BBQ side: 40 ticks, and `boxed_bbq` is the second
-        // thing this factory can sell. Both branches' boxes ride ordinary
-        // belt into the same dock — the delivery pool does not care which
-        // sauce a box holds, only `data/contracts.ron` does.
+        // thing this factory can sell. A box rides ordinary belt into
+        // whichever dock that belt feeds — a dock does not care which sauce
+        // a box holds, only `data/contracts.ron` does.
         Recipe(
             id: "boxed_bbq",
             display_name: "Boxed BBQ",
-            blurb: "The second thing this factory can sell. Both branches' cases ride ordinary belt into the same dock — the delivery pool does not care which sauce a case holds, only the contract board does.",
+            blurb: "The second thing this factory can sell. A case rides ordinary belt into whichever dock that belt feeds — a dock does not care which sauce a case holds, only the contract board does.",
             icon: "item_box_bbq",
             inputs: [("bottled_bbq", 1)],
             outputs: [("boxed_bbq", 1)],

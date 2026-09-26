@@ -60,6 +60,12 @@ fn a_new_game_starts_with_exactly_the_boards_starters_and_offers_the_rest() {
     // Every offer EXCEPT the ones a progression gate holds back
     // (`data/unlocks.ron`): the board a new game reads is what it may
     // actually sign, not everything `contracts.ron` holds.
+    //
+    // `gated` is read from the same unlock state the board was filtered
+    // with, deliberately — the claim here is that the two agree, not that
+    // the gates hold the right ids. WHICH ids a tier must hold back is
+    // pinned in `tests/unlocks.rs` against the contracts file, because a
+    // list checked against itself cannot notice an id going missing.
     let gated: Vec<&str> = board
         .ordered()
         .iter()
@@ -103,7 +109,6 @@ fn the_mustard_mixed_order_asks_for_the_same_vat_ticks_from_each_line() {
     let recipes = recipes();
     let ketchup_cook = recipes.get("ketchup").expect("the shipped cook").time_ticks;
     let mustard_cook = recipes.get("mustard").expect("the shipped cook").time_ticks;
-    assert_eq!((ketchup_cook, mustard_cook), (240, 360));
 
     let board = ContractRegistry::bundled();
     let mixed = board
@@ -117,15 +122,20 @@ fn the_mustard_mixed_order_asks_for_the_same_vat_ticks_from_each_line() {
             .map(|(_, count)| u64::from(*count))
             .unwrap_or_else(|| panic!("{} asks for no {id}", mixed.id))
     };
+    // No literal (240, 360) above this: a cook change has to reach THIS
+    // assertion and print this sentence, rather than trip a bare
+    // `left == right` on the pair and say nothing about why it matters.
     assert_eq!(
         cases("boxed_ketchup") * ketchup_cook,
         cases("boxed_mustard") * mustard_cook,
-        "{} asks for {} ketchup and {} mustard, which is not what a 240-tick vat and a \
-         360-tick vat make in the same window — the cook in data/recipes.ron and this mix \
+        "{} asks for {} ketchup and {} mustard, which is not what a {}-tick vat and a \
+         {}-tick vat make in the same window — the cook in data/recipes.ron and this mix \
          move together or not at all",
         mixed.id,
         cases("boxed_ketchup"),
-        cases("boxed_mustard")
+        cases("boxed_mustard"),
+        ketchup_cook,
+        mustard_cook
     );
 }
 

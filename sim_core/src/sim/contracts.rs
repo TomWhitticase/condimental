@@ -16,8 +16,8 @@
 //!
 //! [`ContractRegistry`] preserves `contracts.ron`'s list order, and that
 //! order is load-bearing rather than incidental: every active contract
-//! draws from one shared pool of delivered stock (see [`super::economy`]'s
-//! module doc for the allocation rule), so when two contracts fall due on
+//! draws from the same stock — every shipping dock's, summed (see
+//! [`super::economy`]'s module doc for the allocation rule), so when two contracts fall due on
 //! the same tick and stock is short, the earlier-listed one is filled
 //! first. A deterministic tiebreak is required by ARCHITECTURE.md §3.9;
 //! this is that tiebreak, and it is stated in `contracts.ron` itself too so

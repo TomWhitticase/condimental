@@ -38,8 +38,8 @@
 //! [`TimedProcess`](super::machine::TimedProcess) and both its buffers, each
 //! item's exact sub-tile position on its belt, every hopper's level, every
 //! tank's and every pipe tile's exact fluid volume, each splitter's
-//! next-due side, each dock's buffer and lifetime shipped total, the shared
-//! delivery pool, every contract's own cadence clock and delivered/missed
+//! next-due side, each dock's stock, lifetime shipped total and last
+//! payment tick, every contract's own cadence clock and delivered/missed
 //! counters, money, owned equipment, owned ingredient stock, and the tick
 //! count.
 //!
@@ -131,6 +131,13 @@
 //! numbers so the refusal reads as "this save predates a change" rather
 //! than as a parse failure.
 //!
+//! **`schema_version` 3 is per-dock stock** (2026-09-26, `super::dock`'s
+//! module doc). The economy's one shared delivery pool is gone, so
+//! `SaveData::delivery_stock` went with it, and what waits to be sold is now
+//! each [`SavedDock::contents`], checked against the dock's places. A v2 file
+//! is rejected like a v1 file: its pool has no dock to stand on, and handing
+//! it to whichever dock came first would invent a fact the file never said.
+//!
 //! A field addition from here on is a bump, for real this time. Adding one
 //! `#[serde(default)]` and leaving the version alone would mean a v2 file
 //! written by an older build and one written by a newer one are both "v2"
@@ -159,7 +166,7 @@ use serde::{Deserialize, Serialize};
 use super::belt::BeltSegment;
 use super::contracts::ContractRegistry;
 use super::dock::{DOCK_KIND, Dock};
-use super::economy::{ActiveContract, DELIVERY_STOCK_CAPACITY};
+use super::economy::ActiveContract;
 use super::fluid::{FLUID_TANK_KIND, FluidTank};
 use super::hopper::{HOPPER_KIND, Hopper};
 use super::inventory::Inventory;
@@ -176,7 +183,7 @@ use super::world::{BELT_KIND, PIPE_KIND, PlayerCommand, World};
 /// The save format's version. Bumped whenever the shape below changes;
 /// a file naming any other version is rejected, never migrated — see the
 /// module doc, and every other loader in this crate.
-pub const SAVE_SCHEMA_VERSION: u32 = 2;
+pub const SAVE_SCHEMA_VERSION: u32 = 3;
 
 /// A fixed-point value as its raw `I16F16` bits — see the module doc for why
 /// a save never stores one as decimal text.
@@ -234,9 +241,6 @@ pub struct SaveData {
     pub owned_equipment: Vec<(String, u32)>,
     /// Bought raw ingredient stock not yet loaded into anything — sorted.
     pub owned_ingredients: Vec<(String, u32)>,
-    /// The economy's one shared delivery pool, in its own slot order (see
-    /// [`Inventory::slots`]).
-    pub delivery_stock: Vec<(ItemId, u32)>,
     /// Every **active** contract's clock and counters, in the world's
     /// contract order. Only the *state* — a contract's mix, cadence, price
     /// and strikes are content (`data/contracts.ron`) and are matched by id
@@ -548,13 +552,14 @@ pub struct SavedTank {
     pub fluid: Option<ItemId>,
 }
 
-/// A dock's buffer (normally empty — it is a pass-through, see
-/// [`super::dock`]) and its lifetime shipped total, which is the number
-/// worth keeping.
+/// What stands on a dock, in its own slot order (see [`Inventory::slots`]),
+/// its lifetime shipped total and the tick it last paid on. `Dock::blocked`
+/// is derived per tick and not saved.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedDock {
     pub contents: Vec<(ItemId, u32)>,
     pub shipped_total: u32,
+    pub last_paid_tick: Option<u64>,
     /// `Dock::understaffed`, for the same reason as the machine's
     /// `refused_by`. `#[serde(default)]`.
     #[serde(default)]
@@ -700,17 +705,6 @@ pub enum SaveError {
     DuplicateContract {
         id: String,
     },
-    /// The shared delivery pool holding more of one item than
-    /// [`DELIVERY_STOCK_CAPACITY`]. It has no tile, so it cannot use
-    /// [`SaveError::OverCapacity`]; it is the same corruption all the same.
-    /// A save written before the pool had a ceiling can land here — the
-    /// world it describes is one this build cannot run, and saying so is
-    /// better than silently shipping the excess into nothing.
-    OverfullDeliveryPool {
-        item: ItemId,
-        held: u32,
-        capacity: u32,
-    },
     /// A buffer, bin, tank or pipe holding more than it can. A hand-edited
     /// file, or content whose capacity constant shrank.
     OverCapacity {
@@ -829,15 +823,6 @@ impl std::fmt::Display for SaveError {
                 f,
                 "the save lists contract '{id}' as active twice — a contract can be signed \
                  once at a time"
-            ),
-            SaveError::OverfullDeliveryPool {
-                item,
-                held,
-                capacity,
-            } => write!(
-                f,
-                "the shared delivery pool holds {held} '{item}', more than the {capacity} \
-                 one item may stand on the dock"
             ),
             SaveError::OverCapacity {
                 what,
@@ -970,6 +955,7 @@ impl World {
                     SavedBody::Dock(SavedDock {
                         contents: dock.slots().to_vec(),
                         shipped_total: dock.shipped_total(),
+                        last_paid_tick: dock.last_paid_tick(),
                         understaffed: dock.understaffed(),
                         mothballed: dock.mothballed(),
                     })
@@ -1024,7 +1010,6 @@ impl World {
                 .iter()
                 .map(|(id, count)| (id.to_string(), count))
                 .collect(),
-            delivery_stock: self.economy().delivery_buffer.slots().to_vec(),
             contracts: self
                 .economy()
                 .contracts
@@ -1285,19 +1270,6 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
             });
         }
     }
-    for (item, held) in &data.delivery_stock {
-        check_item(item, &known_items, || {
-            "in the shared delivery pool".to_string()
-        })?;
-        if *held > DELIVERY_STOCK_CAPACITY {
-            return Err(SaveError::OverfullDeliveryPool {
-                item: item.clone(),
-                held: *held,
-                capacity: DELIVERY_STOCK_CAPACITY,
-            });
-        }
-    }
-
     // Every active contract has to be an offer this build's board makes,
     // and none may be active twice — see `SaveError::UnknownContract` for
     // why the other direction (an offer the save does not name) is fine.
@@ -1584,20 +1556,35 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                     .expect("the entity was just placed");
             }
             SavedBody::Dock(saved) => {
-                let capacity = world
+                let places = world
                     .ecs()
                     .get::<&Dock>(entity)
                     .expect("a dock placement carries a Dock")
-                    .capacity_per_item();
-                check_capacity(&saved.contents, capacity, "dock", placement.tile)?;
+                    .places();
+                // Places are one total across items, so the sum is what
+                // binds; the per-item check would pass a dock holding 32 of
+                // two items each.
+                let used = saved
+                    .contents
+                    .iter()
+                    .fold(0u32, |sum, (_, qty)| sum.saturating_add(*qty));
+                if used > places {
+                    return Err(SaveError::OverCapacity {
+                        what: "dock".to_string(),
+                        tile: placement.tile,
+                        held: used.to_string(),
+                        capacity: places.to_string(),
+                    });
+                }
                 world
                     .ecs_mut()
                     .insert_one(
                         entity,
                         Dock::restore(
-                            capacity,
+                            places,
                             saved.contents.clone(),
                             saved.shipped_total,
+                            saved.last_paid_tick,
                             saved.understaffed,
                             saved.mothballed,
                         ),
@@ -1769,8 +1756,8 @@ fn check_capacity(
     Ok(())
 }
 
-/// The world-level ledgers: unplaced equipment, bought ingredient stock, the
-/// shared delivery pool, and every contract's own clock.
+/// The world-level ledgers: unplaced equipment, bought ingredient stock and
+/// every contract's own clock.
 ///
 /// Owned equipment is credited **after** the rebuild, not before: half one
 /// buys exactly one of each thing it places and spends it immediately, so
@@ -1789,10 +1776,8 @@ fn restore_ledgers(world: &mut World, data: &SaveData) {
         world.ingredients_mut().owned.add(id, *count);
     }
 
-    let delivery_stock = data.delivery_stock.clone();
     let contracts = data.contracts.clone();
     let economy = world.economy_mut();
-    economy.delivery_buffer = Inventory::restore(DELIVERY_STOCK_CAPACITY, delivery_stock);
     // The active list is EXACTLY the save's. The empty world was built with
     // the board's starters running (that is what a new game is); a save
     // that lost a starter, or signed an offer, says so by listing exactly
@@ -1878,35 +1863,37 @@ mod tests {
         }
     }
 
-    /// The v1 refusal issue #43 created, said out loud. A v1 file is every
-    /// save written before a tank could declare what it holds; this build
-    /// will not load one, and the thing that matters is that it says *why*
+    /// The v1 refusal issue #43 created and the v2 refusal per-dock stock
+    /// created, said out loud. A v1 file predates a tank declaring what it
+    /// holds, a v2 file predates stock standing on its own dock; this build
+    /// will load neither, and the thing that matters is that it says *why*
     /// — both version numbers, so the message reads as "this save predates
     /// a change" rather than as a corrupt file. Migration is deliberately
     /// not on the table (ARCHITECTURE.md §4, and this module's doc).
     #[test]
-    fn a_version_one_save_is_refused_with_both_numbers_in_the_message() {
-        let text = a_save().to_ron().replace(
-            &format!("schema_version: {SAVE_SCHEMA_VERSION}"),
-            "schema_version: 1",
-        );
-        let error = SaveData::from_ron(&text).expect_err("a v1 save is not loadable by this build");
-        assert!(
-            matches!(
-                error,
-                SaveError::UnsupportedSchemaVersion {
-                    found: 1,
-                    supported: 2
-                }
-            ),
-            "expected a version refusal naming 1 and 2, got {error:?}"
-        );
-        let message = error.to_string();
-        assert!(
-            message.contains("schema_version 1") && message.contains("supports 2"),
-            "the refusal must name both versions so it does not read as a parse failure: \
-             {message}"
-        );
+    fn an_older_save_is_refused_with_both_numbers_in_the_message() {
+        for old in [1, 2] {
+            let text = a_save().to_ron().replace(
+                &format!("schema_version: {SAVE_SCHEMA_VERSION}"),
+                &format!("schema_version: {old}"),
+            );
+            let error =
+                SaveData::from_ron(&text).expect_err("an older save is not loadable by this build");
+            assert!(
+                matches!(
+                    error,
+                    SaveError::UnsupportedSchemaVersion { found, supported: 3 } if found == old
+                ),
+                "expected a version refusal naming {old} and 3, got {error:?}"
+            );
+            let message = error.to_string();
+            assert!(
+                message.contains(&format!("schema_version {old}"))
+                    && message.contains("supports 3"),
+                "the refusal must name both versions so it does not read as a parse failure: \
+                 {message}"
+            );
+        }
     }
 
     #[test]

@@ -1,7 +1,6 @@
 //! Headless integration test for the delivery-dock ticket: the chain is
 //! emptied by a **dock** — a real building at the end of a real belt, which
-//! ships finished product into the economy's shared delivery pool by itself,
-//! every tick — instead of by `PlayerCommand::CollectOutput`, a command that
+//! holds finished product until a contract collects it — instead of by `PlayerCommand::CollectOutput`, a command that
 //! reached into the last machine's own output buffer and no longer exists.
 //!
 //! This is `hopper.rs`'s file, mirrored to the other end of the line, and it
@@ -9,8 +8,8 @@
 //!
 //! `sim_core/src/sim/dock.rs` already unit-tests `Dock` in isolation (the
 //! empty-belt case, the not-yet-arrived case, one-unit-per-call absorbing,
-//! the full-dock refusal, and shipping). This file drives the real `World`
-//! instead, to prove the four things only the whole system can show:
+//! the full-dock refusal, and lending its stock). This file drives the real
+//! `World` instead, to prove the things only the whole system can show:
 //!
 //! 1. **Geometry.** There is now real tile geometry downstream of the last
 //!    machine — one ordinary belt and one building — where until this ticket
@@ -20,24 +19,22 @@
 //! 2. **Automatic delivery.** Money is earned with **zero** player-issued
 //!    commands beyond supplying the two consumables. That is the whole
 //!    point of the ticket, so it is asserted directly rather than implied.
-//! 3. **The pool, not the dock, is where product waits.** The dock is a
-//!    pass-through (`sim/dock.rs`'s module doc), so its own buffer reads
-//!    empty between ticks while `delivery_stock` climbs — the property a
-//!    presentation pass has to know before it draws a fill level on the
-//!    wrong thing.
+//! 3. **The dock is where product waits** (per-dock stock, 2026-09-26):
+//!    what arrives stays on the dock it arrived at until a contract takes
+//!    it, and the dock a payment took from is the one that says so.
 //! 4. **The wire shape.** The exact JSON field names ticket 2 (the Godot
 //!    dock asset + hover) consumes verbatim, pinned the way `fluids.rs`,
 //!    `hopper.rs` and `machine_footprints.rs` pin theirs.
 //!
 //! Mass conservation across the whole chain *through* the dock is covered in
-//! `core_loop.rs`, which counts the dock's buffer as mass in the system and
+//! `core_loop.rs`, which counts the dock's stock as mass in the system and
 //! reads "shipped" off the dock rather than tallying a command.
 
 mod common;
 
 use sim_core::sim::{
-    ContractRegistry, DELIVERY_STOCK_CAPACITY, DOCK_CAPACITY, Direction, DockSnapshot,
-    RecipeRegistry, TileSnapshot, World, linear_prefix, reference_chain_with_budget,
+    ContractRegistry, DOCK_CAPACITY, Direction, DockSnapshot, PlayerCommand, RecipeRegistry,
+    TileSnapshot, World, linear_prefix, reference_chain_with_budget,
 };
 
 /// Exactly `common::stock_up`'s ingredient bill, so a stocked world starts
@@ -137,7 +134,7 @@ fn the_dock_stands_at_the_end_of_its_own_belt_past_the_last_machine() {
     // tile and therefore still on its inlet face.
     assert_eq!(dock.footprint.width_tiles, 2);
     assert_eq!(dock.footprint.height_tiles, 2);
-    assert_eq!(dock.capacity_per_item, DOCK_CAPACITY);
+    assert_eq!(dock.places, DOCK_CAPACITY);
 }
 
 /// Every tile of the new geometry resolves, and resolves as the right thing
@@ -160,13 +157,14 @@ fn every_tile_of_the_dock_and_its_belt_resolves() {
         Some(TileSnapshot::Dock {
             origin_tile,
             contents,
-            capacity_per_item,
+            places,
+            used,
             shipped_total,
             ..
         }) => {
             assert_eq!(origin_tile, dock.tile);
             assert!(contents.is_empty(), "a fresh dock holds nothing");
-            assert_eq!(capacity_per_item, DOCK_CAPACITY);
+            assert_eq!((places, used), (DOCK_CAPACITY, 0));
             assert_eq!(shipped_total, 0);
         }
         other => panic!("expected the dock at {:?}, got {other:?}", dock.tile),
@@ -262,8 +260,8 @@ fn the_chain_ships_and_earns_with_no_player_command_but_refilling() {
         .sum();
     assert!(
         stock > 0 || earned(&world) > sim_core::sim::types::Money::ZERO,
-        "every shipped box must be either waiting in the shared pool or already spent \
-         paying a contract — never nowhere"
+        "every shipped box must be either waiting on the dock or already spent paying a \
+         contract — never nowhere"
     );
 
     // ...and run on long enough for a contract window to actually settle.
@@ -339,42 +337,125 @@ fn finished_product_actually_travels_the_dock_belt() {
 }
 
 // ---------------------------------------------------------------------
-// 3. The pool, not the dock, is where product waits.
+// 3. The dock is where product waits.
 // ---------------------------------------------------------------------
 
-/// The drain decision, observed through the real world: the dock's own
-/// buffer is empty at every tick boundary while the shared delivery pool
-/// fills up. A presentation pass that drew a fill level from the dock would
-/// draw a permanently-empty building; `delivery_stock` is the number to use.
+/// What arrives stays on the dock, and the stock every contract sees is that
+/// dock's; when the starter contract pays, it takes its mix off THIS dock and
+/// the dock records the tick it was paid from. `used` is the per-dock count
+/// presentation draws its grid of places from.
 #[test]
-fn the_dock_is_empty_between_ticks_while_the_shared_pool_fills() {
+fn what_arrives_waits_on_the_dock_until_a_contract_takes_it() {
     let mut world = world();
-
-    for _ in 0..500_000u32 {
-        common::supply(&mut world);
-        world.tick();
-
-        assert!(
-            the_dock(&world).contents.is_empty(),
-            "the dock must hold nothing at a tick boundary — it ships everything it \
-             receives in the same tick it receives it"
-        );
-
-        if the_dock(&world).shipped_total >= 2 {
-            break;
-        }
-    }
-
-    assert!(the_dock(&world).shipped_total >= 2);
-    let pooled: u32 = world
-        .economy_snapshot()
-        .delivery_stock
+    let mix: u32 = world
+        .economy()
+        .contract("corner_shop")
+        .expect("the starter is active")
+        .contract
+        .mix
         .iter()
         .map(|(_, qty)| *qty)
         .sum();
+
+    let mut paid_at = None;
+    for _ in 0..500_000u32 {
+        let before = the_dock(&world);
+        let made = world
+            .economy()
+            .contract("corner_shop")
+            .unwrap()
+            .deliveries_made;
+        common::supply(&mut world);
+        world.tick();
+        let after = the_dock(&world);
+
+        let held: u32 = after.contents.iter().map(|(_, qty)| *qty).sum();
+        assert_eq!(
+            after.used, held,
+            "`used` is the sum of what stands on the dock"
+        );
+        assert_eq!(
+            world.economy_snapshot().delivery_stock,
+            after.contents,
+            "with one dock, what every contract can draw on is exactly that dock's stock"
+        );
+
+        if world
+            .economy()
+            .contract("corner_shop")
+            .unwrap()
+            .deliveries_made
+            > made
+        {
+            let arrived = after.shipped_total - before.shipped_total;
+            assert_eq!(
+                after.used,
+                before.used + arrived - mix,
+                "the payment took exactly its mix off the dock"
+            );
+            assert_eq!(after.last_paid_tick, Some(world.current_tick()));
+            paid_at = Some(world.current_tick());
+            break;
+        }
+        assert_eq!(
+            after.last_paid_tick, None,
+            "nothing has been paid from the dock yet"
+        );
+    }
     assert!(
-        pooled > 0,
-        "what left the dock has to be somewhere, and the shared pool is where"
+        paid_at.is_some(),
+        "the starter contract must pay within the budget"
+    );
+}
+
+/// A mothballed dock ships nothing: what stands on it is not offered to any
+/// contract, so a window that falls due while it is off is missed and the
+/// stock is still there afterwards — the same "held, not lost" rule the
+/// understaffed dock follows. (The two cases share one line in
+/// `World::tick`'s step 7; this is the one a command can set up.)
+#[test]
+fn a_mothballed_dock_holds_its_stock_back_from_every_contract() {
+    let mut world = world();
+    let tile = the_dock(&world).tile;
+
+    // Enough on the dock to pay the starter's whole mix.
+    for _ in 0..500_000u32 {
+        if the_dock(&world).used >= 2 {
+            break;
+        }
+        common::supply(&mut world);
+        world.tick();
+    }
+    world.issue_command(PlayerCommand::SetMothballed {
+        tile,
+        enabled: true,
+    });
+    let held = the_dock(&world).contents;
+    let delivered = world.economy().lifetime_deliveries;
+    let due = world
+        .economy()
+        .contract("corner_shop")
+        .expect("the starter is still active")
+        .next_delivery_tick;
+    while world.current_tick() < due {
+        world.tick();
+    }
+
+    // Missed — and, this early, possibly lost: the line took its first
+    // windows to reach the dock. Either way nothing was delivered.
+    assert_eq!(
+        world.economy().lifetime_deliveries,
+        delivered,
+        "a window with the dock off pays nothing"
+    );
+    let dock = the_dock(&world);
+    assert_eq!(
+        dock.contents, held,
+        "and nothing was taken off the switched-off dock"
+    );
+    assert!(
+        world.economy_snapshot().delivery_stock.is_empty(),
+        "the clipboard reads what can be drawn on, and a mothballed dock offers nothing"
     );
 }
 
@@ -405,16 +486,17 @@ fn the_dock_json_shape_is_what_presentation_is_told_to_expect() {
         "a dock does not own a belt any more — it reports which belt tile feeds it: {dock}"
     );
     assert_eq!(dock["contents"], serde_json::json!([]));
-    assert_eq!(dock["capacity_per_item"], DOCK_CAPACITY);
+    assert_eq!(dock["places"], DOCK_CAPACITY);
+    assert_eq!(dock["used"], 0);
+    assert_eq!(dock["at_capacity"], false);
     assert_eq!(dock["shipped_total"], 0);
-    // The dock-capacity change (2026-09-16): `full` is the pool's state, not
-    // this building's, and it rides every dock's snapshot so a chunk-driven
-    // renderer can say "full — the belt is backing up" on the tile itself.
+    assert_eq!(dock["last_paid_tick"], serde_json::Value::Null);
+    // `full` is this dock refusing a box right now (the lamp); `at_capacity`
+    // is every place being taken (the "!"). Both ride every dock's snapshot.
     assert_eq!(dock["full"], false);
     assert!(
-        dock.get("fill").is_none(),
-        "a dock has no fill level on purpose — presentation must read \
-         economy_snapshot_json's delivery_stock instead: {dock}"
+        dock.get("capacity_per_item").is_none(),
+        "places are one total across items now: {dock}"
     );
 
     // chunk_snapshot_json's new `docks` array, carrying the identical object.
@@ -433,62 +515,60 @@ fn the_dock_json_shape_is_what_presentation_is_told_to_expect() {
     assert_eq!(tile["direction"], "east");
     assert_eq!(tile["origin_tile"], serde_json::json!([26, 0]));
     assert_eq!(tile["contents"], serde_json::json!([]));
-    assert_eq!(tile["capacity_per_item"], DOCK_CAPACITY);
+    assert_eq!(tile["places"], DOCK_CAPACITY);
+    assert_eq!(tile["used"], 0);
+    assert_eq!(tile["at_capacity"], false);
     assert_eq!(tile["shipped_total"], 0);
+    assert_eq!(tile["last_paid_tick"], serde_json::Value::Null);
 }
 
 // ---------------------------------------------------------------------
-// 5. The ceiling on the pool — a relationship, not a literal.
+// 5. A dock's places — a relationship, not a literal.
 // ---------------------------------------------------------------------
 
-/// `DELIVERY_STOCK_CAPACITY` has to clear the biggest single quantity any
-/// contract on the board asks for in one window, because a contract settles
-/// only when the pool holds its whole mix at once: a ceiling at or under
-/// that quantity would make that contract permanently unsatisfiable, and the
-/// game would give no hint why. Pinned against `data/contracts.ron` itself
-/// rather than against the literal 20 `export_pallet` asks for today, the
-/// way `STARTING_MONEY` is pinned against the chain's build cost — adding a
-/// bigger order fails this test instead of quietly breaking that order.
+/// `DOCK_CAPACITY` has to clear the biggest single order any contract on the
+/// board asks for in one window, because a contract settles only when the
+/// docks hold its whole mix at once: a factory with one dock whose places sat
+/// at or under that order could never fill it, and the game would give no
+/// hint why. Pinned against `data/contracts.ron` itself rather than against
+/// the literal 20 `export_pallet` asks for today, the way `STARTING_MONEY` is
+/// pinned against the chain's build cost — adding a bigger order fails this
+/// test instead of quietly breaking that order.
 ///
-/// The margin is the doc's "comfortably exceed", spelled as twice over: the
-/// pool is shared, so the biggest order must be able to build up while the
-/// small ones keep skimming the same pile.
+/// The bound is a whole MIX, summed across its items, because places are one
+/// total; and the margin is 1.5x, so the biggest order can build up while
+/// the small ones keep skimming the same dock.
 #[test]
-fn the_pool_ceiling_clears_the_biggest_order_on_the_board() {
+fn a_docks_places_clear_the_biggest_order_on_the_board() {
     let board = ContractRegistry::bundled();
-    let (biggest_id, biggest_item, biggest_qty) = board
+    let (biggest_id, biggest) = board
         .ordered()
         .iter()
-        .flat_map(|c| {
-            c.mix
-                .iter()
-                .map(move |(item, qty)| (c.id.clone(), item.clone(), *qty))
-        })
-        .max_by_key(|(_, _, qty)| *qty)
+        .map(|c| (c.id.clone(), c.mix.iter().map(|(_, qty)| *qty).sum::<u32>()))
+        .max_by_key(|(_, total)| *total)
         .expect("the bundled board offers at least one contract");
 
     assert!(
-        DELIVERY_STOCK_CAPACITY >= biggest_qty * 2,
-        "the delivery pool holds {DELIVERY_STOCK_CAPACITY} of an item, but '{biggest_id}'          asks for {biggest_qty} {biggest_item} in one window — raise          DELIVERY_STOCK_CAPACITY to at least twice the biggest order, or that order can          never be filled"
+        DOCK_CAPACITY * 2 >= biggest * 3,
+        "a dock has {DOCK_CAPACITY} places, but '{biggest_id}' asks for {biggest} cases in \
+         one window — raise DOCK_CAPACITY to at least 1.5x the biggest order, or a \
+         one-dock factory can barely fill it"
     );
 }
 
-/// The ceiling reached for real, by a line producing into it. What must NOT
-/// happen is product quietly evaporating at the end of the chain: the pool
-/// stops at its ceiling, the dock refuses the belt rather than swallowing
-/// what it cannot pass on (its own buffer stays empty, the pass-through rule
-/// of section 3 holds even when full), and the belt behind it backs up with
-/// the boxes that have nowhere to go. That backed-up belt is the thing the
-/// player sees, and `full` on the dock's snapshot is how presentation says
-/// so in words.
+/// The places filled for real, by a line producing into them. What must NOT
+/// happen is product quietly evaporating at the end of the chain: the dock
+/// stops at its places, refuses the belt rather than swallowing what it
+/// cannot hold, and the belt behind it backs up with the boxes that have
+/// nowhere to go. That backed-up belt is what the player sees; `full` is the
+/// refusal, `at_capacity` the places all taken.
 #[test]
-fn a_full_pool_backs_the_line_up_instead_of_losing_product() {
-    // Twice `world()`'s larder's worth of *money*: the line has to run some
-    // 25 000 ticks to out-produce the starter contract's appetite by a whole
-    // pool, and one larder runs dry before then (a dead line proves nothing
-    // here). It cannot be bought twice over in one go — a holding is capped
-    // at what the warehouse holds since W1 — so the second larder arrives
-    // through `restock` as the first is eaten.
+fn a_full_dock_backs_the_line_up_instead_of_losing_product() {
+    // Twice `world()`'s larder's worth of *money*: the line has to out-produce
+    // the starter contract's appetite by a whole dock, and one larder may run
+    // dry before then (a dead line proves nothing here). It cannot be bought
+    // twice over in one go — a holding is capped at what the warehouse holds
+    // since W1 — so the second larder arrives through `restock`.
     let mut world = reference_chain_with_budget(recipes(), BUDGET + common::STOCK_COST);
     common::stock_up(&mut world);
     let belt_start = the_dock(&world)
@@ -502,74 +582,57 @@ fn a_full_pool_backs_the_line_up_instead_of_losing_product() {
         common::supply(&mut world);
         world.tick();
 
-        let stock = world.economy_snapshot().delivery_stock;
-        for (item, qty) in &stock {
-            assert!(
-                *qty <= DELIVERY_STOCK_CAPACITY,
-                "the pool holds {qty} {item}, past its own ceiling of                  {DELIVERY_STOCK_CAPACITY}"
-            );
-        }
+        let dock = the_dock(&world);
         assert!(
-            the_dock(&world).contents.is_empty(),
-            "a full pool must make the dock REFUSE the belt, not hold product itself —              the dock is a pass-through at every fill level"
+            dock.used <= dock.places,
+            "the dock holds {} cases on {} places",
+            dock.used,
+            dock.places
         );
-
-        if stock.iter().any(|(_, qty)| *qty == DELIVERY_STOCK_CAPACITY) {
+        if dock.at_capacity {
             filled = true;
             break;
         }
     }
-
     assert!(
         filled,
-        "an undemanded line must reach the pool's ceiling — it never did, so either the          line stopped producing or the ceiling is not being applied"
+        "an undemanded line must fill the dock's places — it never did, so either the line \
+         stopped producing or the places are not being applied"
     );
-    // NOT `dock.full` yet, deliberately. The flag reports this dock refusing
-    // a box, and the pool only reached its ceiling in step 6 of this very
-    // tick — after step 4 had already taken a box off the belt into room
-    // that still existed. The refusal, and the flag, come one tick later.
-    //
-    // Keep running with nowhere to put product: the belt fills instead.
-    let mut backed_up = 0;
-    for _ in 0..2_000u32 {
+    assert!(
+        world.economy_snapshot().delivery_full,
+        "the summary agrees a dock is full"
+    );
+
+    // Keep running with nowhere to put product: the next box to reach the
+    // belt's END is refused, the dock says so, and the box stays on the belt.
+    // Hunted rather than asserted at once: boxes arrive hundreds of ticks
+    // apart, and a contract window may free a few places in between.
+    let mut refused = None;
+    for _ in 0..20_000u32 {
+        common::restock(&mut world);
         common::supply(&mut world);
         world.tick();
-        backed_up = world
-            .chunk_snapshot(belt_chunk)
-            .belts
-            .iter()
-            .find(|b| b.tile == belt_start)
-            .map(|b| b.items.len())
-            .unwrap_or(0);
-        if backed_up > 0 {
+        let dock = the_dock(&world);
+        if dock.full {
+            refused = Some(dock);
             break;
         }
     }
+    let dock = refused.expect("a full dock must eventually refuse a box off its belt");
     assert!(
-        backed_up > 0,
-        "with the pool full the dock's belt must hold the boxes it cannot hand over"
+        dock.at_capacity,
+        "a dock refuses only with every place taken: {dock:?}"
     );
-    // And once a backed-up box actually reaches the belt's END, the dock
-    // refuses it and says so. Hunted rather than asserted outright: the box
-    // above has only just been spawned onto the belt and still has the run
-    // to travel, and `try_absorb` raises nothing until there is something
-    // at the end to say no to.
-    let mut reported = false;
-    for _ in 0..2_000u32 {
-        common::supply(&mut world);
-        world.tick();
-        if the_dock(&world).full {
-            reported = true;
-            break;
-        }
-    }
-    let dock = the_dock(&world);
+    let waiting = world
+        .chunk_snapshot(belt_chunk)
+        .belts
+        .iter()
+        .find(|b| b.tile == belt_start)
+        .map(|b| b.items.len())
+        .unwrap_or(0);
     assert!(
-        reported,
-        "and THAT is what `full` reports — this dock refusing its belt, not the pool's         level: {dock:?}"
-    );
-    assert!(
-        dock.contents.is_empty(),
-        "a dock that is backing up is still a pass-through, holding nothing itself"
+        waiting > 0,
+        "the refused box is still on the belt, not lost"
     );
 }

@@ -277,7 +277,7 @@ func _initialize() -> void:
 		_fail("the first belt's first slot should carry the tomato at belt-surface height, got %s" % str(drawn))
 		return
 
-	# --- A full delivery pool pulses the dock's lamp ----------------------
+	# --- A full dock pulses its lamp -------------------------------------
 	# The lamp's hue comes from the mesh's own vertex colours, which no
 	# material can repaint per state, so "full" cannot be a second colour of
 	# lamp. It is a time channel instead — the one channel a lit lamp and a
@@ -307,33 +307,18 @@ func _initialize() -> void:
 	if not main._dock_lamp_lit(true, true, 0) or main._dock_lamp_lit(true, true, main.DOCK_FULL_PULSE_TICKS):
 		_fail("the blink should turn over every DOCK_FULL_PULSE_TICKS ticks")
 		return
-	# A full pool that somehow holds nothing drawable still reads as full:
-	# "full" is the pool's own verdict, not one inferred from the crates.
+	# A full dock that somehow holds nothing drawable still reads as full:
+	# "full" is the sim's own verdict, not one inferred from the crates.
 	if not main._dock_lamp_lit(false, true, 0):
 		_fail("a full dock's lamp should blink whatever the deck is showing")
 		return
 
 	# --- and only the dock that is actually jammed pulses ------------------
 	# "Full" is per dock (`DockSnapshot::full` — THIS dock refused a box off
-	# its belt this tick), not per pool. It read the pool's shared
-	# `delivery_full` until 2026-09-21, which is an `.any()` over the
-	# products: one capped sauce cried jam on every dock in the world,
-	# including one shipping a different sauce with room to spare. The sim
-	# side is covered by `bbq_branch.rs`; this is the half that decides which
-	# lamp on screen the flag reaches.
-	var saved_dock_states: Dictionary = main._dock_states.duplicate()
-	main._dock_states = {
-		"1,1": {"tile": [1, 1], "full": false},
-		"2,2": {"tile": [2, 2], "full": true},
-	}
-	var blocked: Dictionary = main._blocked_dock_keys()
-	if blocked.size() != 1 or not blocked.has("2,2"):
-		_fail("only the dock reporting full should be blocked, got %s" % str(blocked.keys()))
-		return
-	main._dock_states = saved_dock_states
-
-	# And the set actually steers the lamp: the same dock, the same stock,
-	# the same ticks — blocked or not is the only thing that changes.
+	# its belt this tick). Each dock's lamp reads its own snapshot and
+	# nothing else; the sim side is covered by `bbq_branch.rs`. The same
+	# dock, the same stock, the same ticks — its own `full` is the only
+	# thing that changes.
 	# The demo line ends at a crusher and owns no dock, so buy one through
 	# the ordinary command path and rebuild the scene around it.
 	Layouts.place(main.sim, "dock", Vector2i(8, 0), "east")
@@ -345,11 +330,18 @@ func _initialize() -> void:
 	var stock := [["boxed_ketchup", 1]]
 	var steady_states := {}
 	var blinked_states := {}
+	var other_full_states := {}
 	for tick in range(main.DOCK_FULL_PULSE_TICKS * 2):
-		main._update_dock_stock(stock, {}, tick)
+		main._update_dock_stock({dock_key: {"contents": stock, "full": false}}, tick)
 		steady_states[bool(main._dock_nodes[dock_key]["stocked"])] = true
-		main._update_dock_stock(stock, {dock_key: true}, tick)
+		main._update_dock_stock({dock_key: {"contents": stock, "full": true}}, tick)
 		blinked_states[bool(main._dock_nodes[dock_key]["stocked"])] = true
+		# Another dock jamming never reaches this one's lamp.
+		main._update_dock_stock({dock_key: {"contents": stock, "full": false}, "99,99": {"contents": stock, "full": true}}, tick)
+		other_full_states[bool(main._dock_nodes[dock_key]["stocked"])] = true
+	if other_full_states.size() != 1 or not other_full_states.has(true):
+		_fail("another dock being full made this dock's lamp blink")
+		return
 	if steady_states.size() != 1 or not steady_states.has(true):
 		_fail("a dock that is NOT backing up should hold its lamp lit, not blink")
 		return

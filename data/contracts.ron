@@ -29,8 +29,8 @@
 // whole reason the game rewards a factory that can hold several different
 // lines running at once rather than one maximally-profitable one.
 //
-// FILE ORDER IS PRIORITY. Every active contract draws from ONE shared pool
-// of collected-but-undelivered stock (see `sim_core/src/sim/economy.rs`'s
+// FILE ORDER IS PRIORITY. Every active contract draws from the same stock
+// — what stands on every shipping dock, summed (see `sim_core/src/sim/economy.rs`'s
 // module doc for the full allocation rule and why it is the way it is). When
 // two contracts fall due on the same tick and there isn't enough stock for
 // both, the one listed FIRST here is filled first. That is a deterministic
@@ -91,7 +91,7 @@
 //   growth tier    (the six orders below them)                 ~19.2 / 1000
 //   BBQ tier       (the four below those, in VAT output)        ~7.0 / 1000
 //   mustard tier   (the four at the bottom)                     ~5.1 / 1000
-//   whole board                                                ~35.2 / 1000
+//   whole board                                                ~35.1 / 1000
 //
 // The BBQ tier is quoted in vat output rather than in boxes because that is
 // the only unit the two sauces share: it asks for 2.5 boxed_ketchup and ~4.5
@@ -316,7 +316,7 @@
         //
         // LISTED LAST, so the priority rule above is undisturbed: a player
         // who has not built a BBQ branch never sees a BBQ order skim the
-        // shared pool ahead of the ketchup orders they built for. Within the
+        // docks ahead of the ketchup orders they built for. Within the
         // tier the order again runs small to large.
         //
         // NOTE THE EXISTING CONTRACTS ARE UNTOUCHED. Amending a live order
@@ -502,10 +502,13 @@
             strikes: 2,
         ),
         // The mustard pallet, and the top of this tier: eight boxes every
-        // 5000 ticks is about three mustard lines' output held back for the
-        // window, because a 360-tick vat makes ~2.7 boxes per 1000 ticks and
-        // this asks for 1.6. `export_pallet`'s counterpart on the mustard
-        // side.
+        // 5000 ticks is 1.6 per 1000 against the ~2.7 a 360-tick vat makes,
+        // so it asks for about three fifths of one mustard line's output —
+        // rather than the whole line `export_pallet` asks of ketchup. What
+        // makes it the hardest mustard order on the board is not the rate
+        // but the burst: eight cases have to be banked and shipped inside
+        // one window, so a line running at exactly 0.58 of capacity still
+        // needs somewhere to put them.
         //
         // PAYOUT: 8 boxes x 52 = 416. 52 is the top of the mustard band (17
         // in raws is 33% of it, the same fraction `export_pallet` leaves on

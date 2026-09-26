@@ -507,18 +507,14 @@ fn machine_state(world: &World, tile: (i32, i32)) -> (String, Option<(u64, u64)>
 // 2. Flow follows adjacency.
 // ---------------------------------------------------------------------
 
-/// How many tomatoes' worth of mass the world holds right now: in hoppers,
-/// on belts, in machine buffers, and mid-craft. Everything in this file's
+/// How many tomatoes' worth of mass the line holds right now: in hoppers,
+/// on belts, in machine buffers, and mid-craft. What stands on a dock is
+/// [`shipped_tomatoes`]' to count, not this. Everything in this file's
 /// one-stage content is either a tomato (1) or a paste (4).
 fn tomatoes_in_system(world: &World) -> u32 {
     let mut total = 0;
     for hopper in world.hopper_snapshots() {
         total += hopper.quantity;
-    }
-    for dock in world.dock_snapshots() {
-        for (item, qty) in &dock.contents {
-            total += tomato_value(item) * qty;
-        }
     }
     for chunk in world.all_chunks() {
         let snapshot = world.chunk_snapshot(chunk);
@@ -549,11 +545,13 @@ fn tomato_value(item: &str) -> u32 {
     }
 }
 
+/// What the docks hold, in tomatoes. Read off the docks rather than the
+/// economy's summed stock, which leaves out a dock short of its clerk.
 fn shipped_tomatoes(world: &World) -> u32 {
     world
-        .economy_snapshot()
-        .delivery_stock
+        .dock_snapshots()
         .iter()
+        .flat_map(|dock| dock.contents.iter())
         .map(|(item, qty)| tomato_value(item) * qty)
         .sum()
 }
@@ -758,8 +756,8 @@ fn facing_east_reproduces_the_pre_placement_conventions() {
 // ---------------------------------------------------------------------
 
 /// Two hoppers feeding two lines into two docks: both fill, both meter,
-/// both ship, and the shared delivery pool adds them up — because there is
-/// still exactly one pool, however many docks there are.
+/// both ship, and each crate stands on the dock its own line feeds — a box
+/// arriving at one dock puts nothing on the other.
 #[test]
 fn two_hoppers_and_two_docks_work_independently() {
     let mut world = funded(one_stage());
@@ -799,8 +797,15 @@ fn two_hoppers_and_two_docks_work_independently() {
     assert_eq!(
         shipped_tomatoes(&world),
         8,
-        "and both crates land in the one shared delivery pool"
+        "and nothing was lost on the way"
     );
+    for dock in &docks {
+        assert_eq!(
+            dock.contents,
+            vec![("tomato_paste".to_string(), 1)],
+            "each dock holds exactly its own line's crate: {dock:?}"
+        );
+    }
 }
 
 /// A fill command naming a tile loads only that building — the addressing a

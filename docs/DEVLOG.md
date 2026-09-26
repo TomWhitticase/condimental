@@ -284,6 +284,27 @@ screen. Keying that assertion on a node rather than on content does not work:
 `queue_free` is deferred to end of frame, so within one `_process` the
 previous page's nodes are still findable.
 
+### 2026-09-26 — Each dock holds its own stock
+
+The owner saw the docks behave as if they were wired together. A payout threw
+coins over every dock, and one dock taking a case made every dock pop one.
+The design was working as written: since 2026-09-08 a dock had been a
+pass-through into one shared delivery pool, so the only fact in the world was
+"what is on the docks". There was nothing per-dock for the presentation to
+draw.
+
+Each dock now keeps what it takes off its belt, in 32 places. Contracts draw
+on the docks that can ship this tick, summed, taking from each dock in
+topology order. Every dock a payout drew on records it. The coins now rise
+over only those docks, and a case pops only on the dock that took it. The
+dock hover names what stands on that dock and counts its places.
+
+This supersedes the pool and its 48-per-item cap (DECISIONS_LOG
+2026-09-26). The save schema is now 3, and older saves are refused rather
+than migrated. This is the first of three PRs for the owner's report. The
+hover's places grid and a reusable floating "!" over a full dock follow on
+this model.
+
 ### 2026-09-26 — Mustard, the third sauce, and the fluid it could not drink
 
 Mustard ships as content: two raws (`mustard_seed`, `turmeric`), five stages,
@@ -319,6 +340,15 @@ fluid recipe creates — a dry crusher whose outlet touches a `ketchup_mix` run
 does not poison it, and one vinegar run may feed a crusher and a mixer at
 once. The principled fix, a resolver that reads the solid side of a recipe
 too, is issue #184 rather than something improvised here.
+
+Review caught the gate's own tests asserting a list against itself: they looped
+over `data/unlocks.ron`'s `mustard_sauce` entry, so deleting an id from it made
+the loop vacuous and the suite stayed green with an unfulfillable mustard order
+on a new game's board. What a tier must hold back is now derived from the
+content — every contract whose mix names `boxed_mustard`, every raw the recipe
+graph feeds to mustard alone — and compared with the gate in both directions.
+The general lesson for the next sauce: a gate list is only guarded by something
+that does not read the gate.
 
 Mustard's voxels are ticket M2 (PR #179); registering them in `main.gd`'s
 model and tint tables is M3, so `test_ingredient_models.gd` and

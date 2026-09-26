@@ -18,6 +18,30 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-26 **Each dock holds its own stock; contracts draw on the docks
+  together.** A dock keeps what it takes off its belt in `DOCK_CAPACITY`
+  (32) places, one case each, whatever the case holds — the ceiling is a
+  per-dock total, not a per-item cap. At its ceiling `Dock::try_absorb`
+  refuses and the belt backs up. `World::tick` step 7 hands `Economy::tick`
+  a `DeliveryStock` over the docks able to ship this tick (not mothballed,
+  not refused crew in step 6), in topology order; a contract is satisfied
+  if the SUM covers its mix and consumes each line dock by dock in that
+  order. `ContractEvent::Paid { id, from }` names the docks it drew on, and
+  every such dock records `last_paid_tick` (saved). Step 6 claims a dock's
+  logistics crew only while it holds something an active contract orders
+  (`Economy::wanted`); a dock of unordered goods asks for nobody, so it never
+  holds a head another dock's orders need. The coins rise over
+  those docks only, and an arrival pops only the dock whose
+  `shipped_total` rose. `EconomySnapshot::delivery_stock` /
+  `delivery_capacity` / `delivery_full` are the docks summed / total places
+  / "some dock is at capacity". Removing a dock destroys its stock (the
+  ordinary `Remove` rule) — that is the valve for a dock clogged with a
+  product nobody orders. Save schema 3; v2 saves are rejected, not
+  migrated. **Supersedes** 2026-09-08 "Delivery dock, ticket 1" (the
+  pass-through into one pool) and the pool half of 2026-09-16's full dock
+  (`DELIVERY_STOCK_CAPACITY`, 48 per item, `OverfullDeliveryPool`).
+  > Full record in `docs/DECISIONS.md`.
+
 - 2026-09-26 **At most one RAW fluid may enter a machine kind, and at most one
   recipe on that kind may drink it.** A new sauce whose fluid wants into a kind
   that already drinks a bought fluid must take it as a *derived* fluid, made a
@@ -39,7 +63,6 @@ See [WORKFLOW.md](WORKFLOW.md).
   and by `sim_core/tests/mustard_line.rs`. Teaching the resolver about the
   solid side of a recipe would lift the rule; until then it is content's to
   obey. Full record in `docs/DECISIONS.md`.
-
 - 2026-09-25 **THE COOKBOOK is derived from the content files, and nothing in
   it may be written in GDScript.** The in-game encyclopedia (B, and a page on
   the pause menu) draws `SimBridge::cookbook_json` and only that: the sauce
@@ -782,6 +805,8 @@ See [WORKFLOW.md](WORKFLOW.md).
   over the item ceilings, so one capped sauce pulsed every dock in the
   world, including ones shipping another sauce into room. The `.any()`
   stays for the clipboard, which shows the per-item levels beside it.
+  **Superseded 2026-09-26:** the pool is gone; each dock holds 32 places
+  of its own (see that entry). The lamp pulse and the clipboard bar stand.
   **The crusher throws pulp, and a BEAT is a third size of feedback**
   beside §6a's two: five `crush_bit` flecks every `CRUSH_BEAT_TICKS` of
   the machine's own WORK ticks, so a starved or blocked crusher throws
@@ -1304,7 +1329,8 @@ See [WORKFLOW.md](WORKFLOW.md).
 - 2026-09-08 **Delivery dock, drawn.** Architecture, not equipment,
   following UI_UX §2b's occlusion rule (height at the far side, content at
   the near side). No fill gauge — its buffer empties every tick — the
-  deck instead shows delivery stock directly.
+  deck instead shows delivery stock directly. (Since 2026-09-26 the deck
+  shows the dock's OWN stock.)
 - 2026-09-08 **Real Placement, ticket 1 (sim).** `World::new` builds an
   empty grid; `Place`/`Remove`/`Rotate` do everything else, and
   `sim::reference_chain` rebuilds the shipped line from real commands as
@@ -1313,7 +1339,8 @@ See [WORKFLOW.md](WORKFLOW.md).
 - 2026-09-08 **Delivery dock, ticket 1 (sim).** The dock is a
   pass-through: it empties into `Economy`'s shared pool every tick rather
   than holding stock, so what's "on the dock" is always one number in one
-  place. `CollectOutput` is removed — a supplied factory earns money with
+  place. **Superseded 2026-09-26:** each dock holds its own stock.
+  `CollectOutput` is removed — a supplied factory earns money with
   no player action.
 - 2026-09-08 **Contracts, ticket 2 (clipboard).** One board, one paper
   docket per contract, money and the shared delivery pool shown once above

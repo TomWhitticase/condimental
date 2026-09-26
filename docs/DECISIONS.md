@@ -25,6 +25,72 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-26: **Each dock holds its own stock; contracts draw on the docks
+  together.** (Owner's report, approved as a plan.)
+
+  **What happened.** The owner reported that "docks are sort of all linked
+  to each other": a payout threw coins over every dock, and a case arriving
+  at one dock popped a case on every dock. They also asked for a hover grid
+  of each dock's occupied and free places, and a floating "!" over a dock
+  that is completely full.
+
+  **Why it was not an animation bug.** Both symptoms were the recorded
+  design working as written. Since 2026-09-08 a dock was a pass-through
+  into `Economy::delivery_buffer`, one shared pool (48 per item since
+  2026-09-16), and a dock's own buffer read empty between ticks. With only
+  one number in the world there was no per-dock fact to draw, so
+  `_burst_coins` and `_update_dock_pop` looped every dock on purpose. The
+  grid and the "!" had nothing to show either. Fixing the presentation
+  alone would have meant Godot inventing which dock "paid", which is
+  gameplay logic in GDScript.
+
+  **The options.** (1) Keep the pool and attribute each unit to the dock it
+  came in by, as a tag. That keeps two bookkeeping systems for one fact,
+  and the pool's per-item cap still would not give a dock a "full" of its
+  own. (2) Move the stock onto each dock, and have contracts settle against
+  the docks summed. That is chosen. It deletes the pool, the per-item cap,
+  `Economy::deposit`/`has_delivery_room` and `Dock::ship_into`, and every
+  per-dock fact the owner asked for falls out as a snapshot field.
+
+  **The shape.**
+  - A dock holds `DOCK_CAPACITY` = 32 places, one case each. That is a
+    total, because the hover grid is places, and a player reads "full" as
+    no room on the deck.
+  - The 2026-09-16 pool was capped per item because a total could deadlock
+    with no valve. Now the valve is removing the dock, whose stock is
+    destroyed by the ordinary `Remove` rule. The clog is also local: the
+    other docks keep taking.
+  - 32 is pinned as a relationship (at least 1.5x the largest single mix;
+    1.6x today) by `tests/dock.rs`.
+  - Settlement walks the docks able to ship this tick, in topology order,
+    so the split is deterministic and nothing is credited twice. A dock
+    that is mothballed or was refused crew does not ship, which keeps
+    "held · short of logistics staff" true.
+  - `Paid` names the contributors. `last_paid_tick` is persisted rather
+    than derived, because a save/load lockstep test showed a reloaded world
+    diverging in its snapshot.
+  - **A dock claims its logistics crew only while it holds something an
+    active contract orders** (`Economy::wanted`, `World::tick` step 6). The
+    first cut claimed on every tick a dock held anything. The review of
+    PR #182 measured what that did to the BBQ branch on the starting crew of
+    one logistics head: the first dock in topology order held the head on
+    every tick, and the other dock read `understaffed` for 40 000 of
+    40 000 ticks with 32 cases unsold. On the old pool a dock asked for
+    crew only on the tick a box passed through, so two docks shared one
+    head without anyone designing it. Claiming only for ordered stock gives
+    the work to the dock whose stock is wanted, keeps a clog of an unordered
+    product from holding a head, and makes "the clog is local" true for
+    crew as well as for places. A dock holding only unordered goods asks
+    for nobody and does not read `understaffed`. Two docks both holding
+    ordered stock need two heads, which is what the establishment
+    (`required`) has always said they need. `tests/bbq_branch.rs`'s
+    `two_docks_share_the_starting_logistics_crew` pins it.
+
+  **Cost.** The save schema goes 2 → 3, and v2 saves are rejected per
+  `save.rs`'s no-migration policy (pre-alpha). The clipboard's per-item
+  meters now read against the docks' total places. That is a slightly
+  looser figure than a per-item cap, but it is the true ceiling.
+
 - 2026-09-26: **At most one RAW fluid may enter a machine kind, and at most
   one recipe on that kind may drink it.** (MUSTARD epic, ticket M1.)
 
