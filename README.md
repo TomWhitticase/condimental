@@ -7,6 +7,7 @@ making sauce — tomatoes and sugar in one end, boxed ketchup and boxed BBQ out 
 loading dock at the other, against standing orders that pay you for keeping them fed.
 
 [![status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange)](docs/DEVLOG.md)
+[![licence: GPL-3.0](https://img.shields.io/badge/licence-GPL--3.0-blue)](LICENSE)
 [![sim: Rust](https://img.shields.io/badge/simulation-Rust-b7410e)](sim_core/)
 [![engine: Godot 4.6](https://img.shields.io/badge/engine-Godot%204.6-478cbf)](godot_project/)
 [![art: voxel](https://img.shields.io/badge/art-code--generated%20voxels-8a9a5b)](assets/voxels/)
@@ -391,16 +392,32 @@ The current open backlog is [GitHub issues](https://github.com/TomWhitticase/con
 
 ## Releases
 
-None yet. CONDIMENTAL is **pre-alpha** — the core loop closes and it is genuinely
-playable, but there is no packaged build, no balance pass on any of the placeholder
-numbers, and save files are rejected rather than migrated when the schema moves. Build
-from source as above.
+None yet. CONDIMENTAL is heading for an **alpha** release — the core loop closes and
+it is genuinely playable, but there is no packaged build yet, no balance pass on any of
+the placeholder numbers, and save files are rejected rather than migrated when the
+schema moves. Build from source as above.
 
-Tagged builds are planned for the platform-polish milestone, at which point the
+The plan is two ways to play the same game: **free**, by building it from this
+repository (always), and a small price on **Steam** for anyone who would rather have a
+one-click install with updates — buying it there is how you support development. The
 Conventional Commit history becomes the release notes.
+
+## Licence
+
+CONDIMENTAL's source code is free software under the
+[GNU General Public License v3](LICENSE) (`GPL-3.0-only`): build it, play it, change
+it and share it, and any version you distribute stays open source too. The
+**name and brand** are not part of that grant — a fork you publish needs its own name;
+[TRADEMARKS.md](TRADEMARKS.md) says what is and is not fine. Third-party software the
+game is built on, and its licences, is listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Found a bug? [Open an issue](https://github.com/TomWhitticase/condimental/issues/new/choose).
+A security problem goes through [SECURITY.md](SECURITY.md) instead, and everyone taking
+part follows the [code of conduct](CODE_OF_CONDUCT.md).
 
 ---
 
 <div align="center">
-<sub>Pre-alpha · private repository · no licence granted yet</sub>
+<sub>Pre-alpha · <a href="LICENSE">GPL-3.0</a> · the name and brand are reserved (<a href="TRADEMARKS.md">TRADEMARKS.md</a>)</sub>
 </div>

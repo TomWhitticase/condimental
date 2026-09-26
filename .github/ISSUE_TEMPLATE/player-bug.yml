@@ -1,0 +1,58 @@
+name: Problem playing the game
+description: Something went wrong while playing — a crash, a stuck factory, a save that won't load, something that looks broken.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. The more of this you can fill in, the faster it gets fixed.
+        If it is a **security** problem, please do not use this form — see SECURITY.md.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      description: The steps, as exactly as you can. "Place a mixer facing a belt, then…"
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Game version
+      description: The release you downloaded (e.g. v0.1.0). If you built from source, the commit (`git rev-parse --short HEAD`).
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: Where did you get the game?
+      options:
+        - Steam
+        - A GitHub release download
+        - Built it myself from source
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Steam Deck
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, and the save file if the problem is in a particular factory (drag the file in — the game prints where saves live when it starts).
+    validations:
+      required: false

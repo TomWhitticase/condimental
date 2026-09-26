@@ -86,6 +86,17 @@ decisions log), never incidentally.
 | Godot `.vox` importer | [qbradq/Godot-MagicaVoxel-Importer-with-Extensions](https://github.com/qbradq/Godot-MagicaVoxel-Importer-with-Extensions) v1.2, commit `288f1d8`, vendored under `godot_project/addons/` |
 | `vengi` (dev tool only) | 0.5.0 |
 
+### 1b. Licence
+
+The project is **`GPL-3.0-only`** (`LICENSE`), and the name and brand are
+reserved separately (`TRADEMARKS.md`): the source is free to build and play,
+and the paid Steam release is a convenience, not a different game. Every
+dependency linked into a build must carry a GPL-3.0-compatible licence —
+`deny.toml` is the allow-list, `cargo deny check licenses` in
+`.github/workflows/audit.yml` enforces it, and `THIRD_PARTY_NOTICES.md` is
+what a distributed build ships. Record: `docs/DECISIONS.md`, 2026-09-26,
+"CONDIMENTAL is GPL-3.0-only".
+
 ---
 
 ## 2. High-level architecture

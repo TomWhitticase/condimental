@@ -18,6 +18,22 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-26 **CONDIMENTAL is GPL-3.0-only; the name and brand are
+  reserved.** The code is licensed `GPL-3.0-only` (`LICENSE`, and `license =`
+  in every workspace `Cargo.toml`). The name "CONDIMENTAL", its logo and the
+  official store art are **not** under that grant — `TRADEMARKS.md` says a
+  distributed fork must be renamed. Distribution is two routes to the same
+  game: free by building from source, and a small price on Steam for the
+  packaged build. Every crate linked into a build must carry a licence on
+  `deny.toml`'s allow-list (all GPL-3.0-compatible); `cargo deny check
+  licenses` in `.github/workflows/audit.yml` refuses anything else, and
+  widening the list is a licensing decision, not a build fix. A distributed
+  build ships `LICENSE` and `THIRD_PARTY_NOTICES.md` (Godot's own
+  `COPYRIGHT.txt` included). Contributions are inbound = outbound under the
+  same licence (`CONTRIBUTING.md`). Binds `LICENSE`, `TRADEMARKS.md`,
+  `THIRD_PARTY_NOTICES.md`, `deny.toml`, `docs/ARCHITECTURE.md` §1b. Full
+  record in `docs/DECISIONS.md`.
+
 - 2026-09-26 **A spend that would leave the next payday unpayable is
   confirmed, not refused, and the simulation is what decides.** Every route
   that spends money — the build menu's buy (and the number keys), a market

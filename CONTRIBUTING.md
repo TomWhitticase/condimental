@@ -60,8 +60,12 @@ git switch -c fix/belt-corner-arc
 git push -u origin HEAD
 gh pr create --fill
 gh pr checks --watch
-gh pr merge --squash --delete-branch
+gh pr merge --squash --delete-branch   # only after a VERDICT: APPROVED review
 ```
+
+**No pull request merges before it is reviewed**: green checks *and* a comment
+review whose first line is `VERDICT: APPROVED`, from someone (or a session) that
+did not write the branch — the `review` skill in `.claude/skills/` is how.
 
 A `pre-push` hook (same `.githooks` setup as below) refuses a push to `main`
 and prints those steps. `.github/pull_request_template.md` sets out what a PR
@@ -101,3 +105,12 @@ commits can be run through a changelog generator (e.g.
 [git-cliff](https://git-cliff.org/) or `conventional-changelog`) to produce
 release notes automatically. That only works if the history is clean from the
 start.
+
+## Licence of contributions
+
+CONDIMENTAL is licensed under the [GNU GPL v3](LICENSE) (`GPL-3.0-only`). By
+opening a pull request you agree that your contribution is licensed under the
+same terms (inbound = outbound), and that you have the right to contribute it.
+Do not add a dependency whose licence is not on `deny.toml`'s allow-list — CI
+refuses it, and widening that list is a licensing decision, not a build fix.
+The CONDIMENTAL name and brand are reserved; see [TRADEMARKS.md](TRADEMARKS.md).
