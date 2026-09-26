@@ -6434,8 +6434,11 @@ func _build_contract_checklist_row(body: VBoxContainer, item_id: String, require
 ## factory UI, and it also has to stay legible while floating over a lit 3D
 ## scene, which is exactly what that dark plate exists for.
 func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	# Opaque, unlike the other modal plates' 0.94: this panel's heading row
+	# (search box, balance) sits over the contract clipboard's cream paper, and
+	# at 0.94 the clipboard's text read through under the Money figure.
 	var panel_style := StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.06, 0.06, 0.07, 0.94)
+	panel_style.bg_color = Color(0.06, 0.06, 0.07, 1.0)
 	panel_style.border_color = Color(0.85, 0.63, 0.11, 0.95)
 	panel_style.border_width_top = _ui_i(4)
 	panel_style.border_width_left = _ui_i(2)
@@ -6614,11 +6617,13 @@ func _build_shop_section(id: String, title: String, note: String) -> void:
 ## The grid a category's slots go in. The fallback — the last section, or a
 ## bare grid when the snapshot carried no categories at all — is for a stale
 ## wire only: the loader refuses a `data/shop.ron` entry whose category the
-## file does not define, so a live snapshot never reaches it.
+## file does not define, so a live snapshot never reaches it. It says so
+## loudly rather than quietly filing the kind under the wrong heading.
 func _shop_grid_for(category: String) -> GridContainer:
 	for section in _shop_section_list:
 		if section["id"] == category:
 			return section["grid"]
+	push_error("shop entry names category '%s', which the snapshot does not define — filed under the last section" % category)
 	if _shop_section_list.is_empty():
 		_build_shop_section("", "", "")
 	return _shop_section_list[-1]["grid"]
@@ -6783,7 +6788,7 @@ func _position_shop_menu() -> void:
 	var vp := get_viewport()
 	if vp == null:
 		return
-	var reserved := _hotbar_reserved_height()
+	var reserved := _shop_reserved_height()
 	var bounds := vp.get_visible_rect().size
 	# Each section's grid is fitted on its own, with every other grid first
 	# folded to one column: the panel is as wide as its widest grid, so a
@@ -6794,11 +6799,66 @@ func _position_shop_menu() -> void:
 	for section in _shop_section_list:
 		var grid: GridContainer = section["grid"]
 		_fit_grid_columns(_shop_menu, grid, _visible_children(grid), SHOP_SLOT_COLUMNS)
-	_fit_grid_scroll(_shop_grid_scroll, _shop_sections, bounds.y - reserved - _ui_px(16.0))
+	var fitted := _fit_grid_scroll(_shop_grid_scroll, _shop_sections, bounds.y - reserved - _ui_px(16.0))
+	var snapped := _shop_rows_height(fitted)
+	if snapped > 0.0:
+		_shop_grid_scroll.custom_minimum_size.y = snapped
 	_shop_menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
 	var menu_size := _shop_menu.get_combined_minimum_size()
 	_shop_menu.position.x = maxf(0.0, (bounds.x - menu_size.x) * 0.5)
 	_shop_menu.position.y = max(8.0, (bounds.y - reserved - menu_size.y) * 0.5)
+
+
+## How much of the bottom of the screen the build menu must keep clear: the
+## hotbar's PLATE and the gap under it, not the whole strip. The strip's
+## column also holds the name flyout above the plate, and every other panel
+## reserves that too — but the flyout only fires on a placement, and placing
+## from the menu closes the menu (`_enter_build_mode`), so the two are never
+## up together. Reserving it cost the menu ~46px at 1600x900, which is what
+## cut the Production row through its last line. Falls back to the whole
+## strip's estimate before the plate has laid out (a headless run).
+func _shop_reserved_height() -> float:
+	var vp := get_viewport()
+	if vp == null or _hotbar_panel == null or _hotbar_panel.size.y <= 0.0:
+		return _hotbar_reserved_height()
+	var bounds := vp.get_visible_rect().size
+	return bounds.y - _hotbar_panel.get_global_rect().position.y + HOTBAR_BOTTOM_MARGIN
+
+
+## The tallest height not greater than `cap` at which the build menu's scroll
+## can end on an EDGE: after a whole line of cards, or after a section's
+## heading. A card cut through its "Owned" line reads as a rendering fault,
+## where a whole heading with nothing under it yet says "more below" — at
+## 1600x900 it is the Shipping & Storage heading, and the dock, that the cut
+## lands on. 0 when not even the first heading fits.
+func _shop_rows_height(cap: float) -> float:
+	var separation := float(_shop_sections.get_theme_constant("separation"))
+	var used := 0.0
+	var fitted := 0.0
+	var first := true
+	for section in _shop_section_list:
+		var column: Control = section["section"]
+		if not column.visible:
+			continue
+		if not first:
+			used += separation
+		first = false
+		var inner := float(column.get_theme_constant("separation"))
+		var header: Control = column.get_node("Header")
+		used += header.get_combined_minimum_size().y
+		if used > cap:
+			return fitted
+		fitted = used
+		var grid: GridContainer = section["grid"]
+		var rows_height := _whole_grid_rows_height(grid, cap - used - inner)
+		var full := grid.get_combined_minimum_size().y
+		if rows_height > cap - used - inner:
+			return fitted
+		fitted = used + inner + rows_height
+		if rows_height < full:
+			return fitted
+		used += inner + full
+	return fitted
 
 
 ## Gives `grid` as much of `available` as its panel's own chrome leaves it,
@@ -6839,11 +6899,10 @@ func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float, 
 	# `snap_rows` moves the cut down to the last whole row, and it costs height
 	# to buy a tidy edge, so it is for a stack whose rows are DECISIONS the
 	# player signs — an offer on the board, a hire — where half a card is half
-	# a choice (see `_whole_rows_height`). The build menu does NOT ask for it:
-	# its grid wraps six icon slots to a line, so a "row" there is a line of
-	# cards that are all the same height anyway, and the half-row it shows past
-	# the cap is the thing that says "scroll". Neither does the production
-	# panel, for the same reason: its rows are readouts.
+	# a choice (see `_whole_rows_height`). The build menu snaps too, but on
+	# its own edges — a line of cards OR a section's heading — which a
+	# stack of headed grids needs and this does not know (`_shop_rows_height`).
+	# The production panel does not snap: its rows are readouts.
 	if snap_rows:
 		cap = _whole_rows_height(grid, cap)
 	# Both floors above — `_ui_px(110)` and a whole row — may exceed what the

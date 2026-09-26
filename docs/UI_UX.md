@@ -729,7 +729,15 @@ fit would cramp the one screen whose job is reading them. So the sections
 scroll, and the **search box sits in the heading row, outside the scroll**.
 It filters by display name, case-insensitively, hides a section left empty,
 and is cleared when the menu closes. It is not focused when the menu opens,
-so E, ESC and the digits keep working.
+so E, ESC and the digits keep working; focused, it takes every key, and ESC
+releases it before a second ESC closes the menu (`test_shop_search.gd` pushes
+real key events to pin that). The menu's plate is **opaque** — its heading
+row sits over the contract clipboard's cream paper, and at the other modals'
+0.94 the clipboard's text read through under the balance. The scroll is cut
+on an **edge**, after a whole line of cards or a section's heading, never
+through a card, and the menu clears only the hotbar's plate rather than the
+whole strip: the strip's name flyout fires on a placement, and placing closes
+the menu. At 1600x900 that shows Logistics and Production whole.
 
 **Width yields too, and before it is clipped** (2026-09-20, issue #62).
 Height had yielded since this section was written; width had not, so at
