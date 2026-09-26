@@ -312,6 +312,24 @@ func _run_checks() -> void:
 		var warned: bool = row["last_cycle"].label_settings.font_color == main.METER_FILL_WARN
 		if warned != bool(line.get("short", false)):
 			_fail("%s's last-cycle figure is %scoloured as short, the wire says short=%s" % [line["id"], "" if warned else "not ", str(line.get("short"))])
+	# The settled line is never short, so the check above only ever compares
+	# false with false. Drive the live block through a short line and back:
+	# the warn colour AND the staff panel's short border go on, then come off.
+	if not lines.is_empty():
+		var real_snapshot: Dictionary = main._production_snapshot
+		for short in [true, false]:
+			var forced: Dictionary = real_snapshot.duplicate(true)
+			forced["cycle"]["lines"][0]["short"] = short
+			main._production_snapshot = forced
+			main._update_production_cycle_block()
+			var row: Dictionary = main._production_cycle_rows[0]
+			var colour: Color = row["last_cycle"].label_settings.font_color
+			if (colour == main.METER_FILL_WARN) != short:
+				_fail("a %s line's LAST CYCLE is coloured %s" % ["short" if short else "covered", str(colour)])
+			if row["panel"].get_theme_stylebox("panel") != main._staff_row_style(short):
+				_fail("a %s line's row does not wear the staff panel's %s border" % ["short" if short else "covered", "short" if short else "plain"])
+		main._production_snapshot = real_snapshot
+		main._update_production_cycle_block()
 	if main._production_cycle_empty_label.visible:
 		_fail("a running contract shows its rows, not the no-orders sentence")
 	if main._production_cycle_caption.text.find("PAY CYCLE") < 0 or main._production_cycle_caption.text.find("payday in") < 0:

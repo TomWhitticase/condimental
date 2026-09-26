@@ -9,7 +9,9 @@
 
 mod common;
 
-use sim_core::sim::{PlayerCommand, RecipeRegistry, World, reference_chain_with_budget};
+use sim_core::sim::{
+    PlayerCommand, RecipeRegistry, World, bbq_branch, reference_chain_with_budget,
+};
 
 fn recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
@@ -65,7 +67,12 @@ fn a_payday_rolls_this_cycle_into_last_and_required_is_the_contracts_summed() {
     let mut total_at_close = 0u64;
     let mut closes = 0;
     let mut made_any = false;
-    while closes < 3 {
+    // Bounded, so a payday that stops closing the cycle fails by name
+    // rather than hanging the test binary.
+    for _ in 0..period * 4 {
+        if closes == 3 {
+            break;
+        }
         common::supply(&mut world);
         let before = world.production().cycles_closed();
         world.tick();
@@ -89,6 +96,12 @@ fn a_payday_rolls_this_cycle_into_last_and_required_is_the_contracts_summed() {
         made_any |= total > total_at_close;
         total_at_close = total;
     }
+    assert_eq!(
+        closes,
+        3,
+        "three paydays in {} ticks closed only {closes} cycles",
+        period * 4
+    );
     assert!(
         made_any,
         "the line never boxed anything — the test proved nothing"
@@ -114,6 +127,46 @@ fn a_payday_rolls_this_cycle_into_last_and_required_is_the_contracts_summed() {
     assert_eq!(
         line.produced_last_cycle,
         world.production().produced_last_cycle(PRODUCT)
+    );
+}
+
+/// `corner_shop`'s cadence equals the pay period, so its line cannot tell a
+/// scaled mix from a raw one. `smokehouse_trial` orders on a different
+/// cadence: its REQUIRED is the mix times period over cadence, not the mix.
+#[test]
+fn required_scales_a_mix_whose_cadence_is_not_the_period() {
+    // The BBQ branch built is what unlocks the smokehouse's order.
+    let mut world = bbq_branch(recipes(), 20_000);
+    world.issue_command(PlayerCommand::SignContract {
+        id: "smokehouse_trial".to_string(),
+    });
+    let contract = world
+        .economy_snapshot()
+        .contracts
+        .into_iter()
+        .find(|c| c.id == "smokehouse_trial")
+        .expect("smokehouse_trial signs");
+    let period = world.staff().catalog().pay_period_ticks();
+    assert_ne!(
+        contract.cadence_ticks, period,
+        "the case needs a cadence that is not the period"
+    );
+    let snap = world.production_snapshot().cycle;
+    let line = snap
+        .lines
+        .iter()
+        .find(|l| l.id == "boxed_bbq")
+        .expect("a signed contract's product gets a cycle line");
+    let expected = expected_required(&world, "boxed_bbq", period);
+    let raw: u32 = contract.mix.iter().map(|(_, qty)| *qty).sum();
+    assert!(
+        (expected - f64::from(raw)).abs() > 1e-3,
+        "the scaled and raw figures must differ"
+    );
+    assert!(
+        (line.required - expected).abs() < 1e-3,
+        "required {} is not the mix scaled to the period ({expected})",
+        line.required
     );
 }
 

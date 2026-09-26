@@ -245,6 +245,19 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-26 — The P screen weighs output against the pay cycle's orders
+
+The production screen (P) opens on a pay-cycle block: one row per product an
+active contract orders, with REQUIRED per payday period (each mix scaled by
+period over cadence), MADE THIS CYCLE and LAST CYCLE. A finished cycle that
+fell short of the orders running now takes the staff panel's short border
+and prints `▲ short` in the warning colour. The cycle is the staff payday,
+not a new clock; `ProductionLedger` rolls this cycle into last on the payday
+tick. **Save schema 4:** those counts cannot be re-derived, so a v3 save is
+refused by number rather than migrated (re-run `make-demo-saves.sh`). Review
+caught two Godot checks that could never fail and a test loop that hung
+instead of failing; both now go red under the mutation they guard (PR #193).
+
 ### 2026-09-26 — Open-source licence and alpha-release groundwork
 
 CONDIMENTAL has a licence: **GPL-3.0-only** plus a §7 linking exception for
