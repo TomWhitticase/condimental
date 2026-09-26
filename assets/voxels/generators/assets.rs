@@ -407,13 +407,6 @@ pub const ASSETS: &[Asset] = &[
         name: "item_ketchup_pail",
         build: item_ketchup_pail,
     },
-    // The mustard line's one bulk solid. A fourth pail livery and the first
-    // with matte contents — `item_meal_pail` records why milled seed is not
-    // a liquid.
-    Asset {
-        name: "item_meal_pail",
-        build: item_meal_pail,
-    },
     Asset {
         name: "item_bottle",
         build: item_bottle,
@@ -2001,12 +1994,11 @@ pub fn item_mustard_seed(p: &Palette) -> VoxModel {
 /// hazard yellow) and by SHAPE instead: a cut face on a knobbly root 18px
 /// across is not signage whatever its hue, because signage in this game is a
 /// large flat straight-edged panel on a machine. **Not by area** — the cut is
-/// a seventh of the root by volume, but the repaint below puts it on exactly
-/// the faces this camera sees, so in a play-zoom frame it is over HALF the
-/// root's visible pixels (100 of 186); the argument has to survive that, and
-/// it does. The
-/// dark skin also buys the cut face 42.6/255 of local contrast, which is more
-/// than any yellow-on-yellow arrangement could.
+/// about a sixth of the root by volume, but the repaint below puts it on
+/// exactly the faces this camera sees, so a play-zoom frame shows far more of
+/// it than that ratio suggests; the argument has to survive that, and it
+/// does. The dark skin also buys the cut face 42.6/255 of local contrast,
+/// which is more than any yellow-on-yellow arrangement could.
 ///
 /// Ellipsoids and short cylinders rather than one straight shape, because
 /// straightness is what identifies `item_liquid_smoke`'s drum in the same
@@ -2108,31 +2100,6 @@ pub fn item_ketchup_pail(p: &Palette) -> VoxModel {
     pail(p, "paint_red", "liquid_ketchup", "steel_light")
 }
 
-/// Crushed mustard meal, on the belt between the mustard crusher and the
-/// mustard mixer — the third sauce's one solid intermediate.
-///
-/// **A fourth livery, and the first pail whose contents are NOT a liquid.**
-/// What a crusher does to mustard seed is mill it, so `meal_flour` is
-/// `matte` where the three stages above are `liquid`: giving a dry powder
-/// that gloss would read as sauce standing in a bin, which is the rule
-/// `palette.ron`'s `bulk_pale` already writes down for the hopper. It is
-/// also the answer to whether the mustard chain needs a `liquid_*` palette
-/// entry — it does not. The two fluids it has (`mustard_mix`, `mustard`)
-/// never ride a belt, so like `bbq_mix` and `bbq` they are `fluid_pale`
-/// tinted per fluid in `main.gd`, and the one thing that does ride a belt in
-/// bulk is this flour.
-///
-/// The body is `tote_grey`, the darkest of the four pail bodies, for that
-/// colour's own recorded reason: the fill is the only part of an open pail
-/// that carries meaning, and against this body it is the brightest thing on
-/// the item by 104/255 of luma. That inversion is also the whole difference
-/// from the ketchup line at play zoom — a pale fill in a dark pail, against
-/// three dark fills in pale ones — which is `item_bottle_bbq`'s
-/// separate-by-VALUE argument applied to the bulk stages.
-pub fn item_meal_pail(p: &Palette) -> VoxModel {
-    pail(p, "tote_grey", "meal_flour", "brass")
-}
-
 /// A food-grade pail with a bail handle, holding a visible body of liquid.
 ///
 /// Order matters throughout, and the carve is the whole trick: the walls are
@@ -2142,13 +2109,14 @@ pub fn item_meal_pail(p: &Palette) -> VoxModel {
 /// it is a cavity at all.
 ///
 /// **`contents` names the class as well as the colour, and both readings are
-/// deliberate.** The three ketchup stages above pass a `liquid`-class colour
+/// deliberate.** All three callers above pass a `liquid`-class colour
 /// because the gloss is what says a pail of paste is wet (see their own
-/// note); [`item_meal_pail`] passes a `matte` one because crushed mustard is
-/// a flour and the same gloss on it would read as sauce in a bin
-/// (`palette.ron`'s `bulk_pale` records that rule). So this helper does not
-/// police the class — `a_pail_s_contents_take_the_class_of_the_substance`
-/// does, per caller, which is the only place the answer can be right.
+/// note) — but that is a fact about those three substances, not about this
+/// helper. A dry solid in a pail would have to pass a `matte` colour, since
+/// the same gloss on a flour would read as sauce in a bin (`palette.ron`'s
+/// `bulk_pale` records that rule). So this helper does not police the class
+/// — `a_pail_s_contents_take_the_class_of_the_substance` does, per caller,
+/// which is the only place the answer can be right.
 fn pail(p: &Palette, body: &str, contents: &str, handle: &str) -> VoxModel {
     let mut m = item_volume();
     // Walls and base, then hollowed from the inside so the pail has a real
@@ -7841,11 +7809,10 @@ mod tests {
     ///
     /// The third leg is a VOLUME ratio and says so. It is not the frame's
     /// area fraction: the repaint puts the cut on exactly the faces this
-    /// camera sees, so in a play-zoom frame the cut is 100 of the root's 186
-    /// visible pixels — over half of it. What keeps that off the
-    /// hazard-marking reading is the root's small organic shape, not its
-    /// share of the picture — `palette.ron`'s `turmeric_orange` entry
-    /// carries that argument.
+    /// camera sees, so a play-zoom frame shows far more of the cut than a
+    /// sixth of the root. What keeps that off the hazard-marking reading is
+    /// the root's small organic shape, not its share of the picture —
+    /// `palette.ron`'s `turmeric_orange` entry carries that argument.
     #[test]
     fn the_turmeric_root_shows_its_cut_faces_to_both_cameras() {
         let p = palette();
@@ -7893,19 +7860,25 @@ mod tests {
     }
 
     /// **A pail's contents take the class of the SUBSTANCE, not of the
-    /// pail.** The `liquid` class is a gloss that says "this is wet", so the
-    /// three ketchup stages have it and `item_meal_pail` must not: milled
-    /// mustard seed is a flour, and `palette.ron`'s `bulk_pale` already
-    /// records that the same gloss on a dry solid reads as sauce in a tank
-    /// rather than product in a bin.
+    /// pail.** The `liquid` class is a gloss that says "this is wet", and
+    /// all three pails in the game earn it: tomato paste, mixed paste and
+    /// finished ketchup are wet. The other half of the rule is in
+    /// `palette.ron`'s `bulk_pale` — the same gloss on a dry solid reads as
+    /// sauce in a tank rather than product in a bin — so a pail of flour,
+    /// which [`pail`] is perfectly able to draw, would have to pass a
+    /// `matte` colour.
     ///
-    /// This is the test [`pail`] defers to. Its contract used to be
-    /// "`contents` is a `liquid` colour", which a fourth caller made wrong;
-    /// the check belongs per-caller, where each one can be right for its own
-    /// reason. It also pins the answer to whether the mustard chain needs a
-    /// `liquid_*` entry of its own — it does not, because the only bulk
-    /// mustard that ever rides a belt is this flour, and the fluids are
-    /// tinted `fluid_pale` in a pipe like every other one.
+    /// This is the test [`pail`] defers to, and it is per-CALLER on purpose.
+    /// The contract used to live in the helper as "`contents` is a `liquid`
+    /// colour", which is a claim about the drawing code when the truth is a
+    /// claim about each substance; asserted here, a fourth pail has to say
+    /// what is in it and why that is wet or dry.
+    ///
+    /// The mustard branch is the case that forced the distinction and then
+    /// added no pail at all: its crusher mills the seed WET into a fluid, so
+    /// every bulk mustard stage stands in a pipe as `fluid_pale` tinted by
+    /// `main.gd`, and nothing between the seed tote and the bottle rides a
+    /// belt.
     #[test]
     fn a_pail_s_contents_take_the_class_of_the_substance() {
         let p = palette();
@@ -7927,12 +7900,6 @@ mod tests {
                 item_ketchup_pail(&p),
                 "liquid_ketchup",
                 MaterialClass::Liquid,
-            ),
-            (
-                "item_meal_pail",
-                item_meal_pail(&p),
-                "meal_flour",
-                MaterialClass::Matte,
             ),
         ] {
             let contents = p.idx(colour);
@@ -7974,7 +7941,7 @@ mod tests {
     /// and 31.6 from the body, so both clear the 26/255 anchor and the bottle
     /// still loses its top. What fails is the top taken TOGETHER. At the
     /// ~16px an item draws on a belt the three-voxel neck and the two-voxel
-    /// cap are one mark of about five pixels, and their area-weighted value
+    /// cap are one mark of about five pixels, and their voxel-weighted value
     /// is what the eye compares with the body: 213.9 against a 192.7 body,
     /// 21.2 apart. `label_mustard` puts that mark at 111.1 — 81.6 from the
     /// body — and the silhouette keeps its top.
@@ -8012,7 +7979,7 @@ mod tests {
                 (luma(cap) - luma(body)).abs()
             );
             // The leg that bites: neck and cap as the one mark they are at
-            // item size, area-weighted over the voxels each contributes,
+            // item size, voxel-weighted over the voxels each contributes,
             // against the body colour that fills the rest of the silhouette.
             let neck_z = model
                 .voxels

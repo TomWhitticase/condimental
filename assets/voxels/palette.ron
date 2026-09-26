@@ -416,11 +416,14 @@
         // from BOTH, and a case is the smallest thing on the belt.
         // Matte, for exactly `bbq_brown`'s reason: mustard is only ever seen
         // through a bottle's glass or printed on a carton. Nothing carries
-        // it in an open pail — what the crusher fills a pail with is
-        // `meal_flour` below, a dry solid — and the fluid standing in a pipe
-        // stays `fluid_pale` tinted by `main.gd`'s FLUID_TINTS, whose
-        // mustard entry should be derived from this number (0.863, 0.776,
-        // 0.235), the rule `vinegar_amber` states.
+        // it in an open pail — the crusher mills the seed WET, so every
+        // bulk stage of this branch stands in a pipe rather than on a belt
+        // — and the fluid standing in a pipe stays `fluid_pale` tinted by
+        // `main.gd`'s FLUID_TINTS, whose mustard entry should be derived
+        // from this number (0.863, 0.776, 0.235), the rule `vinegar_amber`
+        // states. That wet mill is also why this branch adds no `liquid_*`
+        // entry of its own: those exist for product a PAIL carries down a
+        // belt, and mustard never puts any on one.
         (name: "mustard_gold",    rgb: "#DCC63C", class: "matte"),
         // The mustard bottle's label band AND its cap, where ketchup's are
         // `label_cream`/`cap_white` and BBQ's are `label_kraft`/`cap_white`.
@@ -444,29 +447,15 @@
         // `seed_tan` is bulk mustard seed heaped in its tote: a dull
         // olive-gold, deliberately the DARKEST member of the mustard family
         // and 61.8 under the sauce it becomes, so the line reads dull seed
-        // -> pale meal -> bright sauce end to end, the way
+        // -> bright sauce from end to end, with nothing between them in
+        // this palette because the crusher mills the seed wet and the
+        // middle of the chain is a tinted fluid in a pipe — the way
         // `liquid_paste`/`liquid_mix`/`liquid_ketchup` read darkening the
         // other. The number was set against the STEEL it sits in (31.0
         // under `steel`, 72.2 under the `steel_light` rim), not against the
         // market row: a heap inside a bright tote is the adjacency that can
         // swallow it.
         (name: "seed_tan",        rgb: "#A18234", class: "matte"),
-        // Crushed mustard meal, standing in the pail the crusher fills, and
-        // the one palette judgement this ticket had to make: it is MATTE.
-        // The three `liquid_*` entries above exist because a pail of tomato
-        // paste is a wet surface; de-hulled crushed mustard is a flour, and
-        // `bulk_pale` already writes the rule down — the liquid class's
-        // gloss on a dry solid "would read as sauce in a tank rather than
-        // product in a bin". So the mustard chain adds no `liquid_*` entry
-        // at all, and `item_meal_pail` is the first pail in the game whose
-        // contents are matte.
-        // Pale, for the readout `tote_grey` argues for: the fill is the only
-        // thing in a pail's opening that carries meaning, and at 104.0 over
-        // that body it is by a long way the brightest thing in it. 29.4 over
-        // `mustard_gold` as well, because a meal pail and a case of finished
-        // bottles can stand on the same floor, and "half made" has to look
-        // different from "finished".
-        (name: "meal_flour",      rgb: "#EDDFAA", class: "matte"),
         // Turmeric's cut flesh — the one raw whose own colour IS the reason
         // it is in the recipe, and the one number here that **cannot** clear
         // 26 of luma from both of its neighbours, because no number can:
@@ -482,17 +471,18 @@
         // The other half is SHAPE, and it is worth being exact about what it
         // is NOT. The rhizome's mass is `cardboard_dark` skin, 42.6 under
         // this, which buys the cut face local contrast no yellow-on-yellow
-        // arrangement could. By VOLUME the cut is a seventh of the root (28
-        // voxels against 153 of skin) — but `item_turmeric` repaints the cut
-        // onto exactly the faces the game's camera sees, so in a play-zoom
-        // frame it is 100 of the root's 186 visible pixels, over HALF of it
-        // (measured off `--item-gallery --no-hud` as an exact difference
-        // against an empty-belt frame). So the argument is not "a little of
-        // it": what keeps this off the hazard reading is that it is a
-        // knobbly organic lump 18px across, where signage in this game is a
-        // large flat straight-edged panel on a machine. A flat plate of this
-        // colour is the one that would read as a marking, whatever fraction
-        // of the frame it took.
+        // arrangement could. By VOLUME the cut is about a sixth of the root
+        // (28 voxels against 153 of skin) — but `item_turmeric` repaints the
+        // cut onto exactly the faces the game's camera sees, so a play-zoom
+        // frame shows far more of it than that ratio suggests. No figure is
+        // quoted for how much more: the share moves with how the mask treats
+        // the contact shadow, and this file does not rest an argument on a
+        // number that depends on the mask rule. So the argument is not about
+        // how much of it there is: what keeps this off the hazard reading
+        // is that it is a knobbly organic lump 18px across, where signage
+        // in this game is a large flat straight-edged panel on a machine. A
+        // flat plate of this colour is the one that would read as a
+        // marking, whatever fraction of the frame it took.
         (name: "turmeric_orange", rgb: "#E3821A", class: "matte"),
     ],
 )
