@@ -416,7 +416,7 @@ impl SimBridge {
     /// `output`, `fluid_output`, `no_outlet_pipe`, and `item` names the
     /// item or fluid. See `docs/MACHINE_LOAD_PLAN.md`, "The wire contract".
     /// Each entry also carries `crewed`, `mothballed` and `understaffed` —
-    /// the last is the stable "idle for want of a crew" the red person over
+    /// the last is the stable "held back for want of a crew" the red person over
     /// a machine reads, where a `staff` stall is only this tick's
     /// (`sim::MachineLoadEntry::understaffed`).
     ///

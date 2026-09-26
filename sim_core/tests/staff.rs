@@ -597,6 +597,69 @@ fn an_understaffed_machine_stays_understaffed() {
     );
 }
 
+/// Short on the establishment is not the same as held back by it, and only
+/// the second earns the red person (PR #192's second review). The
+/// establishment hands heads out in topology order to every machine in
+/// service, working or not; the per-tick pools go only to machines that
+/// would work. So a spare crusher placed early in the order with nothing
+/// feeding it holds a head on the books it never claims, the vat at the end
+/// reads uncrewed — and runs on every tick it has work. It gets no marker;
+/// the spare, which is idle for want of tomatoes, gets none either.
+#[test]
+fn a_running_machine_short_on_paper_is_not_understaffed() {
+    let mut world =
+        reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE);
+    common::stock_up(&mut world);
+    world.issue_command(PlayerCommand::Purchase {
+        kind: "crusher".into(),
+        quantity: 1,
+    });
+    let spare = (-10, -10);
+    world.issue_command(PlayerCommand::Place {
+        kind: "crusher".into(),
+        tile: spare,
+        direction: Direction::East,
+        item: None,
+    });
+    let vat = tile_of(&world, "cooking_vat");
+    let entry = |world: &World, tile| {
+        world
+            .machine_load_snapshots()
+            .into_iter()
+            .find(|e| e.tile == tile)
+            .unwrap()
+    };
+    assert!(
+        entry(&world, spare).crewed,
+        "the spare comes first in order"
+    );
+    assert!(!entry(&world, vat).crewed, "so the vat is short on paper");
+
+    let (mut refused, mut ran) = (0, 0);
+    for tick in 0..3_000 {
+        common::supply(&mut world);
+        world.tick();
+        let vat_entry = entry(&world, vat);
+        assert!(!vat_entry.crewed, "the vat stays short on paper");
+        match vat_entry.stall.map(|s| s.kind) {
+            Some(StallKind::Staff) => refused += 1,
+            None => ran += 1,
+            _ => {}
+        }
+        assert!(
+            !vat_entry.understaffed,
+            "the vat is running, not held back, but is marked at tick {tick}"
+        );
+        assert!(
+            !entry(&world, spare).understaffed,
+            "the spare is idle for want of tomatoes, not a crew"
+        );
+    }
+    // The premise: the vat really did run, and was never turned away.
+    assert_eq!(refused, 0, "the vat was refused its crew");
+    assert!(ran > 1_000, "the vat ran on only {ran} ticks");
+}
+
 /// A paused craft keeps its elapsed time exactly, and finishes the same
 /// number of ticks after the crew returns as it had left to run.
 #[test]

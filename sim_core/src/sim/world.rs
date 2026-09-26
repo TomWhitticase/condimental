@@ -1110,20 +1110,34 @@ pub struct MachineLoadEntry {
     pub crewed: bool,
     /// Whether the player has switched this machine off — issue #19.
     pub mothballed: bool,
-    /// Whether the machine is standing idle **for want of a crew** — the
-    /// one question the red person over it answers (UI_UX §7). It is short
-    /// on the establishment (`!crewed`, so never a mothballed machine) AND
-    /// nothing on its own supply side is holding it up: it has a batch's
-    /// worth of input, or one under way, and room for what it makes. So an
-    /// unfed or backed-up machine is idle for that reason, not this one.
+    /// Whether the machine is **being held back for want of a crew** — the
+    /// one question the red person over it answers (UI_UX §7). Three
+    /// things, all true:
+    ///
+    /// - it is short on the establishment (`!crewed`, so never a mothballed
+    ///   machine);
+    /// - it was actually refused its crew within the last load window
+    ///   (`Machine::refusal_hold`). Being short on paper is not enough:
+    ///   the establishment hands heads out in topology order to every
+    ///   machine in service, working or not, so a spare unfed machine early
+    ///   in the order can leave the last one "uncrewed" on the books while
+    ///   the per-tick pools crew it on every tick it would work
+    ///   (`a_running_machine_short_on_paper_is_not_understaffed`);
+    /// - nothing on its own supply side is holding it up: it has a batch's
+    ///   worth of input, or one under way, and room for what it makes. So an
+    ///   unfed or backed-up machine is idle for that reason, not this one.
+    ///
+    /// It says "throttled or stopped", not "stopped": a machine refused on
+    /// some ticks and crewed on others runs part of the time.
     ///
     /// Deliberately NOT `stall.kind == "staff"`. The pools reset every tick,
     /// and on a tick an upstream machine happens to claim nothing the short
     /// one is handed its crew after all, so the per-tick stall blinks
     /// between `staff` and none (43 toggles in 201 polls on the
-    /// `understaffed` fixture). Both halves here move only with the
-    /// establishment or the machine's own buffers, so it holds while the
-    /// machine stays short (`an_understaffed_machine_stays_understaffed`).
+    /// `understaffed` fixture). The refusal is held for a whole window and
+    /// the other two halves move only with the establishment or the
+    /// machine's own buffers, so it holds while the machine stays short
+    /// (`an_understaffed_machine_stays_understaffed`).
     pub understaffed: bool,
 }
 
@@ -5183,6 +5197,7 @@ impl World {
                 let load = MachineLoadSnapshot::of(&body.load);
                 let mothballed = body.mothballed;
                 let supplied = self.machine_supply_stall(machine, &body).is_none();
+                let refused_lately = body.refusal_hold > 0;
                 drop(body);
                 let crewed = !uncrewed.contains(&machine);
                 MachineLoadEntry {
@@ -5191,7 +5206,7 @@ impl World {
                     stall: self.machine_stall(machine),
                     crewed,
                     mothballed,
-                    understaffed: !crewed && supplied,
+                    understaffed: !crewed && refused_lately && supplied,
                 }
             })
             .collect()

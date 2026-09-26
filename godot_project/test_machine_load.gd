@@ -480,11 +480,17 @@ func _run_checks() -> void:
 		_fail("the vat's staff stall flipped only %d times; the fixture no longer blinks" % stall_flips)
 
 	# And the same for the switch, thrown by a real command rather than
-	# written into a dictionary here.
-	main.sim.issue_command_json(JSON.stringify({
-		"type": "set_mothballed", "tile": [Layouts.UNDERSTAFFED_VAT.x, Layouts.UNDERSTAFFED_VAT.y],
-		"enabled": true,
-	}))
+	# written into a dictionary here — through the config panel's own path,
+	# checked straight after the click with no tick or rebuild between, so
+	# it is that path's own re-poll that clears the person, not the next.
+	var vat_tile := [Layouts.UNDERSTAFFED_VAT.x, Layouts.UNDERSTAFFED_VAT.y]
+	main._issue_config_command({"type": "set_mothballed", "tile": vat_tile, "enabled": true})
+	if not _machine_markers().is_empty():
+		_fail("switching the vat off must clear its person with the click, got %s" % str(_machine_markers()))
+	main._issue_config_command({"type": "set_mothballed", "tile": vat_tile, "enabled": false})
+	if _machine_markers() != ["machine:" + vat_key]:
+		_fail("switching the vat back on must restore its person with the click, got %s" % str(_machine_markers()))
+	main._issue_config_command({"type": "set_mothballed", "tile": vat_tile, "enabled": true})
 	main._rebuild_world()
 	if not bool(main._machine_load.get(vat_key, {}).get("mothballed", false)):
 		_fail("a machine switched off by command must poll back as mothballed")

@@ -4905,15 +4905,15 @@ func _poll_machine_load() -> void:
 		# `mothballed` is a switch the player threw.
 		record["crewed"] = bool(entry.get("crewed", true))
 		record["mothballed"] = bool(entry.get("mothballed", false))
-		_machine_load[key] = record
 		record["understaffed"] = bool(entry.get("understaffed", false))
 		_machine_load[key] = record
-		# The red person over a machine idle for want of a crew: the sim's
+		# The red person over a machine held back for want of a crew: the sim's
 		# `understaffed`, never this poll's `staff` stall. The pools reset
 		# every tick, so a short machine is handed its crew on any tick an
 		# upstream one claims nothing, and the stall blinks while the
 		# machine stays short; `understaffed` holds (short on the
-		# establishment, and nothing on its own supply side holding it up).
+		# establishment, refused its crew within the last load window, and
+		# nothing on its own supply side holding it up).
 		if _machine_marker_anchors.has(key):
 			_set_world_warning(
 				"machine:" + key, _machine_marker_anchors[key],

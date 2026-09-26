@@ -466,6 +466,12 @@ pub struct SavedMachine {
     /// compares before the first post-load tick. `#[serde(default)]`.
     #[serde(default)]
     pub refused_by: Option<String>,
+    /// `Machine::refusal_hold`, for the same reason as `refused_by`: it
+    /// decides `MachineLoadEntry::understaffed`. `#[serde(default)]` — a save
+    /// without it loads with no recent refusal, so the red person returns on
+    /// the machine's next refusal rather than straight away.
+    #[serde(default)]
+    pub refusal_hold: u32,
     /// Which of its kind's recipes this machine is running
     /// (`sim::machine::Machine::recipe`). `#[serde(default)]` and added to
     /// `schema_version` 1 rather than bumping it, like
@@ -980,6 +986,7 @@ impl World {
                             cursor: machine.load.cursor(),
                         },
                         refused_by: machine.refused_by.clone(),
+                        refusal_hold: machine.refusal_hold,
                         recipe: Some(machine.recipe.clone()),
                         mothballed: machine.mothballed,
                     })
@@ -1505,6 +1512,7 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                     });
                 machine.load = load;
                 machine.refused_by = saved.refused_by.clone();
+                machine.refusal_hold = saved.refusal_hold;
                 // The establishment is recomputed once after every body is
                 // restored (see `load`), so setting this here is enough to
                 // put a mothballed machine's crew back out of the payroll.
@@ -2016,6 +2024,7 @@ mod tests {
             process: None,
             load: SavedLoad::default(),
             refused_by: None,
+            refusal_hold: 0,
             recipe: None,
             mothballed: false,
         });
