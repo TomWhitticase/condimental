@@ -9,16 +9,29 @@
 //!
 //! Godot cannot work that out for itself: a belt that stops moving stops
 //! dirtying its chunk, so the presentation layer is never told the tile
-//! stood still. So the simulation counts, per tile, the ticks that tile
-//! actually advanced product on, and `BeltSnapshot::moved_ticks` carries
-//! it. This file proves the three properties the renderer relies on:
+//! stood still. So the simulation records, per tile, the TICK that tile's
+//! rubber last ran on, and `BeltSnapshot::moved_ticks` carries it.
 //!
-//! 1. A tile that moves product counts every such tick, once.
+//! What stops that clock is a JAM, and only a jam (2026-09-25). It used to
+//! stop on an empty tile too, which made one line of belt roll one tile at
+//! a time as a single box walked down it, and made still rubber mean either
+//! "jammed" or "nothing here" — so the jam this counter exists to show
+//! could not be read off the floor. A conveyor with no box on it is a motor
+//! turning, not a starved machine. This file proves the four properties
+//! the renderer relies on:
+//!
+//! 1. A tile advances once per tick while it runs — carrying product or
+//!    idle — and every running tile in the world is on the same phase, so a
+//!    line of belts reads as one conveyor rather than a row of machines.
 //! 2. A jammed tile's count freezes — and stays frozen for as long as the
 //!    jam lasts, which is what makes "missing from a delta" mean "still
-//!    where you last drew it".
+//!    where you last drew it". It rejoins the phase when it moves again.
 //! 3. It survives a save/load, so a loaded factory's rubber stands where
 //!    the saved one's did.
+//! 4. A tile is laid on a tick, not on zero — and an empty belt restored
+//!    from an older save takes the save's tick. The scene reads a placed
+//!    tile once and an idle tile dirties nothing afterwards, so a clock
+//!    that starts out of phase is drawn out of phase for good.
 
 use sim_core::sim::machines::MachineRegistry;
 use sim_core::sim::types::{Money, TileCoord};
@@ -113,20 +126,31 @@ fn clock_at(world: &World, tile: TileCoord) -> u64 {
         .unwrap_or_else(|| panic!("no belt snapshot for {tile:?}"))
 }
 
-/// A freshly placed belt has never carried anything, so its pattern has
-/// never advanced. Phase 0 is also what a save written before this field
-/// existed loads as — see `SavedBelt::moved_ticks`.
+/// A belt with nothing on it is still running, so its rubber keeps
+/// counting — one tick per tick, the same rate a loaded tile counts at.
+/// That is what makes a long idle line move as one surface instead of
+/// lighting up a tile at a time behind a single box, and it is the rule
+/// Godot extrapolates between snapshots (`main.gd`'s `_belt_idle_phase`),
+/// so the exact rate matters and not merely that it moves.
 #[test]
-fn a_belt_that_has_never_carried_anything_stands_at_phase_zero() {
+fn an_empty_belt_keeps_its_rubber_running() {
     let (mut world, tiles) = dead_end_run(3, 0);
-    for _ in 0..200 {
+    const TICKS: u64 = 200;
+    for _ in 0..TICKS {
         world.tick();
     }
-    for tile in tiles {
+    for tile in &tiles {
+        assert!(
+            matches!(
+                world.query_tile(*tile),
+                Some(sim_core::sim::TileSnapshot::Belt { ref items_here, .. }) if items_here.is_empty()
+            ),
+            "this asserts about an EMPTY tile, and {tile:?} has something on it"
+        );
         assert_eq!(
-            clock_at(&world, tile),
-            0,
-            "an empty belt has advanced nothing, so its rubber has not moved"
+            clock_at(&world, *tile),
+            TICKS,
+            "an idle belt runs, so its rubber counts one tick per tick like any other"
         );
     }
 }
@@ -193,35 +217,129 @@ fn a_jammed_belt_freezes_its_surface_clock() {
     }
 }
 
-/// A jam that clears resumes counting from where it stopped rather than
-/// re-joining a global clock — the reason this is a counter and not a
-/// boolean. The rubber must not jump a fraction of a tile at the moment
-/// the line starts again.
+/// A jam that clears REJOINS the phase every other running belt is on,
+/// rather than resuming its own (amended 2026-09-25 — the owner played a
+/// floor of belts laid at different times and asked for them in sync). The
+/// jump that costs is one repeating pattern shifting under items at the
+/// instant they start moving again; the drift it replaces was on every
+/// tile, permanently.
 #[test]
-fn a_cleared_jam_resumes_the_clock_it_stopped_on() {
+fn a_cleared_jam_rejoins_the_phase_the_running_belts_are_on() {
     let (mut world, tiles) = dead_end_run(3, HOPPER_CAPACITY);
     for _ in 0..3000 {
         world.tick();
     }
     let frozen = clock_at(&world, tiles[0]);
+    assert!(
+        frozen < world.current_tick(),
+        "the jam must have left this tile behind the tick for the rejoin to mean anything"
+    );
     // Open the dead end: a belt on the far side takes the front item and
     // the run starts moving again, freed space rippling back one item a
     // tick until it reaches the tile this asserts about.
     build(&mut world, "belt", (3, 0), Direction::East);
-    const RESUMED_TICKS: u64 = 30;
-    for _ in 0..RESUMED_TICKS {
+    for _ in 0..30 {
         world.tick();
     }
-    let running = clock_at(&world, tiles[0]);
+    // Not exactly the tick: a line that has just been freed moves in
+    // stop-and-go waves, and a tile that did not move on the very last tick
+    // is legitimately a tick or two behind. The point is that it is level
+    // with the running floor again rather than hundreds of ticks adrift.
+    let rejoined = clock_at(&world, tiles[0]);
+    let behind = world.current_tick() - rejoined;
     assert!(
-        running > frozen,
-        "the line is moving again, so its rubber must be too; stuck at {frozen}"
+        behind <= 5,
+        "the line is moving again, so this tile's rubber stands with every other \
+         running tile's; it reads {rejoined} against tick {}, and it froze at {frozen}",
+        world.current_tick()
     );
+}
+
+/// The property the whole floor is judged on: every belt that is running
+/// shows the same phase, whenever it was placed and whatever it has been
+/// through. A tile laid 500 ticks after its neighbour is in step with it,
+/// and so is one that spent a spell jammed.
+#[test]
+fn every_running_belt_stands_at_the_same_phase() {
+    let (mut world, _) = dead_end_run(3, 0);
+    for _ in 0..500 {
+        world.tick();
+    }
+    // A tile laid late, and one that has been jammed and freed, both join
+    // the same surface as the tiles that have run all along.
+    build(&mut world, "belt", (3, 0), Direction::East);
+    for _ in 0..40 {
+        world.tick();
+    }
+    let clocks = surface_clocks(&world);
+    assert_eq!(clocks.len(), 4, "the fixture should have four belt tiles");
+    for (tile, clock) in &clocks {
+        assert_eq!(
+            *clock,
+            world.current_tick(),
+            "every running belt is in phase, and {tile:?} is not"
+        );
+    }
+}
+
+/// The case the owner reported, and the one a tick of slack hides: a belt
+/// bought and dropped into a floor that has been running for an hour is in
+/// phase **in the frame it is first drawn in**, before it has ticked once.
+///
+/// Reading it after a tick or two proves nothing, because the tile's first
+/// tick would fix a clock that started at zero. Godot never gets that
+/// second look: it reads a placed tile once, on the rebuild the placement
+/// triggers, and an idle tile dirties no chunk afterwards — so a tile that
+/// is out of phase at that instant stays out of phase until something
+/// crosses it.
+#[test]
+fn a_belt_laid_into_a_running_floor_is_in_phase_before_it_ticks() {
+    let (mut world, tiles) = dead_end_run(3, 0);
+    for _ in 0..777 {
+        world.tick();
+    }
+    build(&mut world, "belt", (3, 0), Direction::East);
+    // No tick here, deliberately.
+    let clocks = surface_clocks(&world);
+    for tile in tiles.iter().chain(std::iter::once(&(3, 0))) {
+        assert_eq!(
+            clocks.get(tile).copied(),
+            Some(world.current_tick()),
+            "{tile:?} is drawn out of phase in the very frame it is placed in"
+        );
+    }
+}
+
+/// A save written before the surface clock was a tick — so every idle
+/// tile's number is the tick it last *carried* something, which is stale —
+/// loads with its empty belts on the loaded world's phase, not on that
+/// stale one. Nothing would ever correct it: an idle tile dirties no chunk,
+/// so the scene draws the number it was handed at load forever.
+#[test]
+fn an_empty_belt_in_an_old_save_loads_in_phase() {
+    let (mut world, _) = dead_end_run(3, 0);
+    for _ in 0..900 {
+        world.tick();
+    }
+    // What a pre-2026-09-25 save of this world holds: belts that have never
+    // carried anything, and so never advanced a counter.
+    let stale = world
+        .to_save_ron()
+        .replace("moved_ticks: 900", "moved_ticks: 0");
     assert!(
-        running <= frozen + RESUMED_TICKS,
-        "the clock resumes from the {frozen} it stopped on — it cannot catch up with a \
-         global clock, or the rubber would jump the moment the line cleared; got {running}"
+        stale.contains("moved_ticks: 0"),
+        "the fixture must really have rewritten the saved clocks"
     );
+    let loaded = World::from_save_ron(&stale, one_stage()).expect("the save must load");
+    let clocks = surface_clocks(&loaded);
+    assert_eq!(clocks.len(), 3, "the save's three belts must all come back");
+    for (tile, clock) in clocks {
+        assert_eq!(
+            clock,
+            loaded.current_tick(),
+            "{tile:?} loaded on a stale phase and nothing will ever correct it"
+        );
+    }
 }
 
 /// Save/load carries it, so a reloaded factory's rubber stands exactly

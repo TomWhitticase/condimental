@@ -845,13 +845,22 @@ pub struct BeltSnapshot {
     pub tile: TileCoord,
     pub direction: Direction,
     pub items: Vec<(ItemId, f64)>,
-    /// How many ticks this tile has actually advanced product on
-    /// (`BeltSegment::moved_ticks`) — the clock the renderer runs the
-    /// belt's surface pattern from, so a jammed tile's rubber stops with
-    /// the items on it (issue #79). It is a COUNTER and not a flag because
-    /// a delta only carries the belts that moved: a tile missing from a
-    /// delta is a tile that stood still, and the last count it sent is
-    /// still exactly where its pattern should be.
+    /// The tick this tile last RAN on (`BeltSegment::moved_ticks`) — the
+    /// clock the renderer runs the belt's surface pattern from, so a jammed
+    /// tile's rubber stops with the items on it (issue #79), and every tile
+    /// that is running holds the same number, so a run of them is one
+    /// conveyor (amended 2026-09-25; it used to count only the ticks the
+    /// tile advanced product on).
+    ///
+    /// **A tile missing from a delta is not a tile that stood still.** An
+    /// idle belt's clock advances every tick and it is deliberately absent
+    /// from the delta, because there is no product on it to redraw and a
+    /// delta per empty tile per tick is the cost this field exists to
+    /// avoid. The renderer carries an idle tile's phase forward itself
+    /// (`main.gd`'s `_belt_idle_phase`), which is exact because the value is
+    /// the tick: the number it draws is the number the tile's next snapshot
+    /// brings. What a missing delta means is "nothing on this tile moved",
+    /// and only a tile with items on it can send one at all.
     pub moved_ticks: u64,
 }
 
@@ -2641,6 +2650,10 @@ impl World {
                 BeltSegment::new(
                     Fx::from_num(BELT_TILE_LENGTH),
                     Fx::from_num(ITEM_MIN_SPACING_TILES),
+                    // Laid on THIS tick, not on tick 0: a belt dropped into
+                    // a floor that has been running for an hour is in phase
+                    // with it from the frame it is first drawn in.
+                    self.tick_count,
                 ),
             )),
             // A splitter is a one-tile belt segment plus a cursor saying
@@ -2656,6 +2669,7 @@ impl World {
                 BeltSegment::new(
                     Fx::from_num(BELT_TILE_LENGTH),
                     Fx::from_num(ITEM_MIN_SPACING_TILES),
+                    self.tick_count,
                 ),
                 Splitter::new(),
             )),
@@ -3688,7 +3702,7 @@ impl World {
                     .ecs
                     .get::<&mut BeltSegment>(carrier)
                     .expect("a belt or splitter placement carries a BeltSegment");
-                segment.tick_toward(self.belt_speed, self.room_ahead[index])
+                segment.tick_toward(self.belt_speed, self.room_ahead[index], self.tick_count)
             };
             if moved {
                 let tile = self.position_of(carrier);

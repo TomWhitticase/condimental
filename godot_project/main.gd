@@ -443,31 +443,52 @@ const BELT_TICKS_PER_TILE := 50
 ## --- The surface clock: whose tick the rubber runs on (issue #79) --------
 ##
 ## **A belt tile's frame follows THAT TILE'S OWN clock, not the world's.**
-## `BeltSnapshot.moved_ticks` is how many ticks the simulation has actually
-## advanced product on that tile, and `_belt_frame_for_moved_ticks` is the
-## same `floor(clock * BELT_FRAMES / BELT_TICKS_PER_TILE) mod BELT_FRAMES`
-## it always was — only the clock changed.
+## `BeltSnapshot.moved_ticks` is the tick that tile last RAN on — the current
+## tick unless it is jammed (amended twice below; it began as a count of the
+## ticks the simulation advanced product on it) — and
+## `_belt_frame_for_moved_ticks` is the same
+## `floor(clock * BELT_FRAMES / BELT_TICKS_PER_TILE) mod BELT_FRAMES` it
+## always was. Only the clock changed.
 ##
 ## It used to be the global `sim.current_tick()`, which meant every belt in
 ## the world ran its rubber forever, a jammed one included: the tomatoes on
 ## a backed-up line sat still while the cleats under them marched, and the
 ## cleats are the louder of the two. That is a decoration running because a
 ## thing exists, which is exactly what UI_UX.md §6a's rule for a continuous
-## effect forbids — a starved crusher throws no pulp, and a belt carrying
-## nothing anywhere must move no rubber.
+## effect forbids.
+##
+## **An EMPTY tile is a running tile, though (2026-09-25).** The clock stops
+## on a jam and on nothing else. A conveyor with no box on it is a motor
+## turning, not a starved crusher — and while the clock also stopped on an
+## empty tile, a long line lit up one tile of rubber at a time as a single
+## box walked down it, and still rubber meant either "jammed" or "nothing
+## here", so the jam this whole mechanism exists to show could not be read
+## off the floor.
 ##
 ## Godot cannot derive this: a belt that stops moving stops dirtying its
 ## chunk, so nothing on the wire would ever say "this tile stood still".
-## The sim counts, the renderer draws — and the count is a COUNTER rather
-## than a running/stopped flag so a line that clears resumes the phase it
-## stopped on instead of snapping back to a world clock that kept running
-## without it.
+## The sim counts and the renderer draws.
 ##
-## The cost lands where the movement is. A tile's frame is re-read exactly
-## when its snapshot arrives (`_render_snapshot`), so a jammed line — which
-## sends no delta at all — costs nothing, and a running one costs the two
-## transform writes per tile per frame change that `_set_tile_instance_frame`
-## explains.
+## **And every running tile is on the SAME phase** (2026-09-25, second
+## amendment — the owner played a floor of them and asked for the line to
+## move as one). `moved_ticks` is the tick a tile last ran on, so tiles laid
+## at different times are in step, and only a jam takes a tile out of step.
+## It used to be a count of each tile's own running ticks, which drifts: one
+## spell of back-pressure, or a neighbour laid a minute later, left two
+## tiles a fraction of a tile apart for good, and a run then read as a row
+## of separate machines. The cost, taken deliberately, is that a tile which
+## HAS been jammed rejoins the phase rather than resuming its own, so its
+## pattern jumps once as the line frees — under items that are themselves
+## just starting to move, at the busiest moment that tile has.
+##
+## The cost lands where the movement is. A loaded tile's frame is re-read
+## exactly when its snapshot arrives (`_render_snapshot`), so a jammed line
+## — which sends no delta at all — costs nothing, and a running one costs
+## the two transform writes per tile per frame change that
+## `_set_tile_instance_frame` explains. An idle tile sends no delta either,
+## so its phase is carried forward in the scene instead
+## (`_belt_idle_phase`), at the same one-per-tick rate the simulation counts
+## at and therefore landing on the same number its next snapshot brings.
 
 # --- Machines & the hopper (the "Machines improvement" milestone) ----------
 ## Which voxel model draws each machine KIND from `data/machines.ron`.
@@ -1080,6 +1101,7 @@ var _tile_sets: Dictionary = {} # set key -> {"frames", "nodes", "count"}, see _
 var _tile_pending: Dictionary = {} # set key -> {"frames", "staged"}; only alive during a rebuild
 var _tile_instances: Dictionary = {} # "x,y" of the tile -> {"set", "index", "asset", "frames", "position", "yaw", "frame"}
 var _belt_surface_ticks: Dictionary = {} # "x,y" -> BeltSnapshot.moved_ticks, the tile's own animation clock
+var _belt_idle_offsets: Dictionary = {} # "x,y" of a tile last seen EMPTY -> its clock minus the tick it was seen on
 var _item_pools: Dictionary = {} # item asset -> pool, see _item_pool_for
 var _item_slots: Dictionary = {} # "prefix_x_y_i" (one per conveyor slot drawn) -> {"asset", "index"}
 var _tiles_root: Node3D # "World/Tiles": every tile MultiMeshInstance3D
@@ -2859,31 +2881,84 @@ func _belt_frames_for_shape(shape: String) -> Array:
 ## that and not `sim.current_tick()`): the plan's
 ## `floor(clock * BELT_FRAMES / BELT_TICKS_PER_TILE) mod BELT_FRAMES`.
 ##
-## The pattern therefore crosses a tile in exactly the ticks an item does,
-## it stands still whenever the tile does — a jam, or the pause menu, or a
-## headless test that never ticks — and it resumes from where it stopped
-## rather than jumping, because the clock is a count and not a flag.
+## The pattern therefore crosses a tile in exactly the ticks an item does
+## (the clock advances once per tick), and it stands still whenever the tile
+## does — a jam, or the pause menu, or a headless test that never ticks.
 func _belt_frame_for_moved_ticks(moved_ticks: int) -> int:
 	return posmod((moved_ticks * BELT_FRAMES) / BELT_TICKS_PER_TILE, BELT_FRAMES)
 
 
-## The frame a tile is currently showing — the surface clock the wire last
-## reported for it, run through `_belt_frame_for_moved_ticks`. A tile whose
-## set has one frame (a pipe, a splitter) is always on frame 0.
+## The surface clock a tile last seen EMPTY stands at on `current_tick`.
+##
+## An idle belt dirties no chunk — there is no product on it to redraw — so
+## the wire goes quiet on exactly the tiles whose rubber is still running.
+## The renderer carries the clock forward itself instead, which is exact
+## rather than a guess because the simulation's increment is one per tick
+## (`BeltSegment::moved_ticks`): the offset recorded when the tile was last
+## seen turns any later tick straight into that tile's own clock. So the
+## phase Godot draws while a tile is idle is the same number the next
+## snapshot brings, and the rubber does not jump when a box lands on it.
+##
+## Off `sim.current_tick()` like every other clock in the scene, so pause
+## freezes an idle belt too and a screenshot run repeats.
+##
+## **The scene reads a placed tile once** — on the rebuild the placement
+## triggers — and an idle tile dirties nothing afterwards, so there is no
+## second look to correct a bad offset with. That is why a belt is laid on
+## the current tick in the simulation (`BeltSegment::new`'s `laid_on_tick`)
+## and an empty one takes the world's tick at load: a tile whose clock
+## started at 0 would be drawn on the wrong frame for as long as it stayed
+## empty, which is a belt bought mid-game — the commonest belt there is.
+## Every running tile's offset is therefore 0, and
+## `test_belt_shapes.gd` section 3b is what keeps it that way, because every
+## belt in every other fixture is placed before the first tick and so cannot
+## tell a working offset from an ignored one.
+func _belt_idle_phase(key: String, current_tick: int) -> int:
+	return current_tick + int(_belt_idle_offsets.get(key, 0))
+
+
+## The frame a tile is currently showing — its own surface clock, run
+## through `_belt_frame_for_moved_ticks`. A tile whose set has one frame (a
+## pipe, a splitter) is always on frame 0.
 func _belt_frame_at(key: String, frames: Array) -> int:
 	if frames.size() <= 1:
 		return 0
+	if _belt_idle_offsets.has(key):
+		return _belt_frame_for_moved_ticks(_belt_idle_phase(key, sim.current_tick()))
 	return _belt_frame_for_moved_ticks(int(_belt_surface_ticks.get(key, 0)))
 
 
 ## Records the surface clock one belt or splitter snapshot reports and
 ## re-draws that tile if its frame moved. Called from `_render_snapshot`
-## for every conveyor tile a delta or a full snapshot carries, which is
-## exactly the set of tiles that could have moved — a tile absent from a
-## delta stood still, and its rubber is already where it belongs.
-func _set_belt_surface_ticks(key: String, moved_ticks: int) -> void:
+## for every conveyor tile a delta or a full snapshot carries.
+##
+## `carrying` is whether that snapshot showed anything ON the tile, and it
+## decides which of the two clocks the tile runs on from here: a loaded tile
+## is redrawn only when a snapshot arrives (a tile absent from a delta is
+## jammed, and its rubber belongs exactly where it is), while an idle one is
+## carried forward every frame by `_advance_idle_belt_frames`.
+func _set_belt_surface_ticks(key: String, moved_ticks: int, carrying: bool) -> void:
 	_belt_surface_ticks[key] = moved_ticks
+	if carrying:
+		_belt_idle_offsets.erase(key)
+	else:
+		_belt_idle_offsets[key] = moved_ticks - sim.current_tick()
 	_set_tile_instance_frame(key, _belt_frame_for_moved_ticks(moved_ticks))
+
+
+## Walks the rubber of every tile that is running but carrying nothing.
+##
+## Called from `_advance_simulation` rather than under `_wire_changed`,
+## because an idle belt is precisely the case where nothing on the wire
+## changes — and from there rather than from `_process` so that the pause
+## menu's early return freezes it with everything else. It stays cheap the
+## way the loaded path does: `_set_tile_instance_frame` returns without
+## touching a MultiMesh unless the frame index actually moved, which at
+## `BELT_TICKS_PER_TILE` / `BELT_FRAMES` is once every 12 ticks per tile.
+func _advance_idle_belt_frames() -> void:
+	var current_tick := sim.current_tick()
+	for key in _belt_idle_offsets:
+		_set_tile_instance_frame(key, _belt_frame_for_moved_ticks(_belt_idle_phase(key, current_tick)))
 
 
 ## Whether `tile` is covered by something a belt hands product to or takes it
@@ -3142,6 +3217,7 @@ func _rebuild_world() -> void:
 	# every tile still standing gets its clock straight back — and a tile
 	# that was removed does not leave one behind (issue #79).
 	_belt_surface_ticks.clear()
+	_belt_idle_offsets.clear()
 	_item_pools.clear()
 	_item_slots.clear()
 
@@ -14986,12 +15062,14 @@ func _advance_simulation(delta: float) -> void:
 		_tick_accum = 0.0
 	# The machines' mechanisms follow the tick, so they are advanced here and
 	# nowhere else: the paused early-return above never reaches this line,
-	# which is what stops the machinery with the pause menu up. The belt
-	# surface needs no line here at all since issue #79 — each tile's rubber
-	# follows its own clock off the wire, inside the `_apply_dirty_chunks`
-	# above, so a pause freezes it for exactly the same reason (no tick, no
-	# delta, no frame change).
+	# which is what stops the machinery with the pause menu up. A belt
+	# carrying something needs no line here — its rubber comes off the wire
+	# inside the `_apply_dirty_chunks` above (issue #79). A belt carrying
+	# NOTHING is still running, and dirties no chunk to say so, so its phase
+	# is extrapolated here instead, on the same tick and behind the same
+	# early-return.
 	_update_machine_motion()
+	_advance_idle_belt_frames()
 	# The load records follow the tick the same way, so the pause menu's
 	# early return above freezes them too: a status that changed while the
 	# factory was stopped would be reporting a factory that is not running.
@@ -15401,12 +15479,16 @@ func _render_snapshot(snapshot: Dictionary) -> void:
 	var belts: Array = snapshot.get("belts", [])
 	for belt in belts:
 		_render_carried_items(belt, "belt")
-		# The tile's own surface clock, and the one place it is read: a
-		# conveyor tile is in a delta exactly when it moved product, so
-		# this runs for the tiles whose rubber advanced and for no others
-		# (issue #79 — see BELT_TICKS_PER_TILE's block).
+		# The tile's own surface clock, and the one place the wire's value is
+		# read. A conveyor tile is in a delta when it moved product, so this
+		# runs for the tiles whose rubber advanced — and for a tile that has
+		# just gone empty, which is how an idle one hands over to the clock
+		# `_advance_idle_belt_frames` carries (issue #79, and
+		# BELT_TICKS_PER_TILE's block for why an idle belt still runs).
 		_set_belt_surface_ticks(
-			_tile_key(_pair_to_tile(belt.get("tile"))), int(belt.get("moved_ticks", 0))
+			_tile_key(_pair_to_tile(belt.get("tile"))),
+			int(belt.get("moved_ticks", 0)),
+			not (belt.get("items", []) as Array).is_empty()
 		)
 
 	# A splitter carries its contents in an ordinary one-tile belt segment
@@ -15423,7 +15505,11 @@ func _render_snapshot(snapshot: Dictionary) -> void:
 		# Harmless and deliberate: a splitter is a one-frame set, so this
 		# records its clock and changes no frame. It keeps the two kinds'
 		# render paths identical, the way `_render_carried_items` does.
-		_set_belt_surface_ticks(_tile_key(tile), int(splitter.get("moved_ticks", 0)))
+		_set_belt_surface_ticks(
+			_tile_key(tile),
+			int(splitter.get("moved_ticks", 0)),
+			not (splitter.get("items", []) as Array).is_empty()
+		)
 		_apply_splitter_state(_tile_key(tile), splitter)
 
 	var machines: Array = snapshot.get("machines", [])

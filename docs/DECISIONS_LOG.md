@@ -313,7 +313,24 @@ See [WORKFLOW.md](WORKFLOW.md).
   Godot is never told a tile stood still. A **counter**, not a "moving"
   flag: a flag re-joins a global phase and makes the rubber jump when a jam
   clears. Saved (`#[serde(default)]`, no schema bump) so a load stands where
-  the save did. An empty belt shows no motion at all, deliberately.
+  the save did. **Amended 2026-09-25: an EMPTY belt is a running belt.**
+  `tick_toward` counts an empty tick too, so the clock stops on a jam and on
+  nothing else — a conveyor with no box on it is a motor turning, not a
+  starved crusher, and while still rubber meant either "jammed" or "nothing
+  here" the jam could not be read off the floor at all. An idle tile still
+  dirties no chunk; `main.gd`'s `_belt_idle_phase` carries the clock forward
+  in the scene instead, which is exact because the value is the tick itself.
+  **Amended again 2026-09-25: it IS the tick, so every running belt is in
+  phase.** `tick_toward` assigns `current_tick` rather than incrementing, so
+  tiles laid minutes apart move as one conveyor and only a jam takes a tile
+  out of step. A tile is **laid on a tick**, not on zero
+  (`BeltSegment::new`'s `laid_on_tick`, and the save's `tick_count` for an
+  empty belt at load): the scene reads a placed tile once and an idle tile
+  dirties nothing after that, so a clock that starts wrong stays wrong. Same
+  formula, same one-per-tick rate; the accepted cost is
+  that a freed tile rejoins the phase instead of resuming its own, jumping
+  once, which is cheaper than a drift that never resolves. Full record in
+  `docs/DECISIONS.md`.
 - 2026-09-20 **A width fix must be MEASURED at every window size, and
   `snap_rows` is for rows the player signs.** Two regressions from the width
   pass above, both from a fit applied unconditionally. `_build_contract_board_row`

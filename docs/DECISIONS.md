@@ -1187,6 +1187,32 @@ matches what code comments and data files cite.
   `tests/belt_surface.rs` pins both halves: frozen while jammed, and
   resumed-not-caught-up when the jam clears.
 
+  **Amended 2026-09-25 (second amendment): the field is the TICK the tile
+  last ran on, and every running belt is in phase.** The paragraph above
+  weighed a one-off jump against nothing, because at the time every tile's
+  count started at zero on the same tick and the drift was invisible. In a
+  played factory it is not: belts are laid minutes apart, and any tile that
+  has ever been held up is permanently a fraction of a tile behind its
+  neighbours. The owner's words, after the first amendment shipped, were
+  that the belts "need to all be synced up, they are a bit out of sync".
+  A run of conveyor that is out of step reads as a row of separate machines
+  bolted together, which is exactly the thing the surface is there to deny.
+
+  So `tick_toward` assigns `current_tick` instead of incrementing. Nothing
+  about the frame formula or the rate changes — the value still advances
+  once per tick, so the pattern still crosses a tile in exactly the ticks an
+  item does — and the jam still freezes it, since a jammed tile is simply
+  not assigned. What changes is the recovery: a freed tile REJOINS the
+  phase, and its pattern jumps up to three frames once. That is the trade
+  made knowingly, and the two sides are not equal. The jump is one
+  repeating pattern shifting on one tile, at the instant its items start
+  moving and the eye is on them; the drift it replaces was on every tile,
+  all the time, and never resolved. `every_running_belt_stands_at_the_same_phase`
+  and `a_cleared_jam_rejoins_the_phase_the_running_belts_are_on` pin the new
+  halves; the latter allows a few ticks of slack, because a line that has
+  just been freed moves in stop-and-go waves and a tile that did not move on
+  the last tick is honestly a tick behind.
+
   **Saved, at the current `schema_version`.** `SavedBelt::moved_ticks` is
   `#[serde(default)]`, like `SavedHopper::auto_fill` and `SavedMachine::load`
   before it — an additive field is not a shape change, and a save written
@@ -1203,15 +1229,76 @@ matches what code comments and data files cite.
   here, and on an empty belt that statement is false. The idle crusher is
   the precedent and the answer is the same one.
 
-  **What proves it.** `tests/belt_surface.rs` (five cases, through
-  `chunk_snapshot`, i.e. the wire Godot reads) and
-  `test_belt_shapes.gd` section 3, which steps the scene's own loop and
-  asserts each tile draws its own clock's frame. Not provable headless: the
-  `MultiMesh` transform writes underneath, because the dummy
+  **Amended 2026-09-25: that consequence was wrong, and an empty belt is a
+  running belt.** The paragraph above is kept as written because the
+  reasoning that produced it is exactly what the play test refuted. The
+  owner built a long line and watched one box cross it: the rubber lit up a
+  single tile at a time, walking down the run under the box like a spotlight
+  — nothing a factory has ever done. The analogy to the idle crusher is what
+  failed. A crusher with no tomato in it is *not doing its job*; a conveyor
+  with no box on it is a motor turning, which is what a conveyor's job looks
+  like when there is nothing to carry. "Powered" is not a third clock the
+  game lacks: a belt the player has paid for and placed is powered, always,
+  and the only state it has to report is whether it is BLOCKED.
+
+  And the rule as written defeated its own purpose. Still rubber meant two
+  different things — jammed, and nothing on it — and an empty belt is by far
+  the commoner of the two, so the jam signal this whole record exists to
+  build could not be read off the floor at all. Counting the idle tick makes
+  still rubber mean exactly one thing. §6a is kept where it bites: the
+  surface stops on a jam, because that is the tile's own state rather than
+  its mere existence, and a jam is the statement worth making.
+
+  **Why Godot extrapolates, and why that is not a second clock.** An idle
+  tile dirties no chunk, deliberately and unchanged: a delta for every empty
+  belt in the world thirty times a second is the cost this counter exists to
+  avoid, and the reason for it in the first place. So `main.gd` records
+  `moved_ticks - current_tick` when it last saw a tile empty
+  (`_belt_idle_phase`) and adds the tick back to get the tile's clock on any
+  later frame. That is EXACT rather than a guess, and only because the
+  simulation's increment is exactly one per tick: the number the scene draws
+  while a tile is idle is the number the tile's next snapshot brings, so the
+  rubber does not jump when a box lands on it. The moment anything is on the
+  tile the offset is dropped and the wire's value is authoritative again.
+  The sim still decides; Godot is interpolating a rule it was given, the way
+  it interpolates an item's position between ticks.
+
+  **Exact only if the clock was right the one time Godot read it** (review of
+  PR #177, 2026-09-25). The scene reads a placed tile ONCE — on the rebuild
+  the placement triggers — and an idle tile dirties nothing afterwards, so
+  there is no second look to correct anything with. A belt whose clock
+  started at 0 was therefore drawn on the wrong frame for as long as it
+  stayed empty, however right the simulation's own number became on the next
+  tick. That is not a flaw in extrapolating; it is the reason a tile is now
+  LAID ON A TICK (`BeltSegment::new`'s `laid_on_tick`, seeded from
+  `World::tick_count` at the `Place`, and the save's own `tick_count` for an
+  empty belt at load). The renderer's assumption is a contract the simulation
+  has to honour at every entry point, not only in `tick_toward`.
+
+  **What proves it.** `tests/belt_surface.rs` (eight cases, through
+  `chunk_snapshot`, i.e. the wire Godot reads — including
+  `an_empty_belt_keeps_its_rubber_running`, which pins the rate at one per
+  tick and not merely "it moves", and
+  `a_belt_laid_into_a_running_floor_is_in_phase_before_it_ticks`, which reads
+  the clock with no tick between the placement and the read, because a tick
+  of slack is exactly what hid the placement bug) and `test_belt_shapes.gd`
+  sections 3 and 3b, which step the scene's own loop and assert each tile
+  draws its own clock's frame, that over one full cycle the empty tile shows
+  all four frames while the jammed tile beside it in the same frame set shows
+  one, that a full re-read of the chunks brings the simulation's own number
+  for the idle tile — the extrapolation, checked against the thing it
+  extrapolates — and that a belt bought and dropped in 3 000 ticks late draws
+  the same frame as one that has run since tick 0, for a whole cycle
+  afterwards. Section 3b exists because every other belt in every fixture is
+  placed before the first tick, so every idle offset in them is 0 and a scene
+  that ignored offsets altogether passed the lot.
+  `tests/chunk_delta.rs` pins the silence: an idle belt's clock advances
+  every tick and it is still absent from the delta. Not provable headless:
+  the `MultiMesh` transform writes underneath, because the dummy
   RenderingServer reads every instance transform back as the identity. That
-  half is `scripts/screenshot-scene.sh --bottleneck --closeup`, where four
-  consecutive tiles of one four-frame set now stand on four different
-  phases and the cleats along a backed-up line no longer march.
+  half is `scripts/screenshot-scene.sh --fixture chain --populate --closeup`,
+  where the run's cleats stand one frame further on than the same world
+  renders them without this change.
 - 2026-09-20: **A width fix must be MEASURED at every window size, and
   `snap_rows` is for rows the player signs.** (Follow-up to the entry below,
   from the review of PR #102.)

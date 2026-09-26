@@ -297,6 +297,46 @@ already called ("the next panel that earns a key will overrun it again").
 Decision record: `docs/DECISIONS.md`, 2026-09-25; the screen is
 `docs/UI_UX.md` §5h.
 
+### 2026-09-25 — An empty belt is a running belt
+
+Play-test note from the owner: on a long run of belt, only the tile under
+the box moved its rubber, so a single item crossing the floor looked like a
+spotlight walking down a dead line. The surface clock from issue #79 counted
+only the ticks a tile advanced product, and that was one analogy too far —
+a crusher with no tomato is not doing its job, a conveyor with no box is a
+motor turning. Worse, still rubber meant both "jammed" and "nothing on it",
+and the empty case is far the commoner, so the jam signal the clock was
+built for could not be read off the floor.
+
+`BeltSegment::tick_toward` now counts an idle tick too, so the clock stops
+on a jam and on nothing else. The silence on the wire is unchanged and
+deliberate — an idle tile dirties no chunk, because a delta per empty belt
+per tick is the cost the counter exists to avoid — and Godot carries the
+phase forward itself between snapshots (`_belt_idle_phase`). That is exact
+rather than a guess: the increment is one per tick, so the phase the scene
+draws while a tile is idle is the number the tile's next snapshot brings,
+and the rubber does not jump when a box lands on it. UI_UX §6a's rule is
+kept where it bites, and the 2026-09-21 decision record is amended in place
+with what the play test refuted.
+
+Playing that build turned up the other half: "the belts need to all be
+synced up, they are a bit out of sync". A per-tile count of running ticks
+drifts — belts are laid minutes apart, and one spell of back-pressure
+leaves a tile a fraction of a tile behind for good — so a run read as a row
+of separate machines. `moved_ticks` is now the TICK the tile last ran on
+rather than a count of its own, which is the same formula at the same rate
+and puts every running belt on one phase. A jam still freezes it; the
+accepted cost is that a freed tile rejoins the phase instead of resuming its
+own, jumping once under items that are just starting to move.
+
+The review of that branch found the half neither test covered: a belt is laid
+on a tick now as well. A freshly placed segment started its clock at 0, and
+since the scene reads a placed tile exactly once — on the rebuild the
+placement triggers — and an idle tile dirties no chunk afterwards, the one
+tile the player had just bought was the one tile permanently out of step. The
+same hole closed at load, where an empty belt now takes the save's own tick
+rather than whatever a pre-rule save recorded.
+
 ### 2026-09-25 — A hover sheds a line only when that helps (PR #163 review)
 
 PR #163 merged unreviewed, and its review after the fact found that the

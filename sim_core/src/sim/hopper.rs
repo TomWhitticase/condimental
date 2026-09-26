@@ -213,7 +213,7 @@ mod tests {
     use crate::sim::types::Fx;
 
     fn belt() -> BeltSegment {
-        BeltSegment::new(Fx::from_num(4.0), Fx::from_num(0.25))
+        BeltSegment::new(Fx::from_num(4.0), Fx::from_num(0.25), 0)
     }
 
     fn hopper() -> Hopper {
@@ -253,7 +253,7 @@ mod tests {
         let mut b = belt();
         for _ in 0..100 {
             assert!(!h.try_unload(&mut b));
-            b.tick(Fx::from_num(0.02));
+            b.tick(Fx::from_num(0.02), 0);
         }
         assert!(b.is_empty());
     }
@@ -272,7 +272,7 @@ mod tests {
 
         let mut moved = 1;
         for _ in 0..200 {
-            b.tick(Fx::from_num(0.02));
+            b.tick(Fx::from_num(0.02), 0);
             if h.try_unload(&mut b) {
                 moved += 1;
             }
