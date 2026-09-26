@@ -763,16 +763,16 @@ fn guide_facts(
             // a shipped game.
             let (number, text) = match fact {
                 GuideFact::StartingMoney => (f64::from(STARTING_MONEY), String::new()),
-                GuideFact::CheapestMachine => {
+                GuideFact::CheapestBuyable => {
                     (0.0, cheapest.map(|e| e.id.clone()).unwrap_or_default())
                 }
-                GuideFact::CheapestMachinePrice => (
+                GuideFact::CheapestBuyablePrice => (
                     cheapest
                         .map(|e| e.price_money().to_num::<f64>())
                         .unwrap_or(0.0),
                     String::new(),
                 ),
-                GuideFact::MachineCount => (input.shop.entries().len() as f64, String::new()),
+                GuideFact::BuyableCount => (input.shop.entries().len() as f64, String::new()),
                 GuideFact::RawCount => (raw_count as f64, String::new()),
                 GuideFact::SauceCount => (sauce_count as f64, String::new()),
                 GuideFact::ContractCount => (input.contracts.len() as f64, String::new()),

@@ -20,6 +20,12 @@
 #   * the pages link up — a stage opens its machine, an ingredient row opens
 #     its ingredient, a row made here opens the sauce that makes it, and the
 #     breadcrumb walks back to the tree,
+#   * BASICS is the prose half of the same rule: a chip per topic in
+#     `data/guide.ron` named with the file's own title, a page carrying its
+#     tagline and every paragraph, every `{placeholder}` in them replaced by
+#     the number the sim answered with — no brace survives onto the screen,
+#     the values shown are the wire's, a tick fact reads as seconds, and no
+#     sentence of the prose is written anywhere in `cookbook_panel.gd`,
 #   * NOTHING is authored in GDScript: no id, display name or contract name
 #     in the whole book appears in any string literal in `cookbook_panel.gd`,
 #     which is the feature's binding requirement stated as an assertion,
@@ -125,6 +131,7 @@ func _run_checks() -> void:
 		return
 
 	_check_tree(book)
+	_check_basics(book)
 	_check_sauce_page()
 	_check_locked(book)
 	_check_links()
@@ -139,7 +146,7 @@ func _finish() -> void:
 	if _failed:
 		quit(1)
 		return
-	print("COOKBOOK_OK: the tree is cookbook_json — a node per sauce in its tier column, an orthogonal labelled edge per sauce-into-sauce, all on the canvas meta _draw() renders from; a locked family is a silhouette with its gate and a gate-only page; an unlocked page is its wire entry, counts, stages in order, seconds and never ticks; stages, rows and the breadcrumb link the pages; no id, name or contract in the book is written anywhere in cookbook_panel.gd; B opens it and closes E/M/C/H/P and each of them closes it, ESC walks back then closes without the pause menu, both legends name B; polled on the tick only while open, an unchanged book redraws nothing, and the pause menu hosts the same panel")
+	print("COOKBOOK_OK: the tree is cookbook_json — a node per sauce in its tier column, an orthogonal labelled edge per sauce-into-sauce, all on the canvas meta _draw() renders from; a locked family is a silhouette with its gate and a gate-only page; an unlocked page is its wire entry, counts, stages in order, seconds and never ticks; stages, rows and the breadcrumb link the pages; no id, name or contract in the book is written anywhere in cookbook_panel.gd; B opens it and closes E/M/C/H/P and each of them closes it, ESC walks back then closes without the pause menu, both legends name B; polled on the tick only while open, an unchanged book redraws nothing, and the pause menu hosts the same panel; BASICS is data/guide.ron — a chip per topic, every paragraph on its page with every placeholder filled from the wire, no brace on screen, ticks read as seconds, and no sentence of the prose written in GDScript")
 	quit(0)
 
 
@@ -402,6 +409,152 @@ func _check_links() -> void:
 		_panel().back()
 		if String(_panel().view().get("id", "")) != id:
 			_fail("back from a linked page does not return to where it was opened from")
+
+
+# --------------------------------------------------------------------------
+# BASICS
+# --------------------------------------------------------------------------
+
+## The formatted value a `{placeholder}` should become on screen, derived
+## here from the wire the same way the panel derives it — the point being
+## that the number shown is the sim's, not a number this file knows.
+func _fact_text(book: Dictionary, name: String) -> String:
+	for fact in book.get("facts", []):
+		if String(fact.get("id", "")) != name:
+			continue
+		var value := float(fact.get("number", 0.0))
+		match String(fact.get("kind", "")):
+			"ticks":
+				return "%.1fs" % (value / float(main.TICK_HZ))
+			"text":
+				return String(fact.get("text", ""))
+			"kind_id":
+				return main._kind_display_name(String(fact.get("text", "")))
+		if is_equal_approx(value, round(value)):
+			return "%d" % int(round(value))
+		return "%.2f" % value
+	return ""
+
+
+## Every `{placeholder}` in a piece of guide prose.
+func _placeholders(text: String) -> Array:
+	var out: Array = []
+	var rest := text
+	var opened := rest.find("{")
+	while opened >= 0:
+		var closed := rest.find("}", opened)
+		if closed < 0:
+			break
+		out.append(rest.substr(opened + 1, closed - opened - 1))
+		rest = rest.substr(closed + 1)
+		opened = rest.find("{")
+	return out
+
+
+func _check_basics(book: Dictionary) -> void:
+	var topics: Array = book.get("guide", [])
+	if topics.is_empty():
+		_fail("cookbook_json carries no guide topics; BASICS cannot be checked")
+		return
+
+	_panel().show_tree()
+	for topic in topics:
+		var id := String(topic.get("id", ""))
+		var chip := _node("Topic_%s" % id)
+		if chip == null:
+			_fail("the tree shows no BASICS chip for %s" % id)
+			continue
+		if (chip as Button).text != String(topic.get("title", "")):
+			_fail("the %s chip is not titled what data/guide.ron titles it" % id)
+
+	for topic in topics:
+		var id := String(topic.get("id", ""))
+		var chip := _node("Topic_%s" % id)
+		if chip == null:
+			continue
+		(chip as Button).pressed.emit()
+		var view: Dictionary = _panel().view()
+		if String(view.get("kind", "")) != "topic" or String(view.get("id", "")) != id:
+			_fail("clicking the %s chip does not open its page" % id)
+			_panel().show_tree()
+			continue
+
+		var screen := _screen()
+		if screen.find(String(topic.get("title", ""))) < 0:
+			_fail("the %s page is not titled with the file's title" % id)
+		# A brace on screen is the one failure this whole design exists to
+		# prevent: it means prose asked for a fact nothing answered.
+		if screen.find("{") >= 0 or screen.find("}") >= 0:
+			_fail("the %s page leaves a placeholder brace on screen" % id)
+		if screen.to_lower().find("tick") >= 0:
+			_fail("the %s page says tick; player-facing clocks are seconds" % id)
+
+		var prose: Array = [String(topic.get("tagline", ""))]
+		prose.append_array(topic.get("body", []))
+		for paragraph in prose:
+			var text := String(paragraph)
+			if text == "":
+				continue
+			# Compared in pieces around the placeholders, because the whole
+			# paragraph never appears on screen verbatim — the numbers in it
+			# are substituted by the time it is drawn.
+			for piece in _split_prose(text):
+				if piece.length() >= 8 and screen.find(piece) < 0:
+					_fail("the %s page drops \"%s\"" % [id, piece])
+			for name in _placeholders(text):
+				var wanted := _fact_text(book, name)
+				if wanted == "":
+					_fail("the %s page asks for {%s} and the wire answers nothing" % [id, name])
+				elif screen.find(wanted) < 0:
+					_fail("the %s page does not show the wire's %s (%s)" % [id, name, wanted])
+
+		# Every other topic is reachable without going back to the tree.
+		for other in topics:
+			var other_id := String(other.get("id", ""))
+			if other_id != id and _node("Topic_%s" % other_id) == null:
+				_fail("the %s page offers no way on to %s" % [id, other_id])
+		if not _panel().back():
+			_fail("a BASICS page does not walk back")
+		_panel().show_tree()
+
+	_check_prose_is_not_in_gdscript(topics)
+
+
+## The prose either side of each `{placeholder}`, which is what actually gets
+## drawn.
+func _split_prose(text: String) -> Array:
+	var out: Array = []
+	var rest := text
+	var opened := rest.find("{")
+	while opened >= 0:
+		var closed := rest.find("}", opened)
+		if closed < 0:
+			break
+		out.append(rest.substr(0, opened).strip_edges())
+		rest = rest.substr(closed + 1)
+		opened = rest.find("{")
+	out.append(rest.strip_edges())
+	return out
+
+
+## The prose half of "nothing is authored in GDScript". `_check_nothing_authored`
+## checks ids and names; this checks sentences, because a paragraph copied into
+## the panel as a fallback is the same defect wearing more words.
+func _check_prose_is_not_in_gdscript(topics: Array) -> void:
+	var source := FileAccess.get_file_as_string(PANEL_SOURCE)
+	if source == "":
+		_fail("could not read %s to check it holds no guide prose" % PANEL_SOURCE)
+		return
+	for topic in topics:
+		var prose: Array = [String(topic.get("tagline", ""))]
+		prose.append_array(topic.get("body", []))
+		for paragraph in prose:
+			var text := String(paragraph)
+			if text.length() < 24:
+				continue
+			var opening := text.substr(0, 24)
+			if source.find(opening) >= 0:
+				_fail("cookbook_panel.gd contains guide prose (\"%s…\"); it belongs in data/guide.ron" % opening)
 
 
 # --------------------------------------------------------------------------

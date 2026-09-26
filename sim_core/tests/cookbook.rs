@@ -443,7 +443,7 @@ fn every_fact_the_guide_can_ask_for_is_answered_from_the_content_files() {
         "the raws the guide counts are the raws the book has pages for"
     );
     assert_eq!(
-        fact("machine_count").number,
+        fact("buyable_count").number,
         sim_core::sim::ShopCatalog::bundled().entries().len() as f64
     );
 
@@ -495,10 +495,10 @@ fn every_fact_the_guide_can_ask_for_is_answered_from_the_content_files() {
         .iter()
         .min_by_key(|e| e.price_money())
         .expect("the shop sells something");
-    assert_eq!(fact("cheapest_machine").text, cheapest.id);
-    assert_eq!(fact("cheapest_machine").kind, "kind_id");
+    assert_eq!(fact("cheapest_buyable").text, cheapest.id);
+    assert_eq!(fact("cheapest_buyable").kind, "kind_id");
     assert_eq!(
-        fact("cheapest_machine_price").number,
+        fact("cheapest_buyable_price").number,
         cheapest.price_money().to_num::<f64>()
     );
 }

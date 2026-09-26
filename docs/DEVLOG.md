@@ -57,7 +57,11 @@ below is history and should only ever be appended to.)*
   `godot_project/cookbook_panel.gd` names a sauce, a machine or a price, and
   `test_cookbook.gd` fails if anything ever does. A locked family is an
   unnamed silhouette carrying its gate. The same panel is a page on the pause
-  menu, for reading with the factory stopped. See the log entry below.
+  menu, for reading with the factory stopped. **It has a BASICS section now
+  (2026-09-26):** six pages of prose out of `data/guide.ron` explaining the
+  loop, money, contracts, crew, building and growing — and the prose states
+  no number of its own, every quantity in it being a `{placeholder}` the sim
+  answers from the registries. See the log entries below.
 - **Raw stock has a ceiling (2026-09-21).** `data/storage.ron` caps every
   ingredient at `base_cap` 20 plus 50 per **bay**, and a `warehouse_rack`
   (1×2, six bays, 75) is the only thing that supplies bays. `BuyIngredient`
@@ -230,6 +234,57 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-26 — THE COOKBOOK gets a BASICS section, and the prose states no numbers
+
+The Cookbook's tree answers "what can this factory make". It cannot answer
+"what is the loop", "what is money for" or "what happens when a contract
+expires" — none of that is derivable from the recipe graph, because it is
+prose. The owner asked for the how-to-play half, under the same binding
+requirement as the rest of the book: dynamic, never hardcoded.
+
+Prose is content, so it went in a content file: `data/guide.ron`, six topics
+(the loop, money, contracts, crew, building, growing), each a title, a
+tagline and three or four paragraphs. The interesting part is the rule the
+file states about itself: **a paragraph never writes a number down.** Every
+quantity is a `{placeholder}` — `{starting_money}`, `{payday_ticks}`,
+`{cheapest_buyable}`, `{first_gate_deliveries}` — and the sim answers all
+fourteen of them from the registries on every poll. A price change rewrites
+the sentence that mentions it; nobody edits a word of prose.
+
+That only holds if it is enforced, so it is enforced from both ends.
+`sim_core/src/sim/guide.rs` refuses at load to accept a paragraph naming a
+placeholder the sim cannot answer, or an unclosed brace — a typo is a load
+error, never a `{` on screen. A unit test strips the placeholders out of
+every shipped paragraph and fails if an ASCII digit survives where a fact
+exists, which is what stops the next author from typing "3000" because it
+was quicker. `guide_facts` always emits the whole vocabulary, so a page can
+never find a gap. `cookbook.rs` carries the topics with their placeholders
+still in them and the answers alongside, and the panel's `_fill()` is the
+only thing that puts the two together — formatting each kind the way the
+book already formats it, so a tick fact reads as seconds and a content id
+goes through the display-name map rather than being titled in Rust.
+
+**Godot gained a view, not a vocabulary.** A row of chips at the top of the
+tree, one per topic, titled from the file; a page per topic; the other
+topics offered at the foot of each page. `test_cookbook.gd` checks the chips
+against the wire, that every paragraph reaches the screen, that the value
+shown for each placeholder is the value the wire answered with, that no
+brace survives, that a tick fact reads as seconds, and that no sentence of
+the prose appears anywhere in `cookbook_panel.gd`. Both halves were
+mutation-tested before being believed: neutering `_fill()` and dropping the
+chip row each turned the suite red in the way it should.
+
+`{machine_count}` and `{cheapest_machine}` were renamed `{buyable_count}`
+and `{cheapest_buyable}` while writing the prose — the shelf holds belts,
+pipes and the dock too, so the cheapest thing on it is a belt, and a
+placeholder called "machine" would have invited a future author to write a
+sentence that was wrong by four.
+
+New screenshot flag `--cookbook-basics`, which opens the first topic the
+guide ships without naming it, for the same reason `--cookbook-page` does
+not name a sauce. The screen is `docs/UI_UX.md` §5h.
+
 
 ### 2026-09-25 — THE COOKBOOK: the game explains itself, out of the data files
 

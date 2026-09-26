@@ -49,7 +49,7 @@
             tagline: "Buy raw, make sauce, ship cases, get paid. Everything else is detail.",
             body: [
                 "This whole factory is one loop. Buy a raw ingredient, run it through machines until it is a case of sauce, and get that case onto the dock before a contract's window closes. The dock pays. Nothing else does.",
-                "The world starts empty on purpose. There are {machine_count} kinds of thing you can buy and place, {raw_count} raws on the market, and {sauce_count} sauces the machines already know how to make. Nothing is built for you, and nothing is made until you build it.",
+                "The world starts empty on purpose. There are {buyable_count} kinds of thing you can buy and place, {raw_count} raws on the market, and {sauce_count} sauces the machines already know how to make. Nothing is built for you, and nothing is made until you build it.",
                 "A machine runs only when everything its recipe asks for is touching it: solids arrive on belt, fluids arrive down pipe. A machine with one input missing waits quietly and forever, which is why the first line you build should be the shortest one that can finish a case.",
             ],
         ),
@@ -59,7 +59,7 @@
             tagline: "You open with {starting_money}, and only the dock refills it.",
             body: [
                 "That opening balance has to cover every machine, every belt tile and every sack of ingredients until the first delivery pays out. It is enough for a line that works and not enough for a line that is impressive.",
-                "Money leaves three ways: tiles bought from the build menu, raws bought from the market, and wages. The cheapest thing on the shelf is the {cheapest_machine}, at {cheapest_machine_price}.",
+                "Money leaves three ways: tiles bought from the build menu, raws bought from the market, and wages. The cheapest thing on the shelf is the {cheapest_buyable}, at {cheapest_buyable_price}.",
                 "Money comes in one way: a contract paying out because you satisfied its delivery window. There is no spot market and nothing sells itself — a case nobody ordered just sits there.",
             ],
         ),

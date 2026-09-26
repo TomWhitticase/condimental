@@ -30,6 +30,17 @@
 ##   only because `TICK_HZ` is GDScript's constant (`main.gd`), so the wire
 ##   carries ticks and the host hands the divisor over.
 ##
+## # BASICS is prose, and it is content too
+##
+## The other half of "the game never explains itself" is the half no recipe
+## graph can answer: what the loop IS, what money is for, what a contract
+## costs you when it expires. That is prose, so it lives in `data/guide.ron`
+## with every other piece of content — and it states no quantity of its own.
+## Every number in it is a `{placeholder}` the sim answers (`guide.rs`), and
+## `_fill()` below is the only thing that puts the two together. A rebalance
+## that halves a price rewrites the BASICS pages that mention it, with no
+## edit here and none to the prose either.
+##
 ## # It is a COLUMN, not a plate
 ##
 ## `build()` returns a `VBoxContainer` the host drops into the plate it has,
@@ -93,6 +104,13 @@ const VIEW_TREE := "tree"
 const VIEW_SAUCE := "sauce"
 const VIEW_MACHINE := "machine"
 const VIEW_INGREDIENT := "ingredient"
+const VIEW_TOPIC := "topic"
+
+## How many BASICS chips sit in a row. A GridContainer of pinned cells, not
+## an HFlowContainer: a flow row decides where to break from the width the
+## layout pass gave it, and a headless run has no layout pass, so the break
+## a test measures would not be the break a player sees.
+const BASICS_COLUMNS := 3
 
 var root: VBoxContainer
 ## The one node everything below the breadcrumb hangs off, emptied and
@@ -106,6 +124,9 @@ var trail_box: HBoxContainer
 
 var _scroll: ScrollContainer
 var _book := {}
+## The wire's guide facts, keyed by placeholder name. Rebuilt from the book
+## on every navigation rather than kept in step by hand.
+var _facts := {}
 var _view := {"kind": VIEW_TREE, "id": ""}
 ## The views walked through to get here, oldest first. `back()` pops it; the
 ## breadcrumb draws it.
@@ -323,6 +344,11 @@ func _rebuild() -> void:
 		child.queue_free()
 	canvas = null
 
+	_facts = {}
+	for fact in _book.get("facts", []):
+		if fact is Dictionary:
+			_facts[String(fact.get("id", ""))] = fact
+
 	_rebuild_trail()
 
 	var kind := String(_view.get("kind", VIEW_TREE))
@@ -333,6 +359,8 @@ func _rebuild() -> void:
 		_build_machine_page(id)
 	elif kind == VIEW_INGREDIENT:
 		_build_ingredient_page(id)
+	elif kind == VIEW_TOPIC:
+		_build_topic_page(id)
 	else:
 		_build_tree()
 
@@ -388,7 +416,143 @@ func _view_title(entry: Dictionary) -> String:
 		return "SAUCE TREE"
 	if kind == VIEW_SAUCE and bool(_sauce(id).get("locked", false)):
 		return "LOCKED"
+	if kind == VIEW_TOPIC:
+		# A BASICS page's crumb is its own title from `data/guide.ron`, not
+		# `_name(id)`: `the_loop` is not a content id and the display-name map
+		# has never heard of it, so titling it here would invent a name.
+		return String(_topic(id).get("title", id))
 	return _name(id)
+
+
+# --------------------------------------------------------------------------
+# BASICS: the prose half
+# --------------------------------------------------------------------------
+
+## The way in to the guide, at the top of the tree: one chip per page in
+## `data/guide.ron`, in the order that file lists them. The titles are the
+## file's, so a seventh topic is a content edit and this function does not
+## change.
+##
+## It sits above the tree rather than behind a tab because the player who
+## needs it most is the one who just opened the book for the first time and
+## does not yet know what a tier is.
+func _build_basics_row() -> void:
+	var topics: Array = _book.get("guide", [])
+	if topics.is_empty():
+		return
+	var section := _section("BASICS", "start here — how the factory works, in words")
+	_chip_grid(section, "BasicsChips", topics)
+
+
+## A BASICS page: title, tagline, paragraphs, every number in them filled in
+## from the wire. Then the other pages, because someone who opened one of
+## these is reading the book rather than looking one thing up.
+func _build_topic_page(id: String) -> void:
+	var topic := _topic(id)
+	if topic.is_empty():
+		_paragraph(body, "CookbookMissing", "no page for %s" % id, INK_DIM)
+		return
+
+	# No `_title_row`: that row leads with the thing's own icon, and a page
+	# about how money works is not a thing with an asset. Inventing one here
+	# would be this file authoring content.
+	var title := Label.new()
+	title.name = "TopicTitle"
+	title.label_settings = _label_settings(_font(3), HEADING)
+	title.text = String(topic.get("title", ""))
+	body.add_child(title)
+
+	var tagline := String(topic.get("tagline", ""))
+	if tagline != "":
+		_paragraph(body, "TopicTagline", _fill(tagline), ACCENT)
+
+	body.add_child(_rule())
+
+	var paragraphs: Array = topic.get("body", [])
+	for index in range(paragraphs.size()):
+		_paragraph(body, "TopicBody_%d" % index, _fill(String(paragraphs[index])), INK)
+
+	var others: Array = []
+	for other in _book.get("guide", []):
+		if other is Dictionary and String(other.get("id", "")) != id:
+			others.append(other)
+	if not others.is_empty():
+		var more := _section("KEEP READING", "")
+		_chip_grid(more, "MoreChips", others)
+
+
+## A block of topic chips. Fixed columns and pinned cells so the shape a
+## headless test measures is the shape on screen — see `BASICS_COLUMNS`.
+func _chip_grid(parent: Node, node_name: String, topics: Array) -> void:
+	var grid := GridContainer.new()
+	grid.name = node_name
+	grid.columns = BASICS_COLUMNS
+	grid.add_theme_constant_override("h_separation", _i(8))
+	grid.add_theme_constant_override("v_separation", _i(8))
+	parent.add_child(grid)
+	for topic in topics:
+		if not (topic is Dictionary):
+			continue
+		var topic_id := String(topic.get("id", ""))
+		if topic_id == "":
+			continue
+		var chip := _button("Topic_%s" % topic_id, String(topic.get("title", "")))
+		chip.custom_minimum_size = Vector2(
+			_px((BODY_WIDTH - 8.0 * float(BASICS_COLUMNS - 1)) / float(BASICS_COLUMNS)),
+			_px(34.0)
+		)
+		# A title longer than its cell is cut rather than allowed to widen the
+		# column: the grid's cells are what `fit()` measures, and one long
+		# title would otherwise set the width of the whole panel.
+		chip.clip_text = true
+		chip.pressed.connect(open.bind(VIEW_TOPIC, topic_id))
+		grid.add_child(chip)
+
+
+## Substitutes every `{fact}` in a guide paragraph for the number the sim
+## answered with.
+##
+## The prose in `data/guide.ron` states no quantity of its own — that is the
+## file's own rule, and `guide.rs` refuses to load a paragraph naming a
+## placeholder the sim cannot answer — so this is where every number on a
+## BASICS page comes from, formatted the way the rest of the panel formats
+## that kind: ticks as seconds, a content id through the display-name map.
+##
+## An unanswered placeholder prints its own bare name. The sim ships the
+## whole vocabulary on every poll, so this can only happen with a book from
+## an older build than this file, and a stray word reads as a gap in a
+## sentence while `{payday_ticks}` reads as a broken screen.
+func _fill(text: String) -> String:
+	var out := ""
+	var rest := text
+	var opened := rest.find("{")
+	while opened >= 0:
+		var closed := rest.find("}", opened)
+		if closed < 0:
+			break
+		out += rest.substr(0, opened)
+		out += _fact_text(rest.substr(opened + 1, closed - opened - 1))
+		rest = rest.substr(closed + 1)
+		opened = rest.find("{")
+	return out + rest
+
+
+func _fact_text(name: String) -> String:
+	var fact: Dictionary = _facts.get(name, {})
+	if fact.is_empty():
+		return name
+	var value := float(fact.get("number", 0.0))
+	match String(fact.get("kind", "")):
+		"ticks":
+			return _seconds(int(round(value)))
+		"text":
+			return String(fact.get("text", ""))
+		"kind_id":
+			return _name(String(fact.get("text", "")))
+	# `money` and `count` are both "a number a player reads": the panel prints
+	# a price as a bare number everywhere else, so a currency mark here would
+	# be the only one in the book.
+	return _quantity(value)
 
 
 # --------------------------------------------------------------------------
@@ -412,6 +576,8 @@ func _build_tree() -> void:
 		"Every sauce this factory knows how to make. A column is how far from raw it is; an arrow is a sauce that goes into another sauce. Click one for its page.",
 		INK
 	)
+
+	_build_basics_row()
 
 	var columns := {}
 	var tiers: Array = []
@@ -926,6 +1092,10 @@ func _machine(id: String) -> Dictionary:
 
 func _ingredient(id: String) -> Dictionary:
 	return _find(_book.get("ingredients", []), id)
+
+
+func _topic(id: String) -> Dictionary:
+	return _find(_book.get("guide", []), id)
 
 
 func _find(entries: Array, id: String) -> Dictionary:

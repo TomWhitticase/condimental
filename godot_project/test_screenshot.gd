@@ -112,11 +112,13 @@
 # with every stage counted and a contract paid. Implies `--populate`.
 #
 # `--cookbook` opens THE COOKBOOK (B) on its sauce tree over the reference
-# line, and `--cookbook-page` opens the page behind the FIRST UNLOCKED node
-# the tree draws. Which sauce that is is deliberately not named here: the
-# whole feature is that the screen comes off `cookbook_json`, and a flag
-# that named a sauce would be one more place to edit when content changes.
-# Both imply `--populate`, so the factory behind the plate is running.
+# line, `--cookbook-page` opens the page behind the FIRST UNLOCKED node
+# the tree draws, and `--cookbook-basics` opens the FIRST BASICS page the
+# guide ships. Which sauce and which topic those are is deliberately not
+# named here: the whole feature is that the screen comes off
+# `cookbook_json`, and a flag that named either would be one more place to
+# edit when the content files change. All three imply `--populate`, so the
+# factory behind the plate is running.
 #
 # `--full-dock` builds the FULL-DOCK LINE (test_layouts.gd's
 # `build_full_dock_line`: the reference line on auto-fill, run until the
@@ -447,8 +449,12 @@ var _production := false
 ## opens the page of the first unlocked sauce the tree drew. The panel is the
 ## same in any world — it is the content files rendered — so the fixture is
 ## chosen for what is BEHIND it, which is the line the game ships.
+## `--cookbook-basics` opens the first prose page in `data/guide.ron`, which
+## is the half of the book that has numbers substituted into sentences — the
+## shot exists to prove no `{placeholder}` reaches the screen.
 var _cookbook := false
 var _cookbook_page := false
+var _cookbook_basics := false
 var _understaffed := false
 ## `--staff-shortfall` opens the staff panel over a line funded to less than
 ## its next payday's bill (the quality pass, ticket 4's BEFORE warning) —
@@ -649,9 +655,15 @@ func _initialize() -> void:
 		_pick_fixture("bottleneck", "--production")
 		_populate = true
 	_cookbook_page = args.has("--cookbook-page")
-	_cookbook = _cookbook_page or args.has("--cookbook")
+	_cookbook_basics = args.has("--cookbook-basics")
+	_cookbook = _cookbook_page or _cookbook_basics or args.has("--cookbook")
 	if _cookbook:
-		_pick_fixture("chain", "--cookbook-page" if _cookbook_page else "--cookbook")
+		var flag := "--cookbook"
+		if _cookbook_page:
+			flag = "--cookbook-page"
+		elif _cookbook_basics:
+			flag = "--cookbook-basics"
+		_pick_fixture("chain", flag)
 		_populate = true
 	_understaffed = args.has("--understaffed")
 	if _understaffed:
@@ -1311,6 +1323,31 @@ func _open_first_unlocked_sauce() -> bool:
 		"SCREENSHOT_FAIL: --cookbook-page found no unlocked sauce in this world, so \
 there is no page to open. Every family is still behind its gate — ship enough to \
 release one, or use --cookbook for the tree."
+	)
+	_refuse()
+	return false
+
+
+## `--cookbook-basics`: the first page `data/guide.ron` lists, opened off the
+## wire for the same reason as `--cookbook-page` — the flag must not know the
+## topic's name. It refuses in words if the guide ships nothing, because a
+## shot of the tree under a basics flag reviews the wrong screen.
+func _open_first_basics_topic() -> bool:
+	var book = JSON.parse_string(_main.sim.cookbook_json())
+	if not (book is Dictionary):
+		printerr("SCREENSHOT_FAIL: --cookbook-basics could not read cookbook_json")
+		_refuse()
+		return false
+	for topic in (book as Dictionary).get("guide", []):
+		var id := String(topic.get("id", ""))
+		if id == "":
+			continue
+		_main._cookbook.open("topic", id)
+		_main._position_cookbook_panel()
+		return true
+	printerr(
+		"SCREENSHOT_FAIL: --cookbook-basics found no topics in cookbook_json, so there \
+is no page to open. data/guide.ron ships the BASICS pages — check it loaded."
 	)
 	_refuse()
 	return false
@@ -2320,6 +2357,8 @@ func _process(delta: float) -> bool:
 	if _frames == 2 and _cookbook:
 		_main._set_cookbook_open(true)
 		if _cookbook_page and not _open_first_unlocked_sauce():
+			return true
+		if _cookbook_basics and not _open_first_basics_topic():
 			return true
 	if _frames == 2 and _understaffed:
 		if not _hover_over_tile(Layouts.UNDERSTAFFED_VAT):

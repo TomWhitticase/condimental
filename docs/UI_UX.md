@@ -1094,7 +1094,7 @@ single unpinned footer Label made the real panel 99px wider than that, which
 is 99px of legend it could then not get off. Every label on this panel pins
 its width and wraps — §5c's rule, and the reason that rule exists.
 
-### 5h. THE COOKBOOK: the game explaining itself (built 2026-09-25)
+### 5h. THE COOKBOOK: the game explaining itself (built 2026-09-25, BASICS 2026-09-26)
 
 Everything else in §5 tells the player what the factory is doing right now.
 This one tells them what the game *is*: **B** opens a screen whose first view
@@ -1147,6 +1147,35 @@ would be invisible to every test; the meta is what `test_cookbook.gd`
 asserts against and the pixels are downstream of it. The nodes themselves
 are real Buttons at explicit positions, so a click is a `pressed` signal
 rather than a hit test against a rectangle nobody measured.
+
+**BASICS: the half no graph can answer (built 2026-09-26).** The tree says
+what the factory can make; it cannot say what the loop *is*, what money is
+for, or what an expired contract costs you. So the book opens on a row of
+chips above the tree — one per topic in `data/guide.ron` — and each one is a
+page of prose: a title, a tagline, three or four paragraphs.
+
+That prose is content, in a content file, for the same reason every recipe
+is. What makes it stay true is a rule the file states about itself: **a
+paragraph never writes a number down.** Every quantity is a
+`{placeholder}` — `{starting_money}`, `{payday_ticks}`,
+`{cheapest_buyable}` — that the sim answers from the registries on every
+poll, so halving a price rewrites the sentence that mentions it and nobody
+edits a word. The vocabulary is closed and enforced from both ends:
+`guide.rs` refuses to load a paragraph naming a placeholder the sim cannot
+answer, and a unit test refuses a shipped paragraph that states a bare
+number where a fact exists. The panel's `_fill()` is the only thing that
+puts the two halves together, and it formats each kind the way the rest of
+the book does — a tick fact reads as seconds, a content id goes through the
+display-name map. `test_cookbook.gd` asserts that no brace ever reaches the
+screen and that no sentence of the prose is written in GDScript.
+
+The chips sit at the **top** of the tree rather than behind a tab, because
+the player who needs them most is the one who has just opened the book for
+the first time and does not yet know what a tier is. They are a
+`GridContainer` of pinned cells, not a flow row: a flow decides where to
+break from the width the layout pass gave it, and a headless run has no
+layout pass, so the break a test measures would not be the break a player
+sees.
 
 **B and the six-line legend.** B was the build menu's key until E took it
 over, and was left dead rather than aliased; "B for book" claims it the way

@@ -93,11 +93,13 @@ pub enum GuideFact {
     /// `sim::STARTING_MONEY`.
     StartingMoney,
     /// The id of the cheapest thing in `data/shop.ron`, titled by Godot.
-    CheapestMachine,
+    CheapestBuyable,
     /// What that cheapest thing costs.
-    CheapestMachinePrice,
-    /// How many kinds `data/shop.ron` sells.
-    MachineCount,
+    CheapestBuyablePrice,
+    /// How many kinds `data/shop.ron` sells. Not "machines": the shelf holds
+    /// belts, pipes and the dock too, so prose that said machine would be
+    /// wrong by four.
+    BuyableCount,
     /// How many priced raws `data/ingredients.ron` holds.
     RawCount,
     /// How many sauces the book has pages for.
@@ -125,9 +127,9 @@ impl GuideFact {
     /// a diff of two snapshots reads consistently.
     pub const ALL: [GuideFact; 14] = [
         GuideFact::StartingMoney,
-        GuideFact::CheapestMachine,
-        GuideFact::CheapestMachinePrice,
-        GuideFact::MachineCount,
+        GuideFact::CheapestBuyable,
+        GuideFact::CheapestBuyablePrice,
+        GuideFact::BuyableCount,
         GuideFact::RawCount,
         GuideFact::SauceCount,
         GuideFact::ContractCount,
@@ -144,9 +146,9 @@ impl GuideFact {
     pub fn placeholder(self) -> &'static str {
         match self {
             GuideFact::StartingMoney => "starting_money",
-            GuideFact::CheapestMachine => "cheapest_machine",
-            GuideFact::CheapestMachinePrice => "cheapest_machine_price",
-            GuideFact::MachineCount => "machine_count",
+            GuideFact::CheapestBuyable => "cheapest_buyable",
+            GuideFact::CheapestBuyablePrice => "cheapest_buyable_price",
+            GuideFact::BuyableCount => "buyable_count",
             GuideFact::RawCount => "raw_count",
             GuideFact::SauceCount => "sauce_count",
             GuideFact::ContractCount => "contract_count",
@@ -163,9 +165,9 @@ impl GuideFact {
     pub fn kind(self) -> GuideFactKind {
         match self {
             GuideFact::StartingMoney
-            | GuideFact::CheapestMachinePrice
+            | GuideFact::CheapestBuyablePrice
             | GuideFact::StartingWageBill => GuideFactKind::Money,
-            GuideFact::MachineCount
+            GuideFact::BuyableCount
             | GuideFact::RawCount
             | GuideFact::SauceCount
             | GuideFact::ContractCount
@@ -175,7 +177,7 @@ impl GuideFact {
             | GuideFact::FirstGateDeliveries => GuideFactKind::Count,
             GuideFact::PaydayTicks => GuideFactKind::Ticks,
             GuideFact::FirstGateName => GuideFactKind::Text,
-            GuideFact::CheapestMachine => GuideFactKind::KindId,
+            GuideFact::CheapestBuyable => GuideFactKind::KindId,
         }
     }
 
