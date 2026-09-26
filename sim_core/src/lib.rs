@@ -439,8 +439,19 @@ impl SimBridge {
     ///              {"id": "1m", "ticks": 1800, "observed": 1800}, ...],
     ///  "items": [{"id": "tomato", "kind": "item",
     ///             "produced": [0, 0, 0, 0], "consumed": [8, 96, 96, 96],
-    ///             "produced_total": 0, "consumed_total": 96}, ...]}
+    ///             "produced_total": 0, "consumed_total": 96}, ...],
+    ///  "cycle": {"period_ticks": 1000, "next_tick": 3000, "cycles_closed": 2,
+    ///            "lines": [{"id": "boxed_ketchup", "required": 2.0,
+    ///                       "produced_this_cycle": 1, "produced_last_cycle": 3,
+    ///                       "short": false}]}}
     /// ```
+    ///
+    /// `cycle` is the pay cycle (the staff payday period): one line per
+    /// product an active contract orders, in priority order — what one
+    /// period requires (a fraction when a cadence does not divide it), what
+    /// was made since payday and in the period before, and whether that
+    /// finished period made less than the contracts active now require.
+    /// `lines` is empty with no contract.
     ///
     /// `windows` is in shortest-first order with how much of each has
     /// actually been observed (a rate divides by that, not by the window);

@@ -1984,6 +1984,16 @@ var _production_window := 1
 ## carries nothing any other readout needs), on the load's cadence.
 var _production_snapshot: Dictionary = {}
 var _production_polled_tick := -1
+## The pay-cycle block over the list (ticket 7, 2026-09-26): per product an
+## active contract orders, REQUIRED per pay cycle, MADE this cycle and last,
+## straight off the wire's `cycle`. `_production_cycle_rows` is one entry
+## per line, see `_build_production_cycle_row`.
+var _production_cycle_box: VBoxContainer
+var _production_cycle_scroll: ScrollContainer
+var _production_cycle_rows_box: VBoxContainer
+var _production_cycle_rows: Array = []
+var _production_cycle_caption: Label
+var _production_cycle_empty_label: Label
 
 # --- THE COOKBOOK (B) -----------------------------------------------------
 # The recipe book: the sauce tree, and a page per sauce, machine and raw.
@@ -2000,6 +2010,9 @@ var _cookbook_polled_tick := -1
 const PRODUCTION_ALL_TIME := -1
 const PRODUCTION_METER_WIDTH := 150.0 * UI_SCALE
 const PRODUCTION_ICON_SIZE := Vector2(36, 36) * UI_SCALE
+## The pay-cycle block's three figure columns, in the wire's terms.
+const PRODUCTION_CYCLE_COLUMNS := ["REQUIRED", "THIS CYCLE", "LAST CYCLE"]
+const PRODUCTION_CYCLE_COLUMN_WIDTH := 130.0 * UI_SCALE
 const STAFF_METER_WIDTH := 150.0 * UI_SCALE
 const STAFF_METER_HEIGHT := 20.0 * UI_SCALE
 const STAFF_ICON_SIZE := Vector2(40, 40) * UI_SCALE
@@ -9806,6 +9819,7 @@ func _build_production_panel(hud: CanvasLayer, base_settings: LabelSettings) -> 
 	# harness (see `_build_ingredient_market`).
 	_production_rows.clear()
 	_production_window_buttons.clear()
+	_production_cycle_rows.clear()
 
 	_production_panel = PanelContainer.new()
 	_production_panel.name = "ProductionPanel"
@@ -9846,6 +9860,8 @@ func _build_production_panel(hud: CanvasLayer, base_settings: LabelSettings) -> 
 	for index in range(windows.size()):
 		_build_production_window_button(selector, base_settings, index, "last %s" % String(windows[index].get("id", "?")))
 	_build_production_window_button(selector, base_settings, PRODUCTION_ALL_TIME, "all time")
+
+	_build_production_cycle_block(body)
 
 	# The column captions, once, over the list — MADE and USED are the two
 	# halves of every row and naming them per row would be noise.
@@ -9897,6 +9913,199 @@ func _build_production_panel(hud: CanvasLayer, base_settings: LabelSettings) -> 
 	_position_production_panel()
 
 
+## The pay-cycle block: a caption naming the cycle and its countdown, the
+## three column captions, one row per demanded product, and a sentence in
+## their place when no contract is running. Above the rolling list because
+## it answers the question the orders ask — "does my factory keep up?" —
+## and the list below answers "what is it doing?".
+func _build_production_cycle_block(body: VBoxContainer) -> void:
+	_production_cycle_box = VBoxContainer.new()
+	_production_cycle_box.name = "ProductionCycle"
+	_production_cycle_box.add_theme_constant_override("separation", _ui_i(4))
+	body.add_child(_production_cycle_box)
+
+	_production_cycle_caption = Label.new()
+	_production_cycle_caption.name = "CycleCaption"
+	_production_cycle_caption.label_settings = _staff_meta_settings()
+	_production_cycle_box.add_child(_production_cycle_caption)
+
+	var captions := HBoxContainer.new()
+	captions.name = "CycleColumns"
+	captions.add_theme_constant_override("separation", _ui_i(14))
+	_production_cycle_box.add_child(captions)
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(PRODUCTION_ICON_SIZE.x + _ui_px(14.0) + _ui_px(150.0), 0.0)
+	captions.add_child(spacer)
+	for caption in PRODUCTION_CYCLE_COLUMNS:
+		var label := Label.new()
+		label.label_settings = _staff_meta_settings()
+		label.text = caption
+		label.custom_minimum_size = Vector2(PRODUCTION_CYCLE_COLUMN_WIDTH, 0.0)
+		captions.add_child(label)
+
+	# The rows scroll on their own, so a third ordered product costs the
+	# panel no height: `_fit_production_scrolls` shares one budget between
+	# this and the list below.
+	_production_cycle_scroll = ScrollContainer.new()
+	_production_cycle_scroll.name = "CycleScroll"
+	_production_cycle_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_production_cycle_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_production_cycle_box.add_child(_production_cycle_scroll)
+
+	_production_cycle_rows_box = VBoxContainer.new()
+	_production_cycle_rows_box.name = "CycleRows"
+	_production_cycle_rows_box.add_theme_constant_override("separation", _ui_i(4))
+	_production_cycle_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_production_cycle_scroll.add_child(_production_cycle_rows_box)
+
+	_production_cycle_empty_label = Label.new()
+	_production_cycle_empty_label.name = "CycleEmpty"
+	_production_cycle_empty_label.label_settings = _staff_meta_settings()
+	_production_cycle_empty_label.text = "no orders running — sign one on the contracts board (C) to see what it needs per pay cycle"
+	_production_cycle_box.add_child(_production_cycle_empty_label)
+
+
+## A per-cycle requirement in words: whole when it is whole (`2`), else to
+## one place (`6.7`) — a 1 500-tick order over a 1 000-tick payday asks for
+## two-thirds of its mix, and rounding that to a whole box would lie. The
+## wire's figure is a fixed-point sum, so a whole 11 can arrive as 10.99998:
+## it is rounded to the place first and judged whole after.
+func _production_required_text(required: float) -> String:
+	var text := "%.1f" % required
+	return text.trim_suffix(".0")
+
+
+## The pay-cycle rows, FORMATTED from the snapshot's `cycle` in the wire's
+## order (contract priority) — nothing sorted, summed or judged here: the
+## sim says what is required and whether last cycle fell short. Before the
+## first payday there is no last cycle, so it prints `—`, never a zero that
+## would read as a factory that made nothing. Pure given the snapshot.
+func _production_cycle_rows_for(snapshot: Dictionary) -> Array:
+	var cycle = snapshot.get("cycle", {})
+	if not (cycle is Dictionary):
+		return []
+	var closed := int(cycle.get("cycles_closed", 0)) > 0
+	var rows: Array = []
+	for line in cycle.get("lines", []):
+		if not (line is Dictionary):
+			continue
+		var id := String(line.get("id", ""))
+		var short := bool(line.get("short", false))
+		var last := int(line.get("produced_last_cycle", 0))
+		var last_text := str(last) if closed else "—"
+		if short:
+			last_text += "  ▲ short"
+		rows.append({
+			"id": id,
+			"name": _item_display_name(id),
+			"required": _production_required_text(float(line.get("required", 0.0))),
+			"this_cycle": str(int(line.get("produced_this_cycle", 0))),
+			"last_cycle": last_text,
+			"short": short,
+		})
+	return rows
+
+
+## The caption over the block: what "cycle" means and when this one ends —
+## `ORDERS PER PAY CYCLE (34s)  ·  payday in 12s`.
+func _production_cycle_caption_text(snapshot: Dictionary) -> String:
+	var cycle = snapshot.get("cycle", {})
+	if not (cycle is Dictionary):
+		return ""
+	var text := "ORDERS PER PAY CYCLE (%s)" % _format_remaining(int(cycle.get("period_ticks", 0)))
+	var next_tick := int(cycle.get("next_tick", 0))
+	if next_tick > 0:
+		text += "    ·    payday in %s" % _format_remaining(next_tick - sim.current_tick())
+	return text
+
+
+## One demanded product: icon and name, then REQUIRED / THIS CYCLE / LAST
+## CYCLE as plain figures in fixed columns. A short row takes the staff
+## panel's short border and prints its last-cycle figure in the warning
+## colour with the words beside it (UI_UX.md §7: colour never alone).
+func _build_production_cycle_row(row_state: Dictionary) -> Dictionary:
+	var id := String(row_state.get("id", "?"))
+	var panel := PanelContainer.new()
+	panel.name = "Cycle_%s" % id
+	panel.add_theme_stylebox_override("panel", _staff_row_style(false))
+	_production_cycle_rows_box.add_child(panel)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", _ui_i(14))
+	panel.add_child(row)
+
+	var icon := TextureRect.new()
+	icon.name = "Icon"
+	icon.custom_minimum_size = PRODUCTION_ICON_SIZE
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	icon.texture = _icon_for(id)
+	row.add_child(icon)
+
+	var name_label := Label.new()
+	name_label.name = "Name"
+	name_label.label_settings = _contract_name_settings_dark()
+	name_label.text = String(row_state.get("name", id))
+	name_label.custom_minimum_size = Vector2(_ui_px(150.0), 0.0)
+	name_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(name_label)
+
+	var figures := {}
+	for key in ["required", "this_cycle", "last_cycle"]:
+		var label := Label.new()
+		label.name = key.to_pascal_case()
+		label.label_settings = _contract_name_settings_dark()
+		label.custom_minimum_size = Vector2(PRODUCTION_CYCLE_COLUMN_WIDTH, 0.0)
+		label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(label)
+		figures[key] = label
+	# The last-cycle figure's own settings, since its colour is the row's
+	# verdict (`_staff_state_settings`' reason).
+	var warn := _contract_name_settings_dark()
+	warn.font_color = METER_FILL_WARN
+	return {
+		"id": id, "panel": panel, "required": figures["required"],
+		"this_cycle": figures["this_cycle"], "last_cycle": figures["last_cycle"],
+		"plain": figures["required"].label_settings, "warn": warn, "short": false,
+	}
+
+
+func _update_production_cycle_block() -> void:
+	if _production_cycle_box == null:
+		return
+	var rows := _production_cycle_rows_for(_production_snapshot)
+	var same: bool = rows.size() == _production_cycle_rows.size()
+	if same:
+		for i in range(rows.size()):
+			same = same and String(rows[i]["id"]) == String(_production_cycle_rows[i]["id"])
+	if not same:
+		for row in _production_cycle_rows:
+			var panel: Node = row["panel"]
+			if is_instance_valid(panel):
+				if panel.get_parent() != null:
+					panel.get_parent().remove_child(panel)
+				panel.queue_free()
+		_production_cycle_rows.clear()
+		for row_state in rows:
+			_production_cycle_rows.append(_build_production_cycle_row(row_state))
+	for i in range(rows.size()):
+		var state: Dictionary = rows[i]
+		var row: Dictionary = _production_cycle_rows[i]
+		row["required"].text = String(state["required"])
+		row["this_cycle"].text = String(state["this_cycle"])
+		row["last_cycle"].text = String(state["last_cycle"])
+		var short := bool(state["short"])
+		if row["short"] != short:
+			row["short"] = short
+			row["panel"].add_theme_stylebox_override("panel", _staff_row_style(short))
+			row["last_cycle"].label_settings = row["warn"] if short else row["plain"]
+	_production_cycle_caption.text = _production_cycle_caption_text(_production_snapshot)
+	_production_cycle_empty_label.visible = rows.is_empty()
+	_production_cycle_box.get_node("CycleColumns").visible = not rows.is_empty()
+	_production_cycle_scroll.visible = not rows.is_empty()
+
+
 ## One window button. The selected one wears the hotbar's selected-socket
 ## style, the rest its stocked style — "the thing I have chosen" looks the
 ## same wherever the game asks (the configuration panel's picker made the
@@ -9944,10 +10153,39 @@ func _position_production_panel() -> void:
 	# row showing past the cut is the thing that says "there is more, scroll".
 	# Asking for whole rows here bought a tidier edge and paid a readable row
 	# for it: at 1600x900 the panel ended 161px short of the column it had.
-	_fit_grid_scroll(_production_scroll, _production_rows_box, bounds.y - reserved - _ui_px(16.0))
+	_fit_production_scrolls(bounds.y - reserved - _ui_px(16.0))
 	var panel_size := _production_panel.get_combined_minimum_size()
 	_production_panel.position.x = maxf(0.0, (bounds.x - panel_size.x) * 0.5)
 	_production_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
+
+
+## The pay-cycle rows and the rolling list share ONE height budget: what
+## `available` leaves after the panel's own chrome (measured, as
+## `_fit_grid_scroll` measures it). Each scroll alone, the cycle block grew
+## the panel by a row per ordered product past the list's floor — at
+## 1280x720 two products put it on the hotbar and three put it off the
+## screen. The cycle rows go first, since they answer the question the
+## orders ask, but never past what leaves the list `_fit_grid_scroll`'s
+## floor or half the room, whichever is more; the list takes the rest. Each
+## keeps at least one row's stub so neither vanishes, and those stubs are
+## the only thing that can overrun `available`, on a window smaller than
+## 1280x720.
+func _fit_production_scrolls(available: float) -> void:
+	if _production_cycle_scroll == null or _production_scroll == null:
+		return
+	var cycle_natural: float = _production_cycle_rows_box.get_combined_minimum_size().y if _production_cycle_scroll.visible else 0.0
+	var list_natural: float = _production_rows_box.get_combined_minimum_size().y if _production_scroll.visible else 0.0
+	_production_cycle_scroll.custom_minimum_size.y = cycle_natural
+	_production_scroll.custom_minimum_size.y = list_natural
+	var chrome: float = _production_panel.get_combined_minimum_size().y - cycle_natural - list_natural
+	var room: float = maxf(0.0, available - chrome)
+	var cycle: float = minf(cycle_natural, maxf(room * 0.5, room - _ui_px(110.0)))
+	if _production_cycle_rows_box.get_child_count() > 0:
+		var first_row: float = (_production_cycle_rows_box.get_child(0) as Control).get_combined_minimum_size().y
+		cycle = maxf(cycle, minf(cycle_natural, first_row))
+	var list: float = minf(list_natural, maxf(room - cycle, _ui_px(40.0)))
+	_production_cycle_scroll.custom_minimum_size.y = cycle
+	_production_scroll.custom_minimum_size.y = list
 
 
 func _production_poll_due() -> bool:
@@ -10157,6 +10395,7 @@ func _rebuild_production_rows(rows: Array) -> void:
 func _update_production_panel() -> void:
 	if _production_panel == null:
 		return
+	_update_production_cycle_block()
 	var rows := _production_rows_for(_production_snapshot, _production_window)
 	if not _production_rows_match(rows):
 		_rebuild_production_rows(rows)
