@@ -285,18 +285,24 @@ product, the requirement and the count, so the padlock and the cookbook read
 "34 of 100 boxes of Boxed Ketchup" with the name resolved by Godot's existing
 display-name map and nothing about the rule written in GDScript.
 
-**Saves load.** `SaveData` gains `lifetime_boxes_sold` with
-`#[serde(default)]` at version 3 rather than bumping the version — a
-documented exception to the usual rule, because a world that never counted has
-nothing to say and *nothing sold* is the honest reading of that silence.
+**Existing saves stop loading, deliberately.** `SaveData` gains
+`lifetime_boxes_sold` and the format goes to **version 5**; a v4 file is
+refused with a sentence saying what changed. The first cut of this branch
+tried one `#[serde(default)]` instead, and review found what that costs: gate
+state is derived from the ledger on every load, so an old save came back with
+both tiers re-locked, its gated raws unbuyable and a signed BBQ contract
+stranded mid-run. A delivery window never recorded what was in it, so nothing
+in a v4 file can be turned into a boxes-sold ledger without inventing it.
+No release has ever written a save.
 
 **The gates are much later, and that is a flag rather than a tuning
 decision.** The numbers are the owner's. Measured headless at 30 ticks/sec:
 the first gate arrives at tick 52 000 (~29 min, 50 delivery windows) with the
 starter order alone, tick 33 000 (~18 min, 44 windows) with all three signed —
-where ten windows used to be a couple of minutes. The second wants ~130 000
-further ticks (~72 min), because authored BBQ demand outruns one branch's
-output. The 2026-09-20 measurement behind issue #55 found its trap stopped
+where ten windows used to be a couple of minutes. The second is measured from
+zero by `godot_project/measure_gate_ticks.gd` and lands at tick 181 000 — 100
+minutes, 114 000 ticks (~63 min) past the first — because authored BBQ demand
+outruns one branch's output. The 2026-09-20 measurement behind issue #55 found its trap stopped
 biting around 40 windows, so at 44 it mostly does not fire any more — by side
 effect, not by design, and #92/#93 are still the right fixes. Full record:
 `docs/DECISIONS.md`, 2026-09-26.

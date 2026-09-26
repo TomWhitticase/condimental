@@ -946,7 +946,7 @@ func _string_arg(args: Array, flag: String) -> String:
 ## written out here, so a balance pass on that file cannot leave these shots
 ## photographing the wrong side of the gate.
 func _cross_gates(offset: int) -> void:
-	Layouts.cross_every_gate(_main.sim, offset)
+	Layouts.cross_every_gate(_main.sim, offset, "SCREENSHOT_FAIL")
 	# `cross_every_gate` goes through save/load, so the rendered world is
 	# rebuilt from the reloaded one — identical by construction, but the scene
 	# has to be told, exactly as `_build_fixture` tells it.

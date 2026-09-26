@@ -241,17 +241,17 @@
         // by a number — a player who has SOLD a hundred cases of BBQ has been
         // paid for them, and a mustard line costs 959.
         //
-        // WHAT IT COSTS IN TIME, measured 2026-09-26 (headless:
-        // `sim::bbq_branch`, fully staffed, all four BBQ orders signed, raws
-        // topped up and money no object, counting boxes sold from the moment
-        // the branch runs):
+        // WHAT IT COSTS IN TIME, measured from a NEW GAME on 2026-09-27 by
+        // `godot_project/measure_gate_ticks.gd` (fully staffed, raws topped
+        // up and money no object — a floor, not a typical run):
         //
-        //   100th box of boxed_bbq at tick 130 000 — 72 minutes at 30
-        //   ticks/sec, on top of the 18-33 minutes the BBQ gate itself takes
+        //   100th box of boxed_ketchup at tick ~52 000, and the 100th box of
+        //   boxed_bbq at tick 181 000 — 100 minutes at 30 ticks/sec, of which
+        //   114 000 ticks (~63 min) are after the first gate opened
         //
         // THAT IS A FLAG, not a measurement in support: it puts mustard about
-        // an hour and a half into a session, where the old trigger put it at
-        // eleven minutes. The cause is not the factory — the four BBQ orders
+        // an hour and three quarters into a session, where the old trigger put
+        // it at eleven minutes. The cause is not the factory — the four BBQ orders
         // between them ask for only about 4.5 boxes per 1 000 ticks, and the
         // branch actually delivered about 0.8, so it is the branch's
         // throughput against the cadences the orders keep. Whoever wants

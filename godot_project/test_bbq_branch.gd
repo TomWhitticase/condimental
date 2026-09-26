@@ -275,7 +275,7 @@ floor have to be tellable apart"
 	# gate counts is read off the wire rather than written out here, so a
 	# balance pass on that file cannot leave this asserting against the wrong
 	# side of it.
-	Layouts.open_every_gate(main.sim)
+	Layouts.open_every_gate(main.sim, "BBQ_BRANCH_FAIL")
 	main._rebuild_world()
 
 	# The board can ask for two products in one order now — something it

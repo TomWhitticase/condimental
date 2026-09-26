@@ -262,7 +262,7 @@ static func storage_bays(sim) -> int:
 ## ingredients back until a hundred boxes of ketchup have been sold, so a
 ## fresh world cannot buy spice mix, molasses or liquid smoke at any price and
 ## this row shows the three a new game has (see `build_bbq_running_line`,
-## which pays some 55 000 ticks for the other three). That every raw the game prices — gated ones
+## which pays some 52 000 ticks for the other three). That every raw the game prices — gated ones
 ## included — has a rack tint of its own, distinct from the floor, is proved
 ## headlessly by `test_warehouse_rack.gd` instead: it is a claim about a
 ## table, and it does not need a camera.
@@ -920,8 +920,11 @@ static func build_bbq_running_line(sim) -> void:
 ## **Callers with a scene must `_rebuild_world()` afterwards**, for the
 ## reason `fill_fluid_runs` gives: the world is reloaded, so it is a new
 ## world object and the 3D subtree is built from the old one until told.
-static func open_every_gate(sim) -> void:
-	cross_every_gate(sim, 0)
+## `marker` is the CALLER's failure marker — this helper is shared by the
+## cookbook, HUD, ingredient, BBQ and screenshot fixtures, and a marker naming
+## the wrong one of those sends the next author to the wrong file.
+static func open_every_gate(sim, marker: String = "GATE_FIXTURE_FAIL") -> void:
+	cross_every_gate(sim, 0, marker)
 
 
 ## [method open_every_gate] with the LAST gate in the file left `offset` boxes
@@ -936,15 +939,15 @@ static func open_every_gate(sim) -> void:
 ## counting different products have no comparable thresholds. `offset` lands on
 ## that gate's product alone, so it would not hold back an earlier tier that
 ## happened to count the same product; no shipped pair does.
-static func cross_every_gate(sim, offset: int) -> void:
+static func cross_every_gate(sim, offset: int, marker: String = "GATE_FIXTURE_FAIL") -> void:
 	var economy = JSON.parse_string(sim.economy_snapshot_json())
 	if not (economy is Dictionary):
-		fail_fixture("MUSTARD_FIXTURE_FAIL", "economy_snapshot_json did not parse as a Dictionary")
+		fail_fixture(marker, "economy_snapshot_json did not parse as a Dictionary")
 		return
 	var gates: Array = economy.get("unlocks", [])
 	if gates.is_empty():
 		fail_fixture(
-			"MUSTARD_FIXTURE_FAIL",
+			marker,
 			"data/unlocks.ron gates nothing — a fixture that crossed no gate would prove nothing"
 		)
 		return
@@ -955,7 +958,7 @@ static func cross_every_gate(sim, offset: int) -> void:
 		var required := int(gate.get("required", 0))
 		if item == "" or required <= 0:
 			fail_fixture(
-				"MUSTARD_FIXTURE_FAIL",
+				marker,
 				"gate '%s' names no product to sell" % String(gate.get("id", "?"))
 			)
 			return
@@ -1023,7 +1026,9 @@ static func unlock_open(sim, id: String) -> bool:
 ## it.** `build_bbq_running_line` runs a ketchup line until BBQ's hundredth
 ## box of ketchup sells, and that is right for a fixture whose subject IS the
 ## unlock. Mustard then wants a hundred boxes of BBQ on top, which is another
-## 130 000 ticks, and this fixture's subject is the line, so it uses
+## 114 000 ticks — measured, by `measure_gate_ticks.gd`, which earns both gates
+## from a new game and reaches mustard at tick 181 000 — and this fixture's
+## subject is the line, so it uses
 ## `open_every_gate` — the same door `test_ingredient_models.gd` and
 ## `test_screenshot.gd` already cross gates through. What stays real is
 ## every placement: nothing here is conjured into the world, it is bought
@@ -1033,7 +1038,7 @@ static func build_mustard_line(sim) -> void:
 	# buying anything, or `stock_larder` silently skips both of mustard's
 	# ingredients and this becomes a complete line that never makes a case
 	# — the failure `build_bbq_running_line` documents at its own ceiling.
-	open_every_gate(sim)
+	open_every_gate(sim, "MUSTARD_FIXTURE_FAIL")
 	if fixture_failure() != "":
 		return
 	if not unlock_open(sim, MUSTARD_UNLOCK):

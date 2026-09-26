@@ -91,16 +91,26 @@ matches what code comments and data files cite.
   is the shape that lets a designer half-author a gate, and the loader would
   then have to invent the missing half or reject a file that *looks* complete.
 
-  **Three refusals at load, because an unopenable gate is worse than a wrong
-  one.** `UnlockRegistry::from_ron` already rejected a `schema_version`
-  mismatch, a duplicate id, an empty id and an unknown ingredient; it now also
-  refuses `boxes: 0` (`ZeroBoxes` — a gate that is open in a new game is not a
-  gate), an `item` no `ingredients.ron`/`recipes.ron` id matches
-  (`UnknownSoldItem`), and an item that exists but **no recipe produces**
-  (`SoldItemNothingProduces` — the typo class that ships a tier nobody can
-  ever reach). All three are a startup panic, in the house style: content is
-  loaded once, and a game that boots into an impossible progression is worse
-  than one that refuses to boot.
+  **Five refusals at load, because an unopenable gate is worse than a wrong
+  one.** `UnlockRegistry::from_ron_str` already rejected a `schema_version`
+  mismatch, a duplicate id, an unlock releasing nothing (`ReleasesNothing`)
+  and an unknown ingredient; it now also refuses `boxes: 0`
+  (`OpenFromTheStart` — a gate that is open in a new game is not a gate), an
+  `item` no `ingredients.ron`/`recipes.ron` id matches (`UnknownSoldItem`),
+  an item that exists but **no recipe produces** (`SoldItemNothingProduces` —
+  the typo class that ships a tier nobody can ever reach), an item every
+  recipe can make but **no contract ever orders**
+  (`SoldItemNoContractOrders`), and two gates on one product whose thresholds
+  fall rather than climb (`TiersOutOfOrder`). The fourth is the one worth
+  dwelling on: only a **paid window's `mix`** feeds the ledger, so "produced"
+  is not "ordered" — of the fourteen recipe outputs only the three boxed
+  cases are ever ordered, which makes a gate on a bottle or an intermediate
+  the easiest unopenable gate to author, and it looks perfectly correct in
+  the file. The fifth keeps the file-order-is-tier-order claim in this record
+  true in the one case where two thresholds are comparable at all. All are a
+  startup panic, in the house style: content is loaded once, and a game that
+  boots into an impossible progression is worse than one that refuses to
+  boot.
 
   **Tier order is file order now.** While every gate counted the same unit, the
   deepest gate was `max_by_key(after_deliveries)`. Two gates counting
@@ -119,18 +129,42 @@ matches what code comments and data files cite.
   place to overflow. `lifetime_deliveries` stays: it is a real number about the
   factory and several surfaces show it. It simply no longer gates anything.
 
-  **The save format gains a field at version 3, on purpose.** "A field
-  addition is a version bump" is the standing rule, and this is a documented
-  exception rather than a quiet one (`save.rs`, "# A field added at version 3
-  on purpose"). The reasoning: a save written before the ledger existed has
-  *no information* about what it sold, and `#[serde(default)]` reads that as
-  **nothing sold** — which is the honest answer, and the conservative one,
-  since it can only leave a gate shut that a replaying player will re-open in
-  one session of the line they already own. A version bump would instead
-  refuse every existing save to communicate the same zero. The alternative
-  considered and rejected was seeding the ledger from `lifetime_deliveries`
-  (say, two boxes a window): that invents production that never happened, and
-  bakes a guess about the starter order's width into the save loader.
+  **The save format goes to version 5 and a pre-5 save is refused.** This was
+  written the other way first, and the first review of the change is why it
+  is not: the branch shipped one `#[serde(default)]` and left the version
+  where `main` had it, arguing
+  that an absent ledger reads as "nothing sold", which is the honest and
+  conservative answer. It is neither, because **gate state is derived from
+  the ledger on every load**. The reviewer wrote a real save on `main` with
+  both tiers open and loaded it here: both gates came back shut, the gated
+  raws unbuyable, the gated pages re-drawn as silhouettes, and an already
+  signed BBQ contract left active but impossible to restock — striking out
+  while its ingredients sat behind a gate the player had already paid for.
+  A default is only safe when its meaning is a fact; here it is a fact about
+  the *ledger* that silently becomes a lie about *access*.
+
+  The sentence that made the exception look affordable was also this PR's own
+  casualty: `save.rs` justified re-earning the tier as "ten delivery windows
+  … a couple of minutes", which was the price under the trigger this very
+  change removes — the new one is ~29 minutes for the first tier and ~100 for
+  the second. So the exception's central number was wrong by ~15x, made wrong
+  by the paragraph beside it.
+
+  Refusing is the honest answer and the one every other loader in the crate
+  already gives. `SAVE_SCHEMA_VERSION` is 5 (`main` took 4 for the pay cycle while this
+  branch was in review), a v4 file is rejected, and
+  `SaveError::UnsupportedSchemaVersion` gains a per-version sentence
+  (`why_the_version_moved`) so the refusal reads as "what unlocks a sauce
+  changed, and this build cannot tell what your save had sold" rather than as
+  two numbers. The cost is real and was accepted deliberately: **every
+  existing save stops loading.** No release has ever written one, so every
+  file in existence is a development save. The alternatives were weighed and
+  rejected — persisting the open-unlock set beside the ledger makes gate state
+  two sources of truth that can disagree, and seeding the ledger from
+  `lifetime_deliveries` (say, two boxes a window) invents production that
+  never happened and bakes the starter order's width into the loader. A
+  delivery window does not record what was in it, which is the whole reason
+  the trigger changed; no arithmetic on it can recover a product breakdown.
 
   **The wire carries the rule's inputs, not its verdict.** `UnlockSnapshot`,
   the cookbook's `GateLine` and the picker's `ContentsChoice` each publish the
@@ -145,11 +179,15 @@ matches what code comments and data files cite.
   starter board: 100 `boxed_ketchup` arrives at **tick 52 000 (~29 min, 50
   delivery windows)** with the starter order alone, and at **tick 33 000
   (~18 min, 44 windows)** with all three starter-era orders signed. The old
-  gate was ten windows — minutes, not half an hour. The second gate is worse:
-  100 further `boxed_bbq` takes about **130 000 ticks (~72 min)** on the
-  reference BBQ branch with all four BBQ orders signed, because authored BBQ
-  demand (~4.5 boxes per 1 000 ticks) runs well ahead of what one branch
-  delivers (~0.8). **The numbers are the owner's and were not changed**, but
+  gate was ten windows — minutes, not half an hour. The second gate is worse,
+  and it is now measured from zero rather than estimated: a factory that earns
+  the first gate and then builds the BBQ branch crosses the mustard gate at
+  **tick 181 000 — 100 minutes at 30 ticks/sec**, 114 000 ticks (~63 min)
+  after the first. `godot_project/measure_gate_ticks.gd` is that measurement,
+  kept in the tree so the figure can be re-run rather than believed; it earns
+  both gates instead of patching the ledger the way every shipped fixture
+  does. The cause is not the factory: authored BBQ demand (~4.5 boxes per
+  1 000 ticks) runs well ahead of what one branch delivers (~0.8). **The numbers are the owner's and were not changed**, but
   the consequence is recorded here: the 2026-09-20 measurement behind issue
   #55 ("the bank at the moment of building decides whether the BBQ branch
   costs you the board") found the trap stopped biting at about 40 windows, and

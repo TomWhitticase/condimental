@@ -352,7 +352,7 @@ func _check_sauce_page() -> void:
 ## difference between this check catching the blank BBQ page and sailing
 ## past it — it was written, run, and found green until the gates went in.
 func _check_every_page(_book: Dictionary) -> void:
-	Layouts.open_every_gate(main.sim)
+	Layouts.open_every_gate(main.sim, "COOKBOOK_FAIL")
 	if Layouts.fixture_failure() != "":
 		_fail("could not open the unlock gates: %s" % Layouts.fixture_failure())
 		return

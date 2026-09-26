@@ -51,9 +51,12 @@ See [WORKFLOW.md](WORKFLOW.md).
   `bbq_sauce` at 100 `boxed_ketchup`, `mustard_sauce` at 100 `boxed_bbq`.
   `Unlock::is_open`/`progress` resolve against that ledger; `Economy::
   lifetime_deliveries` still counts and is still displayed, but **no gate
-  reads it**. The loader refuses a zero `boxes`, an unknown `item`, and an
-  item no recipe in `recipes.ron` produces, so an unreachable gate is a
-  startup panic and never a locked tier nobody can open. Tier order is
+  reads it**. The loader refuses a zero `boxes`, an unknown `item`, an
+  item no recipe in `recipes.ron` produces, an item **no contract's `mix`
+  ever orders** (only a paid window feeds the ledger, so produced is not
+  ordered), and two gates on one product whose thresholds fall rather than
+  climb — so an unreachable gate is a startup panic and never a locked tier
+  nobody can open. Tier order is
   **file order** in `unlocks.ron` — two gates counting different products have
   no comparable thresholds — and `gate_index_for_ingredient`/`at`/
   `ordered().first()` are the only ways to ask which gate is deepest.
@@ -63,10 +66,13 @@ See [WORKFLOW.md](WORKFLOW.md).
   Ketchup" from the display-name map without knowing the rule; the padlock
   caption (`main.gd::_with_gate_note`) and the cookbook
   (`cookbook_panel.gd::_gate_progress`) say boxes, never deliveries.
-  `SaveData` gains `lifetime_boxes_sold` with `#[serde(default)]` at version
-  3 — a deliberate, documented exception to "a field addition is a version
-  bump", because an old save loading as *nothing sold* is the honest reading
-  of a world that never counted. Supersedes the trigger half of 2026-09-19
+  `SaveData` gains `lifetime_boxes_sold` and `SAVE_SCHEMA_VERSION` goes to
+  **5**: a pre-5 save is refused, not defaulted. Gate state is derived from
+  the ledger on every load, so a default does not merely lose a counter — it
+  re-locks a tier the player earned and strands the contracts already signed
+  behind it. `SaveError::UnsupportedSchemaVersion` carries a per-version
+  sentence (`save.rs::why_the_version_moved`) saying what changed. **Every
+  existing save stops loading**; no release has ever written one. Supersedes the trigger half of 2026-09-19
   "BBQ arrives behind a gate"; the two lists, the no-locked-recipe rule and
   the named announcement are unchanged. Full record in `docs/DECISIONS.md`.
 - 2026-09-26 **CONDIMENTAL is GPL-3.0-only; the name and brand are

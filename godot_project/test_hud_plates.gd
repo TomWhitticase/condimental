@@ -1262,7 +1262,7 @@ func _modal_keys() -> Array:
 ## `open_every_gate` goes through save/load, so the rendered world is rebuilt
 ## from the reloaded one.
 func _unlock_everything() -> void:
-	Layouts.open_every_gate(main.sim)
+	Layouts.open_every_gate(main.sim, "HUD_PLATES_FAIL")
 	main._rebuild_world()
 	main._refresh_owned_counts()
 

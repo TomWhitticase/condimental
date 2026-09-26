@@ -21,7 +21,7 @@
 // stale. It does nothing about a number that does not mean what the sentence
 // around it claims, and nothing about tense: `{open_contract_count}` in
 // "nine are on the board of a brand-new factory" is the right fact in a
-// clause that stops being true at the tenth delivery. Write the clause in
+// clause that stops being true at the tenth order signed. Write the clause in
 // the same tense as the fact — "the board is showing {open_contract_count}
 // right now" — and prefer a phrasing that reads correctly at any value a
 // balance pass could produce, since "{starter_contracts} are active" becomes
@@ -84,7 +84,7 @@
             title: "Contracts",
             tagline: "An order is a promise with a clock on it.",
             body: [
-                "Of the {contract_count} orders in the file, the board is showing {open_contract_count} right now — anything missing from it is behind a gate that deliveries will open. Each order names a mix of cases, how often it wants them, what it pays, and what it costs to sign. Orders signed for you before you start: {starter_contracts}. Every order on the board is yours to sign, once there is a line to serve it.",
+                "Of the {contract_count} orders in the file, the board is showing {open_contract_count} right now — anything missing from it is behind a gate that opens when you have sold enough boxes of the sauce below it. Each order names a mix of cases, how often it wants them, what it pays, and what it costs to sign. Orders signed for you before you start: {starter_contracts}. Every order on the board is yours to sign, once there is a line to serve it.",
                 "Sign one and the clock starts. Ship the mix inside the window and it pays; miss the window and it takes a strike. Run out of strikes and the order is gone, and so is the price you paid for it. Signing more than the line can feed is the most expensive mistake available early.",
                 "Each dock holds at most {dock_capacity} cases, of any mix, so it is a loading bay and not a warehouse. Past that ceiling the packer behind it backs up.",
             ],
@@ -116,7 +116,7 @@
             body: [
                 "Content is gated on boxes sold — a sauce is earned by selling the sauce before it, never by money banked or time passed. The first gate is {first_gate_name}, and it opens once you have sold {first_gate_boxes} boxes of {first_gate_product}.",
                 "A gate holds back raws and orders, never recipes. The machines have always known how to make everything in this book; what changes is whether you can buy the ingredients and whether anybody is asking for the result.",
-                "Once a gate is open it stays open, and it is worked out fresh from the current numbers every time you load — so a rebalance never leaves an old save stuck behind a gate it has already passed.",
+                "Once a gate is open it stays open: it is worked out fresh from your boxes-sold count every time you load, and that count only ever goes up. A save written before a change to what the gates count is refused outright rather than reopened at the wrong tier — the game would have to guess which sauces its old deliveries contained, and it will not.",
             ],
         ),
     ],

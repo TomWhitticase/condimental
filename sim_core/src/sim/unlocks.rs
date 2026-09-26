@@ -224,6 +224,31 @@ pub enum UnlockLoadError {
         item: String,
         unlock: String,
     },
+    /// A gate keyed off an item every recipe can make but **no contract ever
+    /// orders**. One step further than [`Self::SoldItemNothingProduces`] and
+    /// the same invisible failure: only a paid window's `mix` feeds the
+    /// ledger, so a product nobody orders is sold zero times however much of
+    /// it the factory makes, and the tier never opens. 11 of the 14 recipe
+    /// outputs are in this class — everything that is not a boxed case — so
+    /// this is an easy gate to author by accident.
+    SoldItemNoContractOrders {
+        item: String,
+        unlock: String,
+        ordered: Vec<String>,
+    },
+    /// Two gates counting the **same** product, where the later one in the
+    /// file needs fewer boxes than the earlier one. `data/unlocks.ron`'s
+    /// header states that file order is tier order and the fixtures rely on
+    /// it; this pair breaks that claim in the one case where the thresholds
+    /// are comparable at all, because the file's second tier would open
+    /// first. Two tiers of one product are fine — they just have to climb.
+    TiersOutOfOrder {
+        item: String,
+        earlier: String,
+        earlier_boxes: u32,
+        later: String,
+        later_boxes: u32,
+    },
     /// Both lists empty: an unlock that releases nothing. The announcement
     /// would still fire, promising content that does not arrive.
     ReleasesNothing {
@@ -292,6 +317,30 @@ impl std::fmt::Display for UnlockLoadError {
                 "unlocks.ron's '{unlock}' opens after selling '{item}', which no recipe \
                  in recipes.ron produces — a dock can only ship what the factory made, \
                  so the gate would never open"
+            ),
+            UnlockLoadError::SoldItemNoContractOrders {
+                item,
+                unlock,
+                ordered,
+            } => write!(
+                f,
+                "unlocks.ron's '{unlock}' opens after selling '{item}', which no contract in \
+                 contracts.ron ever orders (ordered: {}) — only a paid delivery counts as a \
+                 sale, so the gate would never open",
+                ordered.join(", ")
+            ),
+            UnlockLoadError::TiersOutOfOrder {
+                item,
+                earlier,
+                earlier_boxes,
+                later,
+                later_boxes,
+            } => write!(
+                f,
+                "unlocks.ron gates '{earlier}' on {earlier_boxes} boxes of '{item}' and then \
+                 '{later}' on only {later_boxes} of the same product — file order is tier \
+                 order, so a later gate cannot be cheaper than an earlier one on the same \
+                 count"
             ),
             UnlockLoadError::ReleasesNothing { id } => write!(
                 f,
@@ -510,11 +559,16 @@ impl UnlockRegistry {
     /// than merely inert: a `starter: true` contract held back from the
     /// board it is already active on.
     ///
-    /// And since the trigger became boxes sold, it checks the trigger too.
-    /// `recipes` is here for that and only that: a gate keyed off an item no
-    /// recipe produces can never open, which is a worse version of the same
-    /// invisible failure — the market and the board look exactly right,
-    /// forever.
+    /// And since the trigger became boxes sold, it checks the trigger too,
+    /// twice. `recipes` is here for the first half: a gate keyed off an item
+    /// no recipe produces can never open, which is a worse version of the
+    /// same invisible failure — the market and the board look exactly right,
+    /// forever. `contracts` covers the second half, because **produced is
+    /// not ordered**: the ledger is fed only by a paid window's `mix`, so a
+    /// gate on a product every machine can make but no customer ever asks
+    /// for is exactly as stuck. Most recipe outputs are in that class — the
+    /// bottles and the intermediates — and only the boxed cases are ordered,
+    /// so it is the easier of the two mistakes to make.
     pub fn validate_covers(
         &self,
         ingredients: &IngredientCatalog,
@@ -527,6 +581,16 @@ impl UnlockRegistry {
         // different authoring mistakes with two different fixes.
         let mut produced: BTreeSet<&str> = BTreeSet::new();
         let mut known: BTreeSet<String> = ingredients.ids().into_iter().collect();
+        // ...and everything a contract actually asks for. "Produced" is not
+        // "ordered": only a paid window's `mix` feeds the ledger, so a gate
+        // on a product no customer wants is as unopenable as a gate on a
+        // typo, and looks just as correct in the file.
+        let ordered: BTreeSet<&str> = contracts
+            .ordered()
+            .iter()
+            .flat_map(|contract| contract.mix.iter())
+            .map(|(id, _)| id.as_str())
+            .collect();
         for recipe in recipes.ordered() {
             for (id, _) in &recipe.outputs {
                 produced.insert(id.as_str());
@@ -549,6 +613,13 @@ impl UnlockRegistry {
                 return Err(UnlockLoadError::SoldItemNothingProduces {
                     item: item.clone(),
                     unlock: unlock.id.clone(),
+                });
+            }
+            if !ordered.contains(item.as_str()) {
+                return Err(UnlockLoadError::SoldItemNoContractOrders {
+                    item: item.clone(),
+                    unlock: unlock.id.clone(),
+                    ordered: ordered.iter().map(|id| (*id).to_string()).collect(),
                 });
             }
             for id in &unlock.ingredients {
@@ -576,6 +647,29 @@ impl UnlockRegistry {
                 }
             }
         }
+        // File order is tier order (`data/unlocks.ron`'s header). Thresholds
+        // on two DIFFERENT products are not comparable — a hundred boxes of
+        // ketchup is neither more nor less than a hundred of BBQ — but on the
+        // same product they are, and that is the one case where the file can
+        // contradict its own claim.
+        let mut highest: BTreeMap<&str, (&str, u32)> = BTreeMap::new();
+        for unlock in &self.unlocks {
+            let item = unlock.after_sold.item.as_str();
+            let boxes = unlock.after_sold.boxes;
+            if let Some((earlier, earlier_boxes)) = highest.get(item)
+                && *earlier_boxes >= boxes
+            {
+                return Err(UnlockLoadError::TiersOutOfOrder {
+                    item: item.to_string(),
+                    earlier: (*earlier).to_string(),
+                    earlier_boxes: *earlier_boxes,
+                    later: unlock.id.clone(),
+                    later_boxes: boxes,
+                });
+            }
+            highest.insert(item, (unlock.id.as_str(), boxes));
+        }
+
         Ok(())
     }
 }
@@ -642,6 +736,34 @@ mod tests {
 
     fn example() -> UnlockRegistry {
         UnlockRegistry::from_ron_str(EXAMPLE).expect("fixture must load")
+    }
+
+    /// Two gates whose every released id is real shipped content, so
+    /// `validate_covers` reaches the tier-ordering pass instead of stopping
+    /// at an unknown id. `boxes` is the second gate's threshold on the same
+    /// product as the first.
+    fn two_gates_on_one_product(first: u32, second: u32) -> UnlockRegistry {
+        let text = format!(
+            r#"(
+        schema_version: 1,
+        unlocks: [
+            Unlock(
+                id: "bbq_sauce",
+                name: "BBQ Sauce",
+                after_sold: (item: "boxed_ketchup", boxes: {first}),
+                ingredients: ["spice_mix", "molasses"],
+                contracts: ["smokehouse_trial"],
+            ),
+            Unlock(
+                id: "later",
+                name: "Later",
+                after_sold: (item: "boxed_ketchup", boxes: {second}),
+                contracts: ["bbq_festival"],
+            ),
+        ],
+    )"#
+        );
+        UnlockRegistry::from_ron_str(&text).expect("fixture must load")
     }
 
     /// A ledger, written the way a test reads: `sold([("boxed_ketchup", 99)])`.
@@ -970,6 +1092,74 @@ mod tests {
             ),
             "got {err}"
         );
+    }
+
+    /// A real id that recipes really do produce, that **no contract ever
+    /// orders**. `bottled_ketchup` is made by the bottler on the way to a
+    /// case, and every `mix` in `contracts.ron` asks for boxed cases, so the
+    /// ledger would never see one and the gate would be shut forever —
+    /// exactly as dead as `tomato` above, and much easier to author.
+    #[test]
+    fn validate_covers_refuses_a_product_no_contract_orders() {
+        let text = EXAMPLE.replacen(r#"item: "boxed_ketchup""#, r#"item: "bottled_ketchup""#, 1);
+        let unlocks = UnlockRegistry::from_ron_str(&text).unwrap();
+        let err = unlocks
+            .validate_covers(
+                &IngredientCatalog::bundled(),
+                &ContractRegistry::bundled(),
+                &recipes(),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                UnlockLoadError::SoldItemNoContractOrders { ref item, ref unlock, .. }
+                    if item == "bottled_ketchup" && unlock == "bbq_sauce"
+            ),
+            "a gate on a product nobody orders can never open, and 11 of the 14 recipe \
+             outputs are in that class — got {err}"
+        );
+        // It lists what IS ordered, so the fix is in the message.
+        assert!(format!("{err}").contains("boxed_ketchup"), "got {err}");
+    }
+
+    /// Two gates on the same product, the later one cheaper. `data/unlocks.ron`'s
+    /// header and `test_layouts.gd` both state that file order IS tier order;
+    /// this pair would make that false — at 10 boxes the *second* gate is open
+    /// while the first is shut — so it is refused rather than silently
+    /// reordering progression.
+    #[test]
+    fn validate_covers_refuses_two_gates_on_one_product_out_of_order() {
+        let unlocks = two_gates_on_one_product(100, 10);
+        let err = unlocks
+            .validate_covers(
+                &IngredientCatalog::bundled(),
+                &ContractRegistry::bundled(),
+                &recipes(),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                UnlockLoadError::TiersOutOfOrder { ref item, ref earlier, ref later, .. }
+                    if item == "boxed_ketchup" && earlier == "bbq_sauce" && later == "later"
+            ),
+            "got {err}"
+        );
+    }
+
+    /// ...and the same pair the right way round is fine: two tiers of one
+    /// product is a legitimate shape, it just has to climb.
+    #[test]
+    fn validate_covers_accepts_two_gates_on_one_product_in_order() {
+        let unlocks = two_gates_on_one_product(100, 250);
+        unlocks
+            .validate_covers(
+                &IngredientCatalog::bundled(),
+                &ContractRegistry::bundled(),
+                &recipes(),
+            )
+            .expect("a rising pair on one product is tier order, not a mistake");
     }
 
     /// The shipped gates, pinned: the owner's rule of 2026-09-26 is a

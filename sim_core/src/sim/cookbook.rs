@@ -749,9 +749,6 @@ fn guide_facts(
         .min_by_key(|entry| entry.price_money());
 
     // The earliest gate, which is the one a new game is walking towards.
-    // Ties go to file order for `data/unlocks.ron`'s own reason: the
-    // announcement is the point of a gate, and the file decides who
-    // announces first.
     // File order, for the same reason the sauce page's deepest gate uses it:
     // two gates' thresholds count different products and cannot be ordered
     // against each other, and `data/unlocks.ron` orders itself by tier.

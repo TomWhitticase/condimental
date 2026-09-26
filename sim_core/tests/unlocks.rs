@@ -26,6 +26,7 @@ mod common;
 
 use std::collections::BTreeSet;
 
+use sim_core::sim::save::{SAVE_SCHEMA_VERSION, SaveError};
 use sim_core::sim::types::Money;
 use sim_core::sim::{
     ContractRegistry, FLUID_TANK_CAPACITY, PlayerCommand, RecipeRegistry, UnlockRegistry, World,
@@ -400,9 +401,10 @@ fn boxes_of_another_product_never_open_a_gate() {
 ///
 /// Some thresholds have to be reached this way. The BBQ gate's hundred boxes
 /// of ketchup are 52 000 ticks and worth simulating once; the mustard gate's
-/// hundred boxes of BBQ are another 130 000 on top of a branch the player
-/// must first build, which is an hour and a half of factory for a claim about
-/// a number in a content file. A played world also never visits an odd
+/// hundred boxes of BBQ are another 114 000 on top of a branch the player
+/// must first build (tick 181 000 from a new game — `measure_gate_ticks.gd`),
+/// which is over an hour and a half of factory for a claim about a number in
+/// a content file. A played world also never visits an odd
 /// ketchup count, the starter order being two boxes wide, so an exact
 /// "one short" is only reachable from here.
 fn world_with_boxes_sold(ledger: &[(&str, u32)]) -> World {
@@ -772,46 +774,80 @@ fn the_ledger_and_the_gates_it_opens_survive_a_save_round_trip() {
     );
 }
 
-/// A save written before the gate existed has no `lifetime_deliveries` field;
-/// one written before 2026-09-26 has no `lifetime_boxes_sold`. Both load at
-/// zero and re-lock the tier, deliberately — see `save.rs`'s module doc for
-/// the argument and for why the second one is a field addition rather than a
-/// schema bump. This pins the behaviour so the decision cannot be reversed by
-/// accident.
+/// A save from before the trigger changed is **refused**, not read as a
+/// factory that has sold nothing.
+///
+/// This is why `SAVE_SCHEMA_VERSION` moved to 5. Loading a v4 file with one
+/// `#[serde(default)]` does not merely lose a counter: gate state is derived
+/// from the ledger on every load, so a save that had BBQ open comes back with
+/// the tier shut, its raws unbuyable and a signed BBQ contract stranded. A v4
+/// file never recorded which products its deliveries carried, so no honest
+/// ledger can be written from it — see `save.rs`'s module doc, "Version 5".
+///
+/// The refusal has to *say* that, in words a player can read, or the next
+/// person to meet it files it as a parse bug.
 #[test]
-fn a_save_written_before_either_field_existed_loads_as_nothing_sold() {
+fn a_save_from_before_the_trigger_changed_is_refused_with_the_reason() {
     let world = reference_chain_with_budget(recipes(), 1_000);
     let text = world.to_save_ron();
-    for field in ["lifetime_deliveries", "lifetime_boxes_sold"] {
-        assert!(text.contains(field), "a save written now records `{field}`");
-    }
+    assert!(
+        text.contains("lifetime_boxes_sold"),
+        "a save written now records the ledger the gates read"
+    );
+    assert!(
+        text.contains(&format!("schema_version: {SAVE_SCHEMA_VERSION}")),
+        "and stamps the version that describes its shape"
+    );
 
-    // Exactly what an older save is: the same RON with the fields absent.
+    // Exactly what a v4 save is: no ledger, and the version that predates it.
     let older: String = text
         .lines()
-        .filter(|line| {
-            let line = line.trim_start();
-            !line.starts_with("lifetime_deliveries:") && !line.starts_with("lifetime_boxes_sold:")
-        })
+        .filter(|line| !line.trim_start().starts_with("lifetime_boxes_sold:"))
         .collect::<Vec<_>>()
-        .join("\n");
-    assert!(!older.contains("lifetime_deliveries") && !older.contains("lifetime_boxes_sold"));
+        .join("\n")
+        .replace(
+            &format!("schema_version: {SAVE_SCHEMA_VERSION}"),
+            "schema_version: 4",
+        );
+    assert!(!older.contains("lifetime_boxes_sold"));
 
-    let loaded = World::from_save_ron(&older, recipes()).expect("an older save must still load");
-    assert_eq!(loaded.lifetime_deliveries(), 0);
+    let Err(error) = World::from_save_ron(&older, recipes()) else {
+        panic!("a save from before the gates counted boxes must be refused, not guessed at");
+    };
     assert!(
-        loaded.boxes_sold().is_empty(),
-        "a save with no ledger has sold nothing, which is what an empty one means"
+        matches!(
+            error,
+            SaveError::UnsupportedSchemaVersion {
+                found: 4,
+                supported: SAVE_SCHEMA_VERSION
+            }
+        ),
+        "it is refused as an old VERSION, not as a broken file — got {error}"
     );
-    assert!(
-        !loaded.ingredient_unlocked("spice_mix"),
-        "the tier re-locks rather than being handed back unannounced"
-    );
+
+    let message = error.to_string();
+    for phrase in ["delivery windows", "boxes of a", "will not guess"] {
+        assert!(
+            message.contains(phrase),
+            "the refusal has to explain what changed, not just that a number differs — \
+             `{phrase}` is missing from: {message}"
+        );
+    }
+}
+
+/// A save this build wrote loads back, ledger and all — the other side of the
+/// refusal above, so a version bump cannot be "fixed" by refusing everything.
+#[test]
+fn a_save_this_build_wrote_still_round_trips() {
+    let world = reference_chain_with_budget(recipes(), 1_000);
+    let text = world.to_save_ron();
+    let loaded = World::from_save_ron(&text, recipes()).expect("this build's own save must load");
     assert_eq!(
-        loaded.money(),
-        Money::from_num(1_000),
-        "and nothing else about the save changed"
+        loaded.to_save_ron(),
+        text,
+        "a loaded save must be byte-identical, ledger included"
     );
+    assert_eq!(loaded.money(), Money::from_num(1_000));
 }
 
 // =====================================================================

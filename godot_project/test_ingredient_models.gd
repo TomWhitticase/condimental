@@ -93,7 +93,7 @@ func _fail(msg: String) -> void:
 
 ## Every ingredient id, with the gates crossed so the late ones are in it.
 func _all_ingredient_ids() -> Array:
-	Layouts.open_every_gate(_main.sim)
+	Layouts.open_every_gate(_main.sim, "INGREDIENT_MODELS_FAIL")
 
 	var snapshot: Dictionary = _main._ingredients_snapshot()
 	var ids := []
