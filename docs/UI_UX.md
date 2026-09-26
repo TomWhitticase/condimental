@@ -1187,6 +1187,16 @@ you and nothing else. A sentence built out of the wrong one of those is the
 failure this whole section is designed to prevent, and it does not look like
 a bug on screen — it looks like a confident sentence.
 
+And a fact that means "right now" needs a **sentence** that means right now.
+The second draft of the contracts page asked for `open_contract_count`
+correctly and then wrote "of the thirteen orders in the file, nine are on the
+board of a brand-new factory" — true at zero deliveries and false from the
+tenth onwards, because the number moves and "a brand-new factory" does not.
+The prose has to carry the same tense as the fact: *the board is showing nine
+right now, and anything missing from it is behind a gate*. Picking the right
+fact is half the job; the clause around it is the other half, and neither the
+loader nor a test can see that half.
+
 The chips sit at the **top** of the tree rather than behind a tab, because
 the player who needs them most is the one who has just opened the book for
 the first time and does not yet know what a tier is. They are a

@@ -16,6 +16,16 @@
 // balance pass may not silently make this file lie. Write "you open with
 // {starting_money}", never "you open with 3000".
 //
+// WHAT THE PLACEHOLDER RULE DOES NOT BUY YOU. It stops a number going
+// stale. It does nothing about a number that does not mean what the sentence
+// around it claims, and nothing about tense: `{open_contract_count}` in
+// "nine are on the board of a brand-new factory" is the right fact in a
+// clause that stops being true at the tenth delivery. Write the clause in
+// the same tense as the fact — "the board is showing {open_contract_count}
+// right now" — and prefer a phrasing that reads correctly at any value a
+// balance pass could produce, since "{starter_contracts} are active" becomes
+// "1 are". Neither the loader nor a test can see either of these.
+//
 // The vocabulary of placeholders is CLOSED and lives in
 // `sim_core/src/sim/guide.rs` (`GuideFact`). An unknown one is a load error,
 // not a literal left on screen — a typo in a placeholder would otherwise ship
@@ -73,7 +83,7 @@
             title: "Contracts",
             tagline: "An order is a promise with a clock on it.",
             body: [
-                "Of the {contract_count} orders in the file, {open_contract_count} are on the board of a brand-new factory; the rest are behind a gate. Each order names a mix of cases, how often it wants them, what it pays, and what it costs to sign. You start with {starter_contracts} of them already active, signed on your behalf.",
+                "Of the {contract_count} orders in the file, the board is showing {open_contract_count} right now — anything missing from it is behind a gate that deliveries will open. Each order names a mix of cases, how often it wants them, what it pays, and what it costs to sign. You start with {starter_contracts} of them already active, signed on your behalf.",
                 "Sign one and the clock starts. Ship the mix inside the window and it pays; miss the window and it takes a strike. Run out of strikes and the order is gone, and so is the price you paid for it. Signing more than the line can feed is the most expensive mistake available early.",
                 "The dock holds at most {dock_capacity} of any one case, so it is a loading bay and not a warehouse. Past that ceiling the packer behind it backs up.",
             ],

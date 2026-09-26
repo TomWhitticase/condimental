@@ -294,7 +294,13 @@ A count that means "right now" is therefore its own fact:
 `{open_raw_count}` and `{open_contract_count}` join the vocabulary, asked of
 the market and of `contract_available` at the current delivery total, and the
 two file counts keep their own sentences ("of the {contract_count} orders in
-the file"). A third paragraph claimed the machines could already make a sauce
+the file"). The second review pass caught the sequel to that, which is worth
+knowing because the fix for the first mistake walks straight into it: the
+right fact in a sentence with the wrong tense. "Nine are on the board of a
+brand-new factory" is true at zero deliveries and false from the tenth on,
+because the number moves and the clause around it does not — so the prose has
+to carry the same tense as the fact it asks for, and no loader or test can
+see that half of it. A third paragraph claimed the machines could already make a sauce
 this build does not ship; it now says what is actually true and durable —
 what a machine makes is decided by what is touching it.
 

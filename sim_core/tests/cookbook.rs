@@ -453,7 +453,7 @@ fn every_fact_the_guide_can_ask_for_is_answered_from_the_content_files() {
     );
     assert!(
         fact("open_raw_count").number < fact("raw_count").number,
-        "a new game with every raw already on sale has no gate left to open,          and the guide's prose about waiting behind gates would be a lie"
+        "a new game with every raw already on sale has no gate left to open, and the guide's prose about waiting behind gates would be a lie"
     );
 
     assert_eq!(
@@ -512,11 +512,11 @@ fn every_fact_the_guide_can_ask_for_is_answered_from_the_content_files() {
     assert_eq!(fact("open_contract_count").number, open_now as f64);
     assert!(
         fact("open_contract_count").number > fact("starter_contracts").number,
-        "if the only orders on a new board were the ones already signed,          there would be nothing for a new player to sign"
+        "if the only orders on a new board were the ones already signed, there would be nothing for a new player to sign"
     );
     assert!(
         fact("open_contract_count").number < fact("contract_count").number,
-        "a board that shows every order at zero deliveries has no gated          orders, and the guide says it has"
+        "a board that shows every order at zero deliveries has no gated orders, and the guide says it has"
     );
 
     // The cheapest thing on the shelf goes out as an ID, titled by Godot
