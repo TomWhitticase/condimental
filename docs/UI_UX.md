@@ -713,9 +713,23 @@ What a scale change costs is **layout**, not type size: the build menu is six
 columns with a shorter card; panels put heading and balance on one line; the
 legend is four grouped lines; the clipboard and build grid cap themselves
 against `_hotbar_reserved_height()`; the hotbar socket takes 0.88 of the
-scale so twelve fit. `project.godot`'s window is 1600x900, where nothing
-scrolls; at 1280x720 the build grid scrolls slightly, a deliberate last
-resort over burying the footer.
+scale so twelve fit. `project.godot`'s window is 1600x900. There, nothing
+scrolls except the build menu. At 1280x720 the clipboard scrolls too, because
+a scroll is the deliberate last resort over burying the footer.
+
+**The build menu scrolls at 1600x900** (2026-09-26). The owner asked for
+categories and a search box. The categories are `data/shop.ron`'s
+`categories`, and each is a headed section in the Cookbook's caption-and-note
+style. With them, the twelve cards are three rows: Logistics 5, Production 5,
+Shipping & Storage 2. Laying the sections side by side to get back to two rows
+was tried on paper and does not fit. Two five-card sections need 2160px, and
+any two-row packing of 5/5/2 needs seven 216px cards across plus their gaps,
+which is more than the modal gets at 1600px. Shrinking the cards to make that
+fit would cramp the one screen whose job is reading them. So the sections
+scroll, and the **search box sits in the heading row, outside the scroll**.
+It filters by display name, case-insensitively, hides a section left empty,
+and is cleared when the menu closes. It is not focused when the menu opens,
+so E, ESC and the digits keep working.
 
 **Width yields too, and before it is clipped** (2026-09-20, issue #62).
 Height had yielded since this section was written; width had not, so at

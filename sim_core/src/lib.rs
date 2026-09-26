@@ -649,6 +649,9 @@ impl SimBridge {
     ///
     /// ```json
     /// {"money": 120.0,
+    ///  "categories": [
+    ///    {"id": "logistics", "name": "Logistics",
+    ///     "note": "belts, pipes and the bins that feed them"}, ...],
     ///  "entries": [
     ///    {"kind": "belt",        "price": 5.0,   "owned": 3, "affordable": true},
     ///    {"kind": "pipe",        "price": 8.0,   "owned": 0, "affordable": true},
@@ -662,6 +665,10 @@ impl SimBridge {
     ///    {"kind": "dock",        "price": 70.0,  "owned": 0, "affordable": true}
     ///  ]}
     /// ```
+    ///
+    /// Every entry also carries `category` (a `categories` id — the loader
+    /// refuses a file where it is not) and `crew`, left out of the rows above
+    /// for width. `categories` are the build menu's headings, in file order.
     ///
     /// Field by field: `kind` is a `data/shop.ron` buildable-kind id (every
     /// `data/machines.ron` machine kind, plus `belt` and `pipe`, which are

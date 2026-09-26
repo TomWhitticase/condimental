@@ -109,12 +109,16 @@ func _initialize() -> void:
 		_fail("expected %d slots (one per catalog entry), found %d" % [entries.size(), main._shop_slots.size()])
 		return
 
-	var grid: Node = menu.find_child("ShopGrid", true, false)
-	if grid == null:
-		_fail("no ShopGrid container found under ShopMenu")
+	# One grid per category section (test_shop_search.gd checks which slot
+	# lands in which); between them they hold exactly one button per entry.
+	var slot_buttons := 0
+	for section in main._shop_section_list:
+		slot_buttons += section["grid"].get_child_count()
+	if main._shop_section_list.is_empty():
+		_fail("no ShopGrid_<category> sections found under ShopMenu")
 		return
-	if grid.get_child_count() != entries.size():
-		_fail("ShopGrid holds %d children, expected %d slot buttons" % [grid.get_child_count(), entries.size()])
+	if slot_buttons != entries.size():
+		_fail("the section grids hold %d children, expected %d slot buttons" % [slot_buttons, entries.size()])
 		return
 
 	main._update_shop_menu()

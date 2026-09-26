@@ -218,6 +218,8 @@
 # which is the same class of confidently-wrong report as issues #4 and #70.
 #
 # `--shop` opens the build menu (docs/UI_UX.md §5) before rendering.
+# `--shop-search TEXT` opens it too, and types TEXT into its search box, so the
+# frame shows the filter: matching slots only, empty category sections hidden.
 #
 # `--stock` buys an assorted starting kit (belts, pipes, a hopper, a tank and
 # a machine or two) so the hotbar shows CARRIED sockets, multi-digit counts and
@@ -385,6 +387,7 @@ var _cursor_park_noise_tile := Vector2i(-999999, -999999)
 ## by side, with the hover saying which is which.
 var _stalled_run := false
 var _shop := false
+var _shop_search := ""
 ## `--config TX,TY` clicks the hopper or tank standing on that tile once
 ## the fixture is built, so the frame shows its configuration panel — the
 ## level bar, FILL with its reason when it is blocked, the AUTO-FILL switch
@@ -723,7 +726,8 @@ func _initialize() -> void:
 		_populate = true
 	_first_person = args.has("--first-person")
 	_hover_flags = HoverTargets.requested_flags(args)
-	_shop = args.has("--shop")
+	_shop_search = _string_arg(args, "--shop-search")
+	_shop = args.has("--shop") or _shop_search != ""
 	_payday_warning = args.has("--payday-warning")
 	if _payday_warning:
 		_pick_fixture("payday_warning", "--payday-warning")
@@ -1885,6 +1889,10 @@ for a fixture (--fixture, or a flag that implies one)."
 
 func _open_shop_menu() -> void:
 	_main._set_shop_menu_open(true)
+	if _shop_search != "":
+		# What a keystroke does: the box's text changes and it says so.
+		_main._shop_search.text = _shop_search
+		_main._shop_search.text_changed.emit(_shop_search)
 
 
 ## `--payday-warning`: the build menu, then a real belt purchase through

@@ -303,8 +303,8 @@ fn shop_snapshot_json_has_the_documented_shape() {
     keys.sort();
     assert_eq!(
         keys,
-        vec!["entries", "money"],
-        "the snapshot has exactly these two top-level fields"
+        vec!["categories", "entries", "money"],
+        "the snapshot has exactly these three top-level fields"
     );
     assert_eq!(
         value["money"].as_f64().expect("money is a number"),
@@ -329,8 +329,8 @@ fn shop_snapshot_json_has_the_documented_shape() {
         fields.sort();
         assert_eq!(
             fields,
-            vec!["affordable", "crew", "kind", "owned", "price"],
-            "each entry has exactly these five fields (`crew` since the staff pools MVP epic)"
+            vec!["affordable", "category", "crew", "kind", "owned", "price"],
+            "each entry has exactly these six fields (`crew` since the staff pools MVP epic, `category` since the build menu got sections)"
         );
         assert!(
             entry["crew"].is_array(),

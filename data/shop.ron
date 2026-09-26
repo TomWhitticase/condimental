@@ -71,19 +71,47 @@
 // two feed-end buffers, then the chain's machines in chain order, then the
 // delivery dock — which has no recipe, so it is placed by its POSITION in
 // the chain (the tail) rather than by recipe order.
+//
+// CATEGORIES are the build menu's headed sections (schema v2). Every entry
+// names one in `category`, and the loader refuses an entry whose category
+// is not defined below — and an entry listed after one of a LATER category,
+// because the menu shows each category's entries under its heading and the
+// digit on a card is its position in this file (the hotbar's slot number),
+// so a file out of category order would print the digits out of order down
+// the menu. Pure presentation: a category changes nothing a kind costs or
+// does. `name` is the heading, `note` the short line beside it.
 (
-    schema_version: 1,
+    schema_version: 2,
+    categories: [
+        ShopCategory(
+            id: "logistics",
+            name: "Logistics",
+            note: "belts, pipes and the bins that feed them",
+        ),
+        ShopCategory(
+            id: "production",
+            name: "Production",
+            note: "the machines that make the sauce",
+        ),
+        ShopCategory(
+            id: "shipping_storage",
+            name: "Shipping & Storage",
+            note: "where the cases leave, and where stock waits",
+        ),
+    ],
     entries: [
         // --- Infrastructure, priced per tile ---
         ShopEntry(
             id: "belt",
             price: 5,
+            category: "logistics",
         ),
         // Slightly dearer than a belt tile: a pipe run is stainless and
         // carries a fluid (UI_UX.md §2b point 6), where a belt is rubber.
         ShopEntry(
             id: "pipe",
             price: 8,
+            category: "logistics",
         ),
         // Epic B's conveyor splitter — one belt in, two belts out. Listed
         // with the infrastructure rather than with the buildings because
@@ -103,18 +131,21 @@
         ShopEntry(
             id: "splitter",
             price: 25,
+            category: "logistics",
         ),
 
         // --- Buffers: placed buildings with no recipe (see machines.ron) ---
         ShopEntry(
             id: "hopper",
             price: 40,
+            category: "logistics",
         ),
         // Dearer than the hopper for the same reason a pipe is dearer than
         // a belt — a pressure vessel is more than a bin.
         ShopEntry(
             id: "fluid_tank",
             price: 60,
+            category: "logistics",
         ),
 
         // --- Chain machines, in `data/recipes.ron` order ---
@@ -123,10 +154,12 @@
         ShopEntry(
             id: "crusher",
             price: 75,
+            category: "production",
         ),
         ShopEntry(
             id: "mixer",
             price: 100,
+            category: "production",
         ),
         // The most expensive thing in the catalog, on purpose: the biggest
         // machine on the line, running the chain's longest process.
@@ -138,6 +171,7 @@
         ShopEntry(
             id: "cooking_vat",
             price: 200,
+            category: "production",
         ),
         // GAMEPLAY.md §4 groups bottling with the reduction step as one
         // equipment tier, so it is priced in the vat's neighbourhood rather
@@ -145,10 +179,12 @@
         ShopEntry(
             id: "bottler",
             price: 120,
+            category: "production",
         ),
         ShopEntry(
             id: "packer",
             price: 90,
+            category: "production",
         ),
 
         // --- The chain's exit, placed by position rather than by recipe ---
@@ -177,6 +213,7 @@
         ShopEntry(
             id: "dock",
             price: 70,
+            category: "shipping_storage",
         ),
 
         // --- Storage, which is not on the line at all ---
@@ -199,6 +236,7 @@
         ShopEntry(
             id: "warehouse_rack",
             price: 75,
+            category: "shipping_storage",
         ),
     ],
 )
