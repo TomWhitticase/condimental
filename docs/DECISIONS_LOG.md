@@ -20,7 +20,11 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 - 2026-09-26 **CONDIMENTAL is GPL-3.0-only; the name and brand are
   reserved.** The code is licensed `GPL-3.0-only` (`LICENSE`, and `license =`
-  in every workspace `Cargo.toml`). The name "CONDIMENTAL", its logo and the
+  in every workspace `Cargo.toml`) **with a GPLv3 §7 additional permission**
+  (`LICENSE-EXCEPTION.md`) to link the Steamworks SDK, GodotSteam and other
+  platform SDKs — plain GPL would forbid a Steam build using achievements or
+  the overlay, and once outside contributions land the exception could no
+  longer be added without every contributor's consent. The name "CONDIMENTAL", its logo and the
   official store art are **not** under that grant — `TRADEMARKS.md` says a
   distributed fork must be renamed. Distribution is two routes to the same
   game: free by building from source, and a small price on Steam for the
@@ -30,7 +34,8 @@ See [WORKFLOW.md](WORKFLOW.md).
   widening the list is a licensing decision, not a build fix. A distributed
   build ships `LICENSE` and `THIRD_PARTY_NOTICES.md` (Godot's own
   `COPYRIGHT.txt` included). Contributions are inbound = outbound under the
-  same licence (`CONTRIBUTING.md`). Binds `LICENSE`, `TRADEMARKS.md`,
+  same licence and exception (`CONTRIBUTING.md`). Binds `LICENSE`,
+  `LICENSE-EXCEPTION.md`, `TRADEMARKS.md`,
   `THIRD_PARTY_NOTICES.md`, `deny.toml`, `docs/ARCHITECTURE.md` §1b. Full
   record in `docs/DECISIONS.md`.
 

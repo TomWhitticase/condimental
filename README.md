@@ -406,7 +406,9 @@ Conventional Commit history becomes the release notes.
 
 CONDIMENTAL's source code is free software under the
 [GNU General Public License v3](LICENSE) (`GPL-3.0-only`): build it, play it, change
-it and share it, and any version you distribute stays open source too. The
+it and share it, and any version you distribute stays open source too. An
+[additional permission](LICENSE-EXCEPTION.md) lets a build link platform SDKs such as
+Steamworks (achievements, cloud saves) without that SDK having to be open. The
 **name and brand** are not part of that grant — a fork you publish needs its own name;
 [TRADEMARKS.md](TRADEMARKS.md) says what is and is not fine. Third-party software the
 game is built on, and its licences, is listed in

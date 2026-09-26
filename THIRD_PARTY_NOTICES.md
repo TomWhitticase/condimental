@@ -49,9 +49,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Rust crates compiled into `sim_core`
+## Rust crates in `sim_core`'s dependency tree
 
-The simulation library links these crates. Where a crate is dual-licensed,
+The simulation library is built from these crates (a few — `syn`, `quote`,
+`proc-macro2`, `venial`, the `*-derive`/`*-macros` crates — run only at build
+time and leave no code in the binary; they are listed anyway). Where a crate is dual-licensed,
 CONDIMENTAL uses it under the MIT (or other permissive) option. Each crate's
 full licence text is in its source distribution on
 [crates.io](https://crates.io/).

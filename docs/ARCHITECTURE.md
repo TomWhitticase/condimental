@@ -88,7 +88,9 @@ decisions log), never incidentally.
 
 ### 1b. Licence
 
-The project is **`GPL-3.0-only`** (`LICENSE`), and the name and brand are
+The project is **`GPL-3.0-only`** (`LICENSE`) with a §7 linking exception for
+the Steamworks SDK and other platform SDKs (`LICENSE-EXCEPTION.md`), so a
+Steam build may use Steam's APIs; the name and brand are
 reserved separately (`TRADEMARKS.md`): the source is free to build and play,
 and the paid Steam release is a convenience, not a different game. Every
 dependency linked into a build must carry a GPL-3.0-compatible licence —

@@ -247,8 +247,9 @@ below is history and should only ever be appended to.)*
 
 ### 2026-09-26 — Open-source licence and alpha-release groundwork
 
-CONDIMENTAL has a licence: **GPL-3.0-only**, with the name and brand reserved
-in `TRADEMARKS.md` — free to build from source, and a paid Steam build for
+CONDIMENTAL has a licence: **GPL-3.0-only** plus a §7 linking exception for
+Steamworks and other platform SDKs (`LICENSE-EXCEPTION.md`), with the name
+and brand reserved in `TRADEMARKS.md` — free to build from source, and a paid Steam build for
 convenience. `THIRD_PARTY_NOTICES.md` lists what a distributed build must
 carry, and `cargo deny check licenses` (new job in `audit.yml`, allow-list in
 `deny.toml`) keeps every linked crate GPL-compatible. Ahead of the repository

@@ -108,9 +108,11 @@ start.
 
 ## Licence of contributions
 
-CONDIMENTAL is licensed under the [GNU GPL v3](LICENSE) (`GPL-3.0-only`). By
-opening a pull request you agree that your contribution is licensed under the
-same terms (inbound = outbound), and that you have the right to contribute it.
+CONDIMENTAL is licensed under the [GNU GPL v3](LICENSE) (`GPL-3.0-only`) with
+an [additional permission](LICENSE-EXCEPTION.md) to link platform SDKs such as
+Steamworks. By opening a pull request you agree that your contribution is
+licensed under the same terms, that additional permission included (inbound =
+outbound), and that you have the right to contribute it.
 Do not add a dependency whose licence is not on `deny.toml`'s allow-list — CI
 refuses it, and widening that list is a licensing decision, not a build fix.
 The CONDIMENTAL name and brand are reserved; see [TRADEMARKS.md](TRADEMARKS.md).

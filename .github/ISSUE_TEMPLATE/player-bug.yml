@@ -53,6 +53,6 @@ body:
     id: extra
     attributes:
       label: Anything else
-      description: Screenshots, and the save file if the problem is in a particular factory (drag the file in — the game prints where saves live when it starts).
+      description: Screenshots, and the save file if the problem is in a particular factory (drag the file in). Saves live in Godot's per-user data folder under `CONDIMENTAL/saves` — on Windows `%APPDATA%\Godot\app_userdata\CONDIMENTAL\saves`, on macOS `~/Library/Application Support/Godot/app_userdata/CONDIMENTAL/saves`, on Linux `~/.local/share/godot/app_userdata/CONDIMENTAL/saves`.
     validations:
       required: false

@@ -45,8 +45,26 @@ matches what code comments and data files cite.
   is the **name**, which a copyright licence does not grant — hence
   `TRADEMARKS.md` beside `LICENSE`, the model other open-source games with a
   paid store build use. The owner chose GPL-3.0. `-only` rather than
-  `-or-later` keeps the terms exactly the ones chosen; as the copyright holder
-  the owner can still relicence later.
+  `-or-later` keeps the terms exactly the ones chosen.
+
+  **The Steamworks linking exception.** Review of this change (PR #197)
+  caught that plain GPL-3.0 forbids conveying a build linked against a
+  proprietary platform SDK — Valve's Steamworks SDK for achievements, the
+  overlay or cloud APIs, including as bundled by GodotSteam — and that with
+  contributions accepted inbound = outbound, only the owner *today*, while
+  still the sole copyright holder, can add the permission that allows it.
+  Once outside code is merged, relicensing or adding an exception needs every
+  contributor's consent, so "the owner can relicence later" is only true
+  until the first external PR. Three routes were put to the owner: a GPLv3 §7
+  additional permission for platform SDKs, a CLA/copyright assignment, or
+  recording that the Steam build will never link Steamworks. The owner chose
+  the **§7 linking exception** (`LICENSE-EXCEPTION.md`, modelled on the FSF's
+  own template for linking exceptions): it keeps Steam features possible,
+  asks nothing extra of contributors, and every line of CONDIMENTAL's own
+  code stays GPL-3.0 and published. `LICENSE` stays the unmodified GPLv3 text,
+  and the `Cargo.toml` `license` fields stay `GPL-3.0-only`: there is no SPDX
+  identifier for a bespoke exception, and cargo-deny judges the crates'
+  licence, which is unchanged.
 
   **Compatibility, checked rather than assumed.** Every crate linked into
   `sim_core` (`cargo tree -p sim_core -e normal`) is MIT, Apache-2.0, Zlib,
