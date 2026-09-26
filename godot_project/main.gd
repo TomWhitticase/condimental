@@ -3345,6 +3345,7 @@ func _rebuild_world() -> void:
 	_rack_nodes.clear()
 	_pipe_fluid_nodes.clear()
 	_pipe_fault_nodes.clear()
+	_world_warnings.clear()
 	# The instanced tiles and item pools are children of "World" and went
 	# with it; their bookkeeping goes too, so a stale slot index can never
 	# point into a MultiMesh that no longer exists.
@@ -3515,6 +3516,8 @@ func _build_placement(placement: Dictionary) -> void:
 				# positions, which are laid out for four cases and are not
 				# obliged to stay symmetric about it.
 				"anchor": _footprint_centre(origin, size, DOCK_DECK_Y),
+				# Its floating "!"'s key, built once rather than every frame.
+				"warning_key": "dock:" + key,
 			}
 		_:
 			# A machine: a recipe-running kind. Its status lamp and (for the
@@ -4371,6 +4374,14 @@ func _update_dock_stock(dock_states: Dictionary, current_tick := 0) -> void:
 			nodes,
 			_dock_lamp_lit(not waiting.is_empty(), bool(snapshot.get("full", false)), current_tick)
 		)
+		# Every place taken: the "!" over the dock. `at_capacity`, not `full`
+		# — a dock whose places are all taken needs a contract or a removal
+		# whether or not a box happened to arrive this tick to be refused.
+		_set_world_warning(
+			nodes.get("warning_key", "dock:" + key),
+			nodes.get("anchor", Vector3.ZERO),
+			bool(snapshot.get("at_capacity", false))
+		)
 
 
 ## A dock's (item, quantity) pairs flattened into one case per unit, in
@@ -4536,6 +4547,74 @@ func _update_pipe_fault_markers() -> void:
 		# being turned to its host's facing.
 		_world_root.add_child(node)
 		_pipe_fault_nodes[key] = node
+
+
+# --- The floating "!" ----------------------------------------------------
+## A glowing "!" hung over a placement that needs the player
+## (`warning_marker`, `assets/voxels/generators/assets.rs`). A dock with every
+## place taken raises one first (the owner's 2026-09-26 ask). The marker is
+## built to be reused, so a rack out of bays or a stuck machine can raise the
+## same one through `_set_world_warning` with a key of its own. It marks
+## WHERE to look and the hover says what is wrong, the split the pipe clamp
+## already makes. It is never the only signal (UI_UX §7): the dock's lamp
+## still pulses and its hover still says FULL.
+const WARNING_MARKER_ASSET := "warning_marker"
+## How far above its anchor the marker floats, and at what size. Measured in
+## TILE (§6a), clear of the dock's roof.
+const WARNING_MARKER_LIFT := 1.35 * TILE
+const WARNING_MARKER_SCALE := 0.75
+## A slow bob, clocked off the simulation tick like every other animation
+## here (§6a), so a pause freezes it and a screenshot repeats. It only moves
+## the marker up and down, never turns it: the "!" reads the same from every
+## side (`a_warning_marker_is_unchanged_by_a_quarter_turn`).
+const WARNING_MARKER_BOB_TICKS := 48
+const WARNING_MARKER_BOB := 0.08 * TILE
+var _world_warnings: Dictionary = {} # caller's key -> Node3D, one "!" each
+
+
+## Raises (`on`) or clears the floating "!" for `key`, standing over
+## `anchor`. Idempotent both ways, so a caller can hand it its state every
+## frame. The key is the caller's, namespaced by what raised it
+## (`"dock:5,0"`), so two kinds on one tile never share a marker.
+func _set_world_warning(key: String, anchor: Vector3, on: bool) -> void:
+	if not on:
+		if _world_warnings.has(key):
+			var stale: Node3D = _world_warnings[key]
+			_world_warnings.erase(key)
+			if stale != null and is_instance_valid(stale):
+				stale.get_parent().remove_child(stale)
+				_release_render_resources(stale)
+				stale.free()
+		return
+	var node: Node3D = _world_warnings.get(key)
+	if node == null or not is_instance_valid(node):
+		if _world_root == null:
+			return
+		node = _asset_node(WARNING_MARKER_ASSET)
+		node.name = "%s_%s" % [WARNING_MARKER_ASSET, key.replace(":", "_").replace(",", "_")]
+		node.scale = Vector3.ONE * WARNING_MARKER_SCALE
+		_world_root.add_child(node)
+		_world_warnings[key] = node
+	node.set_meta("anchor", anchor)
+	node.position = _world_warning_position(anchor, sim.current_tick() if sim != null else 0)
+
+
+## Where a marker over `anchor` stands on `tick`: lifted clear, plus the bob.
+func _world_warning_position(anchor: Vector3, tick: int) -> Vector3:
+	var phase := float(posmod(tick, WARNING_MARKER_BOB_TICKS)) / WARNING_MARKER_BOB_TICKS
+	return anchor + Vector3(0.0, WARNING_MARKER_LIFT + sin(phase * TAU) * WARNING_MARKER_BOB, 0.0)
+
+
+## Moves every raised marker to this tick's point in its bob.
+func _update_world_warnings(current_tick: int) -> void:
+	if _world_warnings.is_empty():
+		return
+	for key in _world_warnings.keys():
+		var node: Node3D = _world_warnings[key]
+		if node == null or not is_instance_valid(node):
+			_world_warnings.erase(key)
+			continue
+		node.position = _world_warning_position(node.get_meta("anchor", Vector3.ZERO), current_tick)
 
 
 ## The liquid body sitting in one pipe segment's bore, created on first
@@ -16628,10 +16707,15 @@ func _apply_hover_panel_state(state: Dictionary, yielded := 0) -> void:
 		_hover_places_grid.visible = not places.is_empty()
 		if not places.is_empty():
 			var count := int(places.get("places", 0))
-			_hover_places_grid.set_meta("places", count)
-			_hover_places_grid.set_meta("cells", places.get("cells", []))
-			_hover_places_grid.custom_minimum_size = _places_grid_size(count)
-			_hover_places_grid.queue_redraw()
+			var cells: Array = places.get("cells", [])
+			# The hover is re-applied every frame; redraw only when what the
+			# grid shows has changed.
+			if int(_hover_places_grid.get_meta("places", -1)) != count \
+					or _hover_places_grid.get_meta("cells", []) != cells:
+				_hover_places_grid.set_meta("places", count)
+				_hover_places_grid.set_meta("cells", cells)
+				_hover_places_grid.custom_minimum_size = _places_grid_size(count)
+				_hover_places_grid.queue_redraw()
 	var meter: Dictionary = state.get("meter", {})
 	if _hover_meter != null:
 		_hover_meter.visible = not meter.is_empty()
@@ -16676,22 +16760,34 @@ func _places_grid_size(count: int) -> Vector2:
 ## room" and "room for what" are one picture. Filled in snapshot order, left
 ## to right, top row first.
 func _draw_places_grid(grid: Control) -> void:
-	var count := int(grid.get_meta("places", 0))
-	var cells: Array = grid.get_meta("cells", [])
 	var border := maxf(1.0, _ui_px(1.5))
 	var inset := _ui_px(2.0)
-	for i in range(count):
-		var cell := Vector2(i % HOVER_PLACES_COLUMNS, floori(float(i) / HOVER_PLACES_COLUMNS))
-		var rect := Rect2(cell * (HOVER_PLACE_CELL + HOVER_PLACE_GAP), Vector2.ONE * HOVER_PLACE_CELL)
-		if i < cells.size():
+	for socket in _places_grid_sockets(int(grid.get_meta("places", 0)), grid.get_meta("cells", [])):
+		var rect: Rect2 = socket["rect"]
+		var item := String(socket["item"])
+		if not item.is_empty():
 			grid.draw_rect(rect, HOVER_PLACE_FILLED)
-			var icon := _icon_for(String(cells[i]))
+			var icon := _icon_for(item)
 			if icon != null:
 				grid.draw_texture_rect(icon, rect.grow(-inset), false)
 			grid.draw_rect(rect, HOVER_PLACE_FILLED_BORDER, false, border)
 		else:
 			grid.draw_rect(rect, METER_TRACK_COLOR)
 			grid.draw_rect(rect, METER_BORDER_COLOR, false, border)
+
+
+## Every socket `_draw_places_grid` draws, one per place: its rect, and the
+## item it holds or "" for a free one. Pure, so a test can assert the picture
+## the drawing makes without a layout pass.
+func _places_grid_sockets(count: int, cells: Array) -> Array:
+	var sockets: Array = []
+	for i in range(count):
+		var cell := Vector2(i % HOVER_PLACES_COLUMNS, floori(float(i) / HOVER_PLACES_COLUMNS))
+		sockets.append({
+			"rect": Rect2(cell * (HOVER_PLACE_CELL + HOVER_PLACE_GAP), Vector2.ONE * HOVER_PLACE_CELL),
+			"item": String(cells[i]) if i < cells.size() else "",
+		})
+	return sockets
 
 
 ## Where a panel that points at something in the WORLD goes — the hover
@@ -18074,6 +18170,7 @@ func _update_payout_feedback() -> void:
 	_update_payout_flyout(current_tick)
 	_update_payout_stamps(current_tick)
 	_update_dock_pop(current_tick)
+	_update_world_warnings(current_tick)
 
 
 func _update_coins(current_tick: int) -> void:

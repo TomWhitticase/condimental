@@ -283,6 +283,14 @@ page the book holds and fails unless each puts its own display name on
 screen. Keying that assertion on a node rather than on content does not work:
 `queue_free` is deferred to end of frame, so within one `_process` the
 previous page's nodes are still findable.
+### 2026-09-26 — A floating "!" over a full dock
+
+A dock with all 32 places taken now shows a glowing amber "!" hanging over
+it, so a floor with a stuck dock shows where the problem is before you hover
+anything. The marker is a general one. Racks and machines can raise it under
+their own key, through the same `_set_world_warning` call, when they need
+the player's attention. Together with the hover's places grid, this closes
+the owner's report on the docks.
 
 ### 2026-09-26 — Each dock holds its own stock
 

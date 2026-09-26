@@ -295,6 +295,33 @@ func _run_checks() -> void:
 	if not is_equal_approx(grid_node.custom_minimum_size.y, want_height):
 		_fail("the grid should be %d rows tall for %d places, got %s" % [rows, places, grid_node.custom_minimum_size])
 		return
+	# What the drawing makes of those metas: one socket per place, the first
+	# five holding their items in order, every other one free, and no two
+	# sockets on the same spot.
+	var sockets: Array = main._places_grid_sockets(places, grid_node.get_meta("cells", []))
+	if sockets.size() != places:
+		_fail("the grid drew %d sockets for %d places" % [sockets.size(), places])
+		return
+	var drawn_items: Array = []
+	var spots := {}
+	for socket in sockets:
+		drawn_items.append(socket["item"])
+		spots[socket["rect"].position] = true
+	if drawn_items.slice(0, 5) != cells or drawn_items.slice(5).any(func(item): return item != ""):
+		_fail("the grid should draw five occupied sockets then free ones, drew %s" % [drawn_items])
+		return
+	if spots.size() != places:
+		_fail("two of the grid's sockets were drawn on the same spot")
+		return
+	# The grid redraws only on a change, and a change of WHAT stands on the
+	# dock is one even when the number of places is not: a box shipped and
+	# another arrived must not leave the old icons drawn.
+	dock_state["contents"] = [["boxed_ketchup", 2], ["boxed_bbq", 3]]
+	main._apply_hover_panel_state(main._hover_panel_state(Vector2i(5, 0)))
+	var redrawn: Array = grid_node.get_meta("cells", [])
+	if redrawn != ["boxed_ketchup", "boxed_ketchup", "boxed_bbq", "boxed_bbq", "boxed_bbq"]:
+		_fail("the grid kept its old cells after the dock's contents changed: %s" % [redrawn])
+		return
 	# The size is the snapshot's, not a constant: half the places, half the rows.
 	dock_state["places"] = main.HOVER_PLACES_COLUMNS * 2
 	main._apply_hover_panel_state(main._hover_panel_state(Vector2i(5, 0)))
