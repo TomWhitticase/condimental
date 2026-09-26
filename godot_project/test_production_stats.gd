@@ -24,6 +24,10 @@
 #     windows re-reads, and an empty world says so in a sentence,
 #   * P opens it and closes the other modals; each of E/M/C/H closes it;
 #     ESC closes it without the pause menu; both legends name P,
+#   * the pay-cycle block (ticket 7) prints the wire's `cycle` lines in its
+#     order as REQUIRED / THIS CYCLE / LAST CYCLE, a fraction to one place,
+#     `—` before the first payday, the short verdict in words and the warn
+#     colour, and a sentence in place of the rows with no contract running,
 #   * the ledger is polled on the tick only while open, the pause menu
 #     freezes it, opening re-reads at once, and a save loaded back reads
 #     its counts on the first frame.
@@ -173,6 +177,8 @@ func _run_checks() -> void:
 	main._set_production_open(true)
 	if not main._production_empty_label.visible or main._production_scroll.visible:
 		_fail("an empty ledger shows its sentence in place of the list")
+	if main._production_cycle_rows_for(main._production_snapshot).is_empty() != main._production_cycle_empty_label.visible:
+		_fail("the no-orders sentence shows exactly when the wire lists no cycle line")
 	if main._production_empty_label.text.find("nothing made or used") < 0:
 		_fail("the empty sentence says nothing was made or used, got '%s'" % main._production_empty_label.text)
 	main._set_production_open(false)
@@ -221,6 +227,31 @@ func _run_checks() -> void:
 	if int(_wire_item("tomato").get("consumed_total", 1)) % 4 != 0:
 		_fail("tomato is used four a craft, total %d is not a multiple of four" % int(_wire_item("tomato").get("consumed_total", 0)))
 
+	# --- 2b. the pay-cycle rows, pure ------------------------------------------
+	var cycle_snapshot := {"cycle": {"period_ticks": 1000, "next_tick": 3000, "cycles_closed": 2, "lines": [
+		{"id": "boxed_mustard", "required": 6.666656494140625, "produced_this_cycle": 3, "produced_last_cycle": 5, "short": true},
+		{"id": "boxed_ketchup", "required": 2.0, "produced_this_cycle": 1, "produced_last_cycle": 4, "short": false},
+	]}}
+	var cycle_rows: Array = main._production_cycle_rows_for(cycle_snapshot)
+	if cycle_rows.size() != 2 or String(cycle_rows[0]["id"]) != "boxed_mustard":
+		_fail("the cycle rows are the wire's lines in the wire's order, got %s" % str(cycle_rows.map(func(r): return r["id"])))
+	else:
+		if cycle_rows[0]["required"] != "6.7" or cycle_rows[1]["required"] != "2":
+			_fail("required prints a fraction to one place and a whole number whole, got '%s' / '%s'" % [cycle_rows[0]["required"], cycle_rows[1]["required"]])
+		if cycle_rows[0]["this_cycle"] != "3" or cycle_rows[1]["last_cycle"] != "4":
+			_fail("this and last cycle print the wire's counts, got %s" % str(cycle_rows))
+		if not bool(cycle_rows[0]["short"]) or String(cycle_rows[0]["last_cycle"]).find("short") < 0:
+			_fail("a short line says so in words, got '%s'" % cycle_rows[0]["last_cycle"])
+		if bool(cycle_rows[1]["short"]) or String(cycle_rows[1]["last_cycle"]).find("short") >= 0:
+			_fail("a covered line is not short")
+	if main._production_required_text(10.99998474121093) != "11":
+		_fail("a fixed-point whole number prints whole, got '%s'" % main._production_required_text(10.99998474121093))
+	cycle_snapshot["cycle"]["cycles_closed"] = 0
+	if String(main._production_cycle_rows_for(cycle_snapshot)[1]["last_cycle"]) != "—":
+		_fail("before the first payday there is no last cycle to print")
+	if not main._production_cycle_rows_for({"cycle": {"lines": []}}).is_empty() or not main._production_cycle_rows_for({}).is_empty():
+		_fail("no contract, or no snapshot, is no cycle rows")
+
 	# --- 3. the panel reads the wire ---------------------------------------------
 	main._set_production_open(true)
 	if main._production_snapshot.is_empty():
@@ -259,6 +290,32 @@ func _run_checks() -> void:
 		_fail("the footer names the close keys")
 	if main._production_panel.name != "ProductionPanel":
 		_fail("the panel node is named ProductionPanel")
+	# The pay-cycle block: one row per line the wire's `cycle` carries,
+	# each figure printed from it. The settled line has run past a payday.
+	var cycle: Dictionary = main._production_snapshot.get("cycle", {})
+	var lines: Array = cycle.get("lines", [])
+	if int(cycle.get("period_ticks", 0)) <= 0 or int(cycle.get("cycles_closed", 0)) < 1:
+		_fail("the settled line's wire carries a pay cycle past its first payday, got %s" % str(cycle))
+	if lines.is_empty() or String(lines[0].get("id", "")) != "boxed_ketchup":
+		_fail("the running contract orders boxed ketchup, so the cycle lists it, got %s" % str(lines))
+	if main._production_cycle_rows.size() != lines.size():
+		_fail("%d cycle lines on the wire, %d on the panel" % [lines.size(), main._production_cycle_rows.size()])
+	for i in range(min(lines.size(), main._production_cycle_rows.size())):
+		var line: Dictionary = lines[i]
+		var row: Dictionary = main._production_cycle_rows[i]
+		if row["required"].text != main._production_required_text(float(line.get("required", 0.0))):
+			_fail("%s REQUIRED prints '%s', the wire says %s" % [line["id"], row["required"].text, str(line.get("required"))])
+		if row["this_cycle"].text != str(int(line.get("produced_this_cycle", -1))):
+			_fail("%s THIS CYCLE prints '%s', the wire says %s" % [line["id"], row["this_cycle"].text, str(line.get("produced_this_cycle"))])
+		if not row["last_cycle"].text.begins_with(str(int(line.get("produced_last_cycle", -1)))):
+			_fail("%s LAST CYCLE prints '%s', the wire says %s" % [line["id"], row["last_cycle"].text, str(line.get("produced_last_cycle"))])
+		var warned: bool = row["last_cycle"].label_settings.font_color == main.METER_FILL_WARN
+		if warned != bool(line.get("short", false)):
+			_fail("%s's last-cycle figure is %scoloured as short, the wire says short=%s" % [line["id"], "" if warned else "not ", str(line.get("short"))])
+	if main._production_cycle_empty_label.visible:
+		_fail("a running contract shows its rows, not the no-orders sentence")
+	if main._production_cycle_caption.text.find("PAY CYCLE") < 0 or main._production_cycle_caption.text.find("payday in") < 0:
+		_fail("the cycle caption names the pay cycle and its countdown, got '%s'" % main._production_cycle_caption.text)
 	# The selector: five buttons (four windows + all time), one selected.
 	if main._production_window_buttons.size() != windows.size() + 1:
 		_fail("one button per window plus all time, got %d" % main._production_window_buttons.size())
@@ -385,5 +442,5 @@ func _run_checks() -> void:
 	if _failed:
 		quit(1)
 		return
-	print("PRODUCTION_STATS_OK: the production panel (P) sorts and formats production_snapshot_json — rows biggest first with per-minute rates over the observed span and bars against the largest count, a window selector with all time, the running line counting every stage with fluids as fluids and a paid order as the exit, nothing counted for buying or filling, one modal at a time with E/M/C/H, ESC closes, polled on the tick only while open and frozen by pause, and a loaded save reads its counts first frame")
+	print("PRODUCTION_STATS_OK: the production panel (P) sorts and formats production_snapshot_json — rows biggest first with per-minute rates over the observed span and bars against the largest count, a window selector with all time, the running line counting every stage with fluids as fluids and a paid order as the exit, nothing counted for buying or filling, the pay-cycle block's REQUIRED / THIS CYCLE / LAST CYCLE off the wire, one modal at a time with E/M/C/H, ESC closes, polled on the tick only while open and frozen by pause, and a loaded save reads its counts first frame")
 	quit(0)

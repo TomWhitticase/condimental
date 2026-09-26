@@ -234,7 +234,7 @@ use super::splitter::{SPLITTER_KIND, Side, Splitter};
 use super::staff::{
     CrewEntry, CrewRequest, CrewSource, EstablishmentEntry, StaffPools, StaffSnapshot, crew_entries,
 };
-use super::stats::{ProductionLedger, ProductionSnapshot, StatKind};
+use super::stats::{CycleSnapshot, ProductionLedger, ProductionSnapshot, StatKind};
 use super::storage::{StorageCatalog, WAREHOUSE_RACK_KIND, WarehouseRack};
 use super::types::{ChunkId, Direction, FluidId, Fx, ItemId, Money, RecipeId, TileCoord, chunk_of};
 
@@ -2352,8 +2352,17 @@ impl World {
     /// The presentation-facing view of [`World::production`] — see
     /// [`ProductionSnapshot`] for the JSON shape. **Poll this**; it changes
     /// every tick a machine runs and deliberately dirties nothing.
+    /// Its `cycle` sets the pay cycle's produced counts beside what the
+    /// active contracts require over one pay period.
     pub fn production_snapshot(&self) -> ProductionSnapshot {
-        self.production.snapshot()
+        let period_ticks = self.staff.catalog().pay_period_ticks();
+        let demand = self.economy.demand_per_period(period_ticks);
+        self.production.snapshot(CycleSnapshot {
+            period_ticks,
+            next_tick: self.staff.next_payday_tick(),
+            cycles_closed: self.production.cycles_closed(),
+            lines: self.production.cycle_lines(&demand),
+        })
     }
 
     /// The shop catalog, the player's owned counts and their current money
@@ -4064,7 +4073,15 @@ impl World {
         // 8. Payday. Not tied to any tile either; Godot polls
         // `staff_snapshot`. A head left unpaid is simply not available when
         // the pools reset next tick; one who leaves is not there at all.
-        let _ = self.staff.tick(self.tick_count, &mut self.economy);
+        // The payday also closes the production ledger's pay cycle — the
+        // P screen's "this cycle / last cycle" (`stats` module doc).
+        if self
+            .staff
+            .tick(self.tick_count, &mut self.economy)
+            .is_some()
+        {
+            self.production.close_cycle();
+        }
     }
 
     /// Step 0 of [`World::tick`]: tops every auto-filling hopper and tank up

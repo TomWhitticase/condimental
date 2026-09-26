@@ -30,10 +30,24 @@
 //! bookkeeping in the presentation layer. It **never dirties a chunk**: it
 //! changes every tick a machine is running, so it is a polled readout
 //! (`World::production_snapshot`) like the load and the fluid network.
+//!
+//! **The pay cycle** (ticket 7, 2026-09-26). Beside the rolling windows,
+//! every id keeps what it PRODUCED since the last payday and in the whole
+//! period before it: the staff payday (`staff.ron`'s `pay_period_ticks`) is
+//! the game's one global cycle, the one the wage bill and its countdown
+//! already run on — a contract's own cadence is per contract, so it cannot
+//! be the period a factory-wide tally rolls over on. `World::tick` calls
+//! [`ProductionLedger::close_cycle`] on the tick payday lands. What the
+//! active contracts ASK for over the same period is the economy's
+//! (`Economy::demand_per_period`); [`ProductionLedger::cycle_lines`] puts
+//! the two side by side. Neither ring can derive these — no bucket edge
+//! lands on a payday — so they are saved (`SavedItemStats`).
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+
+use fixed::types::I48F16;
 
 use super::types::ItemId;
 
@@ -111,6 +125,11 @@ pub struct ItemStats {
     pub consumed: [[u32; STAT_BUCKETS]; STAT_WINDOW_COUNT],
     pub produced_total: u64,
     pub consumed_total: u64,
+    /// Produced since the last payday.
+    pub produced_this_cycle: u32,
+    /// Produced in the whole pay period before that one; zero until the
+    /// first payday.
+    pub produced_last_cycle: u32,
 }
 
 impl ItemStats {
@@ -121,6 +140,8 @@ impl ItemStats {
             consumed: [[0; STAT_BUCKETS]; STAT_WINDOW_COUNT],
             produced_total: 0,
             consumed_total: 0,
+            produced_this_cycle: 0,
+            produced_last_cycle: 0,
         }
     }
 }
@@ -136,6 +157,9 @@ pub struct ProductionLedger {
     /// Ticks this ledger has observed, so a window younger than itself can
     /// report a true rate (`observed = min(age, window.ticks)`).
     age: u64,
+    /// Paydays this ledger has closed — zero means there is no "last
+    /// cycle" yet, so a zero there is not a shortfall.
+    cycles_closed: u64,
 }
 
 impl Default for ProductionLedger {
@@ -151,6 +175,7 @@ impl ProductionLedger {
             cursor: [0; STAT_WINDOW_COUNT],
             ticks_into_bucket: [0; STAT_WINDOW_COUNT],
             age: 0,
+            cycles_closed: 0,
         }
     }
 
@@ -165,6 +190,7 @@ impl ProductionLedger {
             stats.produced[w][c] = stats.produced[w][c].saturating_add(qty);
         }
         stats.produced_total = stats.produced_total.saturating_add(u64::from(qty));
+        stats.produced_this_cycle = stats.produced_this_cycle.saturating_add(qty);
     }
 
     /// Adds `qty` to `id`'s consumed count in every window and its total.
@@ -205,6 +231,60 @@ impl ProductionLedger {
                 }
             }
         }
+    }
+
+    /// Ends the pay cycle: what was produced this cycle becomes last
+    /// cycle's, and this cycle starts again at zero. Called by
+    /// `World::tick` on the tick payday lands, after everything that
+    /// records, so that tick's crafts belong to the cycle it closes.
+    pub fn close_cycle(&mut self) {
+        self.cycles_closed = self.cycles_closed.saturating_add(1);
+        for stats in self.items.values_mut() {
+            stats.produced_last_cycle = stats.produced_this_cycle;
+            stats.produced_this_cycle = 0;
+        }
+    }
+
+    /// Paydays closed so far.
+    pub fn cycles_closed(&self) -> u64 {
+        self.cycles_closed
+    }
+
+    pub fn produced_this_cycle(&self, id: &str) -> u32 {
+        self.items
+            .get(id)
+            .map(|s| s.produced_this_cycle)
+            .unwrap_or(0)
+    }
+
+    pub fn produced_last_cycle(&self, id: &str) -> u32 {
+        self.items
+            .get(id)
+            .map(|s| s.produced_last_cycle)
+            .unwrap_or(0)
+    }
+
+    /// One line per product the active contracts ask for, in the order
+    /// `demand` gives (the economy's: active-list order, so contract
+    /// priority): what one pay period requires, what was made this cycle
+    /// and last. `short` is last cycle's verdict — a finished period that
+    /// made less than it required — and is never set before the first
+    /// payday, when there is no finished period to judge. An empty
+    /// `demand` (no active contract) is an empty list.
+    pub fn cycle_lines(&self, demand: &[(ItemId, I48F16)]) -> Vec<CycleLineSnapshot> {
+        demand
+            .iter()
+            .map(|(id, required)| {
+                let last = self.produced_last_cycle(id);
+                CycleLineSnapshot {
+                    id: id.clone(),
+                    required: required.to_num::<f64>(),
+                    produced_this_cycle: self.produced_this_cycle(id),
+                    produced_last_cycle: last,
+                    short: self.cycles_closed > 0 && I48F16::from_num(last) < *required,
+                }
+            })
+            .collect()
     }
 
     /// Ticks this ledger has observed in total.
@@ -274,6 +354,7 @@ impl ProductionLedger {
         cursor: [usize; STAT_WINDOW_COUNT],
         ticks_into_bucket: [u32; STAT_WINDOW_COUNT],
         age: u64,
+        cycles_closed: u64,
     ) -> Option<Self> {
         for (w, window) in STAT_WINDOWS.iter().enumerate() {
             if cursor[w] >= STAT_BUCKETS || ticks_into_bucket[w] >= window.bucket_ticks() {
@@ -285,12 +366,16 @@ impl ProductionLedger {
             cursor,
             ticks_into_bucket,
             age,
+            cycles_closed,
         })
     }
 
-    /// The presentation-facing view — see [`ProductionSnapshot`].
-    pub fn snapshot(&self) -> ProductionSnapshot {
+    /// The presentation-facing view — see [`ProductionSnapshot`]. `cycle`
+    /// is the world's to fill: the ledger does not know the payday clock or
+    /// the contracts.
+    pub fn snapshot(&self, cycle: CycleSnapshot) -> ProductionSnapshot {
         ProductionSnapshot {
+            cycle,
             windows: STAT_WINDOWS
                 .iter()
                 .enumerate()
@@ -336,11 +421,42 @@ impl ProductionLedger {
 /// `windows` is [`STAT_WINDOWS`] in order with how much of each has been
 /// observed (for a rate); every count array is in that same order. `items`
 /// lists every id ever recorded, sorted by id — Godot sorts by count and
-/// formats; the sim only counts.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// formats; the sim only counts. `cycle` is the pay-cycle view (see the
+/// module doc):
+///
+/// ```json
+/// "cycle": {"period_ticks": 1000, "next_tick": 3000, "cycles_closed": 2,
+///           "lines": [{"id": "boxed_ketchup", "required": 6.666656494140625,
+///                      "produced_this_cycle": 3, "produced_last_cycle": 5,
+///                      "short": true}]}
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProductionSnapshot {
+    pub cycle: CycleSnapshot,
     pub windows: Vec<WindowSnapshot>,
     pub items: Vec<ItemStatsSnapshot>,
+}
+
+/// The pay cycle: its length, the tick it next closes on, how many have
+/// closed, and one [`CycleLineSnapshot`] per product an active contract
+/// orders — none with no contract running.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CycleSnapshot {
+    pub period_ticks: u64,
+    pub next_tick: u64,
+    pub cycles_closed: u64,
+    pub lines: Vec<CycleLineSnapshot>,
+}
+
+/// One demanded product. `required` is a float only here, at the
+/// presentation edge; the sim holds it fixed-point.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CycleLineSnapshot {
+    pub id: ItemId,
+    pub required: f64,
+    pub produced_this_cycle: u32,
+    pub produced_last_cycle: u32,
+    pub short: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -447,7 +563,7 @@ mod tests {
     fn the_snapshot_sums_rings_in_window_order() {
         let mut ledger = ledger_with_history();
         ledger.record_consumed("vinegar", StatKind::Fluid, 2);
-        let snap = ledger.snapshot();
+        let snap = ledger.snapshot(no_cycle());
         assert_eq!(snap.windows.len(), STAT_WINDOW_COUNT);
         assert_eq!(snap.windows[0].id, "5s");
         assert_eq!(snap.windows[1].ticks, 1_800);
@@ -485,31 +601,97 @@ mod tests {
                 items.clone(),
                 ledger.cursor(),
                 ledger.ticks_into_bucket(),
-                ledger.age()
+                ledger.age(),
+                ledger.cycles_closed()
             )
             .is_some()
         );
         let mut bad_cursor = ledger.cursor();
         bad_cursor[0] = STAT_BUCKETS;
         assert!(
-            ProductionLedger::restore(items.clone(), bad_cursor, ledger.ticks_into_bucket(), 0)
+            ProductionLedger::restore(items.clone(), bad_cursor, ledger.ticks_into_bucket(), 0, 0)
                 .is_none()
         );
         let mut bad_clock = ledger.ticks_into_bucket();
         bad_clock[1] = STAT_WINDOWS[1].bucket_ticks();
-        assert!(ProductionLedger::restore(items, ledger.cursor(), bad_clock, 0).is_none());
+        assert!(ProductionLedger::restore(items, ledger.cursor(), bad_clock, 0, 0).is_none());
     }
 
     #[test]
     fn a_restored_ledger_is_the_saved_one() {
-        let ledger = ledger_with_history();
+        let mut ledger = ledger_with_history();
+        ledger.close_cycle();
+        ledger.record_produced("paste", StatKind::Item, 4);
         let restored = ProductionLedger::restore(
             ledger.items().clone(),
             ledger.cursor(),
             ledger.ticks_into_bucket(),
             ledger.age(),
+            ledger.cycles_closed(),
         )
         .unwrap();
         assert_eq!(restored, ledger);
+    }
+
+    fn no_cycle() -> CycleSnapshot {
+        CycleSnapshot {
+            period_ticks: 1_000,
+            next_tick: 1_000,
+            cycles_closed: 0,
+            lines: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn closing_a_cycle_moves_this_cycle_to_last_and_starts_again() {
+        let mut ledger = ProductionLedger::new();
+        ledger.record_produced("boxed_ketchup", StatKind::Item, 3);
+        ledger.record_consumed("boxed_ketchup", StatKind::Item, 9);
+        assert_eq!(ledger.produced_this_cycle("boxed_ketchup"), 3);
+        assert_eq!(ledger.produced_last_cycle("boxed_ketchup"), 0);
+
+        ledger.close_cycle();
+        assert_eq!(ledger.cycles_closed(), 1);
+        assert_eq!(ledger.produced_this_cycle("boxed_ketchup"), 0);
+        assert_eq!(ledger.produced_last_cycle("boxed_ketchup"), 3);
+
+        ledger.record_produced("boxed_ketchup", StatKind::Item, 5);
+        assert_eq!(ledger.produced_this_cycle("boxed_ketchup"), 5);
+        ledger.close_cycle();
+        assert_eq!(ledger.produced_last_cycle("boxed_ketchup"), 5);
+        // An idle cycle is a zero, not a carry-over of the one before.
+        ledger.close_cycle();
+        assert_eq!(ledger.produced_last_cycle("boxed_ketchup"), 0);
+        // Consumption is not a cycle count, and the rolling windows and
+        // lifetime total never see a payday.
+        assert_eq!(ledger.produced_total("boxed_ketchup"), 8);
+        assert_eq!(ledger.produced_in("boxed_ketchup", 0), 8);
+    }
+
+    #[test]
+    fn a_cycle_line_is_short_only_after_a_finished_cycle_made_too_little() {
+        let mut ledger = ProductionLedger::new();
+        let demand = vec![
+            ("boxed_ketchup".to_string(), I48F16::from_num(6)),
+            (
+                "boxed_bbq".to_string(),
+                I48F16::from_num(2) / I48F16::from_num(3),
+            ),
+        ];
+        ledger.record_produced("boxed_ketchup", StatKind::Item, 2);
+        // No cycle has finished, so nothing can be short yet.
+        let lines = ledger.cycle_lines(&demand);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].id, "boxed_ketchup", "demand order, not id order");
+        assert_eq!(lines[0].produced_this_cycle, 2);
+        assert!(!lines[0].short && !lines[1].short);
+
+        ledger.record_produced("boxed_bbq", StatKind::Item, 1);
+        ledger.close_cycle();
+        let lines = ledger.cycle_lines(&demand);
+        assert!(lines[0].short, "2 made of 6 required");
+        assert!(!lines[1].short, "1 made covers two-thirds");
+        assert!((lines[1].required - 2.0 / 3.0).abs() < 1e-4);
+        assert!(ledger.cycle_lines(&[]).is_empty());
     }
 }
