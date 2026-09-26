@@ -325,5 +325,8 @@
   "warehouse_rack": [
     "matte",
     "metal"
+  ],
+  "warning_marker": [
+    "emissive"
   ]
 }

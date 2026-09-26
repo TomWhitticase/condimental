@@ -346,7 +346,46 @@ func _initialize() -> void:
 		_fail("a dock that is NOT backing up should hold its lamp lit, not blink")
 		return
 	if blinked_states.size() != 2:
-		_fail("the dock named in blocked_keys should blink, it held at %s" % str(blinked_states.keys()))
+		_fail("a dock whose own snapshot says full should blink, it held at %s" % str(blinked_states.keys()))
+		return
+
+	# --- a dock with every place taken raises the floating "!" ------------
+	# `at_capacity` (every place taken), not `full` (a box was refused this
+	# tick), and per dock: another dock at capacity never raises this one's.
+	var warning_key := "dock:" + dock_key
+	main._update_dock_stock({dock_key: {"contents": stock, "at_capacity": false}, "99,99": {"contents": stock, "at_capacity": true}}, 0)
+	if main._world_warnings.has(warning_key):
+		_fail("another dock at capacity raised this dock's warning marker")
+		return
+	main._update_dock_stock({dock_key: {"contents": stock, "at_capacity": true}}, 0)
+	if not main._world_warnings.has(warning_key):
+		_fail("a dock at capacity should raise the floating \"!\"")
+		return
+	var marker: Node3D = main._world_warnings[warning_key]
+	var anchor: Vector3 = main._dock_nodes[dock_key]["anchor"]
+	if marker.get_parent() != main._world_root or marker.position.y <= anchor.y + main.TILE:
+		_fail("the \"!\" should float in the world, a tile clear of its dock, got y %.2f over %.2f" % [marker.position.y, anchor.y])
+		return
+	# It bobs off the tick (UI_UX §6a): two ticks a quarter-bob apart stand
+	# at two heights, and the same tick always at the same one.
+	main._update_world_warnings(0)
+	var y0 := marker.position.y
+	main._update_world_warnings(main.WARNING_MARKER_BOB_TICKS / 4)
+	var y_quarter := marker.position.y
+	main._update_world_warnings(main.WARNING_MARKER_BOB_TICKS)
+	if is_equal_approx(y0, y_quarter) or not is_equal_approx(y0, marker.position.y):
+		_fail("the \"!\" should bob with the tick: %.3f, %.3f, %.3f" % [y0, y_quarter, marker.position.y])
+		return
+	# A contract draws the dock down and the marker goes with it.
+	main._update_dock_stock({dock_key: {"contents": stock, "at_capacity": false}}, 1)
+	if main._world_warnings.has(warning_key) or is_instance_valid(marker):
+		_fail("a dock with a free place again should drop its \"!\"")
+		return
+	# A rebuild frees the world, and the marker map must not outlive it.
+	main._update_dock_stock({dock_key: {"contents": stock, "at_capacity": true}}, 2)
+	main._rebuild_world()
+	if not main._world_warnings.is_empty():
+		_fail("a rebuild left a stale warning marker behind")
 		return
 
 	# --- and the two halves of that blink have to LOOK different ----------
@@ -378,7 +417,7 @@ func _initialize() -> void:
 		])
 		return
 
-	print("PRESENTATION_OK: orthographic camera, %d light(s) w/ shadows, SSAO+glow, %d voxel meshes, %d placement(s), item rendered, full dock pulses" % [
+	print("PRESENTATION_OK: orthographic camera, %d light(s) w/ shadows, SSAO+glow, %d voxel meshes, %d placement(s), item rendered, full dock pulses, full dock raises its \"!\"" % [
 		lights.size(), meshes.size(), layout.size()
 	])
 	quit(0)
