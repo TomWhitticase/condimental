@@ -2861,7 +2861,7 @@ matches what code comments and data files cite.
   (`godot_project/CLAUDE.md`, "visual randomness is derived from an index").
 
   One regression came out of the rearrangement and is recorded as UI_UX.md
-  §2b point 35: the save list's flat 450px cap fit under a title *inside* the
+  §2b point 41: the save list's flat 450px cap fit under a title *inside* the
   plate and pushed BACK off the bottom edge under a 114pt one above it. It is
   now measured — the viewport less the wordmark, the plate's padding and the
   load view's own furniture, read off the nodes so it follows the fonts. The

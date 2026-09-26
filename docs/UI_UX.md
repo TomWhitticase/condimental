@@ -106,10 +106,11 @@ assets/voxels/
 
 Point numbers are cited by code comments; keep them stable — a number is
 never reused and never moves. Full narrative in DECISIONS.md Part B. There is
-no point 10, and the list runs 1-28, 35-37, 29-34, 38-39: the three entries the
-factory-floor work added were written as a second 27, a third 27 and a second
-28, and were given the next free numbers on 2026-09-16 rather than renumbered
-into sequence. They sit where they were discovered.
+no point 10, and the list runs 1-28, 35-37, 29-34, 41, 38-40: the three entries
+the factory-floor work added were written as a second 27, a third 27 and a
+second 28, and were given the next free numbers on 2026-09-16 rather than
+renumbered into sequence; 41 was written as a second 35 and took the next free
+number the same way on 2026-09-26. They sit where they were discovered.
 
 1. **The `.vox` encoder is hand-written** (`generators/vox.rs`, ~150 lines) —
    no Rust crate writes the chunks the Godot importer needs. It puts a
@@ -268,7 +269,7 @@ into sequence. They sit where they were discovered.
     not, show the plain tile and let the prompt (§5a) say the rest in
     words.
 
-35. **A list that scrolls is capped by what the window has left, measured,
+41. **A list that scrolls is capped by what the window has left, measured,
     not by a constant.** The main menu's save list had a flat 450px cap,
     which fit while the title sat inside the plate. The wordmark then moved
     out of the plate and grew to 114pt for the title screen (§5d), and at

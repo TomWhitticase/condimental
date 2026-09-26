@@ -285,6 +285,12 @@ GAMEPLAY §7/§11, UI_UX §2b point 40 and §5, and ARCHITECTURE §4 are amended
 `docs/DECISIONS.md` carries the full record, including the four scope calls
 the owner made and the two I argued against.
 
+Noticed while adding point 40: §2b had two points numbered 35 — the vengi
+camera rule the voxel generators cite, and the menu list's height budget. The
+second took the next free number, 41, the way the 2026-09-16 entries did;
+only the two records pointing at it needed the correction, since every code
+comment citing 35 means the camera.
+
 ### 2026-09-26 — Each dock holds its own stock
 
 The owner saw the docks behave as if they were wired together. A payout threw
@@ -2966,7 +2972,7 @@ camera-projection search after three rendered compositions were rejected.
 The menu was rearranged around it — the wordmark out of the plate, the column
 set to one side of the vanishing point, a gradient scrim holding the text
 against whatever the drifting camera is pointing at. That turned up one real
-regression, now UI_UX.md §2b point 35: the save list's flat 450px cap pushed
+regression, now UI_UX.md §2b point 41: the save list's flat 450px cap pushed
 the BACK button off the bottom edge under the taller wordmark. The list is
 now sized from the window less its measured chrome, and `test_main_menu.gd`
 asserts both that budget and the backdrop itself (camera, hall, floor,
