@@ -58,6 +58,13 @@ const ICON_SIZE: u32 = 64;
 /// A small breathing margin around the model's content, as a fraction of
 /// `ICON_SIZE`, so the icon doesn't touch its own edges.
 const CROP_MARGIN_FRAC: f32 = 0.06;
+/// The model the desktop app icon (`config/icon` in `project.godot`) is
+/// rendered from: the ketchup bottle, the game's first finished product.
+const APP_ICON_MODEL: &str = "item_bottle";
+/// The window/dock icon is shown far larger than a UI slot, so it gets its
+/// own bigger render rather than an upscale of the 64px icon.
+const APP_ICON_RENDER_SIZE: u32 = 1024;
+const APP_ICON_SIZE: u32 = 512;
 
 fn voxels_root() -> PathBuf {
     // generators/ -> assets/voxels/
@@ -159,42 +166,42 @@ fn main() {
 
     for model_path in &entries {
         let name = model_path.file_stem().unwrap().to_str().unwrap();
-        let raw_path = tmp_dir.join(format!("voxicons_{name}_raw.png"));
-
-        let status = Command::new(&thumbnailer)
-            .arg("-i")
-            .arg(model_path)
-            .arg("-o")
-            .arg(&raw_path)
-            .args(["-s", &RENDER_SIZE.to_string()])
-            .args(["--image", "--isometric"])
-            .status();
-
-        if !matches!(status, Ok(s) if s.success()) {
-            eprintln!("  FAIL {name} (vengi-thumbnailer)");
-            failures += 1;
-            continue;
-        }
-
-        let raw = match image::open(&raw_path) {
-            Ok(img) => img.to_rgba8(),
-            Err(e) => {
-                eprintln!("  FAIL {name} (reading render: {e})");
-                failures += 1;
-                continue;
-            }
-        };
-        let _ = std::fs::remove_file(&raw_path);
-
-        let icon = make_icon(&raw);
         let out_path = icons_dir.join(format!("{name}.png"));
-        if let Err(e) = icon.save(&out_path) {
-            eprintln!("  FAIL {name} (writing icon: {e})");
-            failures += 1;
-            continue;
+        match render_icon(
+            &thumbnailer,
+            model_path,
+            &tmp_dir,
+            RENDER_SIZE,
+            ICON_SIZE,
+            &out_path,
+        ) {
+            Ok(()) => {
+                println!("  {}", out_path.display());
+                written += 1;
+            }
+            Err(e) => {
+                eprintln!("  FAIL {name} ({e})");
+                failures += 1;
+            }
         }
-        println!("  {}", out_path.display());
-        written += 1;
+    }
+
+    let app_icon_model = models_dir.join(format!("{APP_ICON_MODEL}.vox"));
+    let app_icon_path = icons_dir.join("app_icon.png");
+    let app_icon = render_icon(
+        &thumbnailer,
+        &app_icon_model,
+        &tmp_dir,
+        APP_ICON_RENDER_SIZE,
+        APP_ICON_SIZE,
+        &app_icon_path,
+    );
+    match app_icon {
+        Ok(()) => println!("  {}", app_icon_path.display()),
+        Err(e) => {
+            eprintln!("  FAIL app_icon ({e})");
+            failures += 1;
+        }
     }
 
     if failures > 0 {
@@ -204,10 +211,46 @@ fn main() {
     println!("voxicons: wrote {written} icons to {}", icons_dir.display());
 }
 
+/// Renders `model_path` at `render_size` and writes it to `out_path` as a
+/// `size` icon — the three steps of the module doc for one model.
+fn render_icon(
+    thumbnailer: &Path,
+    model_path: &Path,
+    tmp_dir: &Path,
+    render_size: u32,
+    size: u32,
+    out_path: &Path,
+) -> Result<(), String> {
+    let name = model_path.file_stem().unwrap().to_str().unwrap();
+    let raw_path = tmp_dir.join(format!("voxicons_{name}_{render_size}_raw.png"));
+
+    let status = Command::new(thumbnailer)
+        .arg("-i")
+        .arg(model_path)
+        .arg("-o")
+        .arg(&raw_path)
+        .args(["-s", &render_size.to_string()])
+        .args(["--image", "--isometric"])
+        .status();
+
+    if !matches!(status, Ok(s) if s.success()) {
+        return Err("vengi-thumbnailer".to_string());
+    }
+
+    let raw = image::open(&raw_path)
+        .map_err(|e| format!("reading render: {e}"))?
+        .to_rgba8();
+    let _ = std::fs::remove_file(&raw_path);
+
+    make_icon(&raw, size)
+        .save(out_path)
+        .map_err(|e| format!("writing icon: {e}"))
+}
+
 /// Keys out the solid background `vengi-thumbnailer` fills the frame with,
-/// crops to the remaining content, and returns a square `ICON_SIZE` canvas
+/// crops to the remaining content, and returns a square `size` canvas
 /// with the model centered on a transparent background.
-fn make_icon(raw: &RgbaImage) -> RgbaImage {
+fn make_icon(raw: &RgbaImage, size: u32) -> RgbaImage {
     let (w, h) = raw.dimensions();
     let bg = raw.get_pixel(0, 0).0; // the corner is always background
     let mut keyed = raw.clone();
@@ -218,9 +261,9 @@ fn make_icon(raw: &RgbaImage) -> RgbaImage {
     let content_h = max_y - min_y + 1;
     let cropped = image::imageops::crop_imm(&keyed, min_x, min_y, content_w, content_h).to_image();
 
-    // Fit inside ICON_SIZE minus a small margin, preserving aspect ratio.
-    let margin = ((ICON_SIZE as f32 * CROP_MARGIN_FRAC).round() as u32) * 2;
-    let target = ICON_SIZE.saturating_sub(margin).max(1);
+    // Fit inside `size` minus a small margin, preserving aspect ratio.
+    let margin = ((size as f32 * CROP_MARGIN_FRAC).round() as u32) * 2;
+    let target = size.saturating_sub(margin).max(1);
     let scale =
         (target as f32 / content_w.max(1) as f32).min(target as f32 / content_h.max(1) as f32);
     let new_w = ((content_w as f32) * scale).round().max(1.0) as u32;
@@ -232,9 +275,9 @@ fn make_icon(raw: &RgbaImage) -> RgbaImage {
         image::imageops::FilterType::Lanczos3,
     );
 
-    let mut canvas = RgbaImage::from_pixel(ICON_SIZE, ICON_SIZE, Rgba([0, 0, 0, 0]));
-    let off_x = (ICON_SIZE - new_w) / 2;
-    let off_y = (ICON_SIZE - new_h) / 2;
+    let mut canvas = RgbaImage::from_pixel(size, size, Rgba([0, 0, 0, 0]));
+    let off_x = (size - new_w) / 2;
+    let off_y = (size - new_h) / 2;
     image::imageops::overlay(&mut canvas, &resized, off_x as i64, off_y as i64);
     canvas
 }
