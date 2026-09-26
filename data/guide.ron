@@ -83,7 +83,7 @@
             title: "Contracts",
             tagline: "An order is a promise with a clock on it.",
             body: [
-                "Of the {contract_count} orders in the file, the board is showing {open_contract_count} right now — anything missing from it is behind a gate that deliveries will open. Each order names a mix of cases, how often it wants them, what it pays, and what it costs to sign. You start with {starter_contracts} of them already active, signed on your behalf.",
+                "Of the {contract_count} orders in the file, the board is showing {open_contract_count} right now — anything missing from it is behind a gate that deliveries will open. Each order names a mix of cases, how often it wants them, what it pays, and what it costs to sign. Orders signed for you before you start: {starter_contracts}. Every other one is yours to sign, once there is a line to serve it.",
                 "Sign one and the clock starts. Ship the mix inside the window and it pays; miss the window and it takes a strike. Run out of strikes and the order is gone, and so is the price you paid for it. Signing more than the line can feed is the most expensive mistake available early.",
                 "Each dock holds at most {dock_capacity} cases, of any mix, so it is a loading bay and not a warehouse. Past that ceiling the packer behind it backs up.",
             ],

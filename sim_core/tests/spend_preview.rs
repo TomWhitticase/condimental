@@ -67,15 +67,15 @@ fn wage_of(category: &str) -> u32 {
         .wage
 }
 
-/// The id of a board offer the fixture has not signed — `corner_shop` is a
-/// `starter` and active from tick 0, so it is never the answer.
+/// The id of a board offer the fixture has not signed — the fixture signs
+/// `corner_shop` on tick 0, so it is never the answer.
 fn unsigned_offer() -> String {
     reference_chain(recipes())
         .economy_snapshot()
         .board
         .iter()
         .find(|o| !o.active)
-        .expect("data/contracts.ron ships more than its starters")
+        .expect("data/contracts.ron ships more than the fixture signs")
         .id
         .clone()
 }
@@ -256,15 +256,15 @@ fn an_ingredient_buy_is_priced_after_the_stock_room_clamp() {
 fn a_contract_fee_warns_and_an_already_signed_offer_costs_nothing() {
     let bill = reference_chain(recipes()).staff_snapshot().next_bill;
     let sign = |id: &str| PlayerCommand::SignContract { id: id.to_string() };
-    // An offer nothing has signed yet. `corner_shop` is a `starter`, active
-    // from tick 0, so it is the wrong one to price — and the right one to
-    // prove the already-signed case with.
+    // An offer nothing has signed yet. The fixture signs `corner_shop` on
+    // tick 0, so it is the wrong one to price — and the right one to prove
+    // the already-signed case with.
     let offer = reference_chain(recipes())
         .economy_snapshot()
         .board
         .iter()
         .find(|o| !o.active)
-        .expect("data/contracts.ron ships more than its starters")
+        .expect("data/contracts.ron ships more than the fixture signs")
         .clone();
     assert!(offer.price > 0.0, "a contract charges a fee to sign");
 

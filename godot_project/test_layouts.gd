@@ -475,6 +475,10 @@ static func build_splitter_line(sim) -> void:
 ## footprints — and `sim_core/tests/machine_footprints.rs` pins the same
 ## literals, so a content change that moves the line fails there first, with
 ## a far better message than a Godot script could give.
+##
+## A new game runs no contract, so the line ends by signing the board's first
+## offer (`corner_shop`) the way `sim::reference_chain` does — see
+## `sign_first_offer`.
 static func build_reference_line(sim) -> void:
 	# Stage 1, the crusher: one feed lane, fed by a tomato hopper.
 	place(sim, "hopper", Vector2i(-1, 0), "east", "tomato")
@@ -520,6 +524,25 @@ static func build_reference_line(sim) -> void:
 	for x in [22, 23, 24, 25]:
 		place(sim, "belt", Vector2i(x, 0), "east")
 	place(sim, "dock", Vector2i(26, 0), "east")
+	sign_first_offer(sim)
+
+
+## Signs the board's first offer, through the same `sign_contract` command
+## the SIGN button issues, so a fixture line has an order to ship against.
+## Only on a board with nothing running that has never lost that offer: a
+## caller that re-issues the line (`build_bbq_branch`) must not quietly
+## re-sign a contract its run struck out — issue #55 is why that matters.
+static func sign_first_offer(sim) -> void:
+	var economy = JSON.parse_string(sim.economy_snapshot_json())
+	if not (economy is Dictionary):
+		return
+	var board: Array = economy.get("board", [])
+	if board.is_empty() or not economy.get("contracts", []).is_empty():
+		return
+	var first: Dictionary = board[0]
+	if int(first.get("times_lost", 0)) > 0:
+		return
+	sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": String(first["id"])}))
 
 
 ## How many placements `build_reference_line` makes. Stated once here so a
@@ -787,8 +810,8 @@ static func build_bbq_running_line(sim) -> void:
 	}))
 	hire_until_staffed(sim)
 
-	# 2. Run it until the game offers BBQ. The starter order is the only one
-	#    active, exactly as a new game starts, so the deliveries that open
+	# 2. Run it until the game offers BBQ. The order `build_reference_line`
+	#    signed is the only one active, so the deliveries that open
 	#    the gate also bank the stock that pays for the transient below.
 	var waited := 0
 	while waited < BBQ_GATE_TICK_CEILING:

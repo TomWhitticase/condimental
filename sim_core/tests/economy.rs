@@ -386,13 +386,13 @@ fn the_economy_snapshot_reports_one_entry_per_shipped_contract() {
     let snapshot = world.economy_snapshot();
     let board = contracts();
 
-    // Active = the board's starters only (the contract-board epic: the rest
-    // are signed); the whole board rides along beside them.
+    // Active = the one offer the reference chain signs (a new game signs
+    // none); the whole board rides along beside it.
     let ids: Vec<&str> = snapshot.contracts.iter().map(|c| c.id.as_str()).collect();
-    let expected: Vec<&str> = board.starters().map(|c| c.id.as_str()).collect();
+    let expected = vec![board.ordered()[0].id.as_str()];
     assert_eq!(
         ids, expected,
-        "a new world's active contracts are the starters, in contracts.ron order"
+        "the fixture's active contract is the board's first offer"
     );
     assert!(
         snapshot.board.len() >= 2,
@@ -413,8 +413,9 @@ fn the_economy_snapshot_reports_one_entry_per_shipped_contract() {
     );
     for offer in &snapshot.board {
         assert_eq!(
-            offer.active, offer.starter,
-            "in a new world exactly the starters are active"
+            offer.active,
+            ids.contains(&offer.id.as_str()),
+            "the board reads active for exactly what was signed"
         );
         assert!(offer.price > 0.0);
         assert!(offer.strikes >= 1);

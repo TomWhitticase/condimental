@@ -1879,8 +1879,7 @@ var _market_open := false
 
 # --- The contracts board (the contract-board epic, 2026-09-10) -------------
 # `data/contracts.ron` is a board of OFFERS since its schema 2: a new game
-# runs only its starter, and every other contract is SIGNED here for its
-# price. A contract that misses its strikes in a row is LOST and comes back
+# runs no contract, and every contract is SIGNED here for its price. A contract that misses its strikes in a row is LOST and comes back
 # here to be signed again, at the same price. Built from
 # `economy_snapshot_json`'s `board` array the way the build menu is built
 # from `shop_snapshot_json`'s entries: one row per offer, in file (=
@@ -6132,7 +6131,7 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_empty_label = Label.new()
 	_contract_empty_label.name = "NoContracts"
 	_contract_empty_label.label_settings = _contract_ink_settings
-	_contract_empty_label.text = "no contracts — nothing to deliver against\npress C to sign one from the board"
+	_contract_empty_label.text = "no contracts — press C to sign one"
 	_contract_empty_label.visible = false
 	body.add_child(_contract_empty_label)
 
@@ -17677,8 +17676,11 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 		# Issue #13 made the same trade against the SHORT-STAFFED strip and
 		# for the same reason: the clipboard has room for one line of advice,
 		# and a docket cut through a line outranks it.
+		# With nothing signed the empty line already names the key, and a new
+		# game opens that way: "sign MORE orders" would be wrong, and its line
+		# is what keeps the stock plate off the CREW plate at 1280x720.
 		if _contract_hint_label != null:
-			_contract_hint_label.visible = true
+			_contract_hint_label.visible = not _contract_empty_label.visible
 		var cut: float = _fit_grid_scroll(
 			_contract_cards_scroll,
 			_contract_cards_box,

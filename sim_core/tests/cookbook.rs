@@ -596,7 +596,7 @@ fn every_fact_the_guide_can_ask_for_is_answered_from_the_content_files() {
 
     // The orders the board is showing a brand-new factory, which is neither
     // the file's count nor the starters: a starter is one the game signs for
-    // you, and there is one of those, while nine are simply ungated.
+    // you, and the shipped board has none, while nine are simply ungated.
     let open_now = contracts
         .ordered()
         .iter()
