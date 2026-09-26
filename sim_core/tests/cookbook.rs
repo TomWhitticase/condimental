@@ -62,6 +62,17 @@ fn sauce<'a>(book: &'a CookbookSnapshot, id: &str) -> &'a sim_core::sim::cookboo
         .unwrap_or_else(|| panic!("no sauce page for {id}"))
 }
 
+/// A raw ingredient's page, by id. The shelf grows with every sauce, so a
+/// page is never reached by its index here: `&book.ingredients[6..]` used to
+/// mean "mustard's raws" and would have silently stopped checking them the
+/// day a fourth sauce added one of its own.
+fn raw<'a>(book: &'a CookbookSnapshot, id: &str) -> &'a sim_core::sim::cookbook::IngredientPage {
+    book.ingredients
+        .iter()
+        .find(|i| i.id == id)
+        .unwrap_or_else(|| panic!("no ingredient page for {id}"))
+}
+
 /// Three sauces, and the book tells the two *kinds* of sauce apart without
 /// being told which is which: the tier is the depth of the recipe graph, so a
 /// sauce that starts at a hopper of its own is tier 0 however late it was
@@ -347,28 +358,54 @@ fn every_bought_ingredient_has_a_page_saying_what_it_is_for() {
     }
 
     // THE ONE INGREDIENT TWO SAUCES BUY. Every other raw on the shelf feeds
-    // one product; vinegar goes into the ketchup mixer and the mustard mixer
-    // both, so its page names two sauces and a player reading it learns that
-    // the two lines compete in the shop. Derived from `data/recipes.ron`, so
-    // this is also what fails if mustard ever stops drinking it.
-    let vinegar = &book.ingredients[2];
+    // one product; vinegar goes into the ketchup mixer and the mustard
+    // crusher — mustard mills its seed WET, which is how the two sauces stay
+    // off one another's machine kind (`docs/DECISIONS.md`, 2026-09-26) — so
+    // its page names two sauces and a player reading it learns that the two
+    // lines compete in the shop. Derived from `data/recipes.ron`, so this is
+    // also what fails if mustard ever stops drinking it.
+    let vinegar = raw(&book, "vinegar");
     assert!(vinegar.fluid, "vinegar is a tank, not a hopper");
     assert_eq!(vinegar.used_in, vec!["boxed_ketchup", "boxed_mustard"]);
     assert!(!vinegar.locked);
 
-    let smoke = &book.ingredients[5];
+    let smoke = raw(&book, "liquid_smoke");
     assert!(smoke.fluid);
     assert!(smoke.locked);
     assert_eq!(smoke.gate.as_ref().map(|g| g.after_deliveries), Some(10));
 
-    // Mustard's two raws are solids, they belong to one sauce, and they are
-    // held back further than BBQ's — the gate is in `data/unlocks.ron` and
-    // the page only reports it.
-    for page in &book.ingredients[6..] {
+    // Mustard's raws are solids, they belong to one sauce, and they are held
+    // back further than BBQ's — the gate is in `data/unlocks.ron` and the
+    // page only reports it. WHICH raws those are is derived from `used_in`,
+    // not from a slice of the shelf: a raw that feeds nothing but mustard is
+    // mustard's, whether it is the two shipped today or a third tomorrow.
+    let mustard_raws: Vec<&sim_core::sim::cookbook::IngredientPage> = book
+        .ingredients
+        .iter()
+        .filter(|page| page.used_in == ["boxed_mustard"])
+        .collect();
+    assert_eq!(
+        mustard_raws
+            .iter()
+            .map(|p| p.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["mustard_seed", "turmeric"],
+        "the raws the recipe graph says feed mustard and nothing else"
+    );
+    for page in mustard_raws {
         assert!(!page.fluid, "{} rides a belt out of a hopper", page.id);
-        assert_eq!(page.used_in, vec!["boxed_mustard"]);
-        assert!(page.locked);
-        assert_eq!(page.gate.as_ref().map(|g| g.after_deliveries), Some(25));
+        assert!(
+            page.locked,
+            "'{}' feeds nothing but mustard, so a new game must not be able to buy it — \
+             the mustard_sauce gate in data/unlocks.ron has to name it",
+            page.id
+        );
+        assert_eq!(
+            page.gate.as_ref().map(|g| g.after_deliveries),
+            Some(25),
+            "'{}' is held back by a gate other than mustard_sauce's 25 deliveries",
+            page.id
+        );
     }
 }
 

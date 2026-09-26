@@ -23,6 +23,8 @@
 
 mod common;
 
+use std::collections::BTreeSet;
+
 use sim_core::sim::types::Money;
 use sim_core::sim::{
     ContractRegistry, FLUID_TANK_CAPACITY, PlayerCommand, RecipeRegistry, UnlockRegistry, World,
@@ -229,16 +231,92 @@ fn world_at_deliveries(deliveries: u32) -> World {
     world
 }
 
-/// The third sauce's gate: it holds back its own two raws and its own four
-/// orders, it holds back nothing else, and it opens on its own threshold —
-/// which is a later one than the BBQ tier's, because a whole second line
-/// costs more than a branch does.
+/// The third sauce's gate: it holds back every raw that feeds nothing but
+/// mustard and every order that asks for a case of it, it holds back nothing
+/// else, and it opens on its own threshold — which is a later one than the
+/// BBQ tier's, because a whole second line costs more than a branch does.
+///
+/// **THE EXPECTED IDS COME FROM THE CONTENT, NOT FROM THE GATE.** The first
+/// draft of this test looped over `mustard_sauce`'s own two lists, so
+/// deleting an id from `data/unlocks.ron` made the loop vacuous instead of
+/// false: the whole suite stayed green with a 416-money mustard order on a
+/// brand-new game's board — signable, unfulfillable, straight to strikes.
+/// So the two expected sets are derived here from `data/contracts.ron`
+/// (every order whose mix names `boxed_mustard`) and from THE COOKBOOK's
+/// `used_in` (every raw the recipe graph feeds to mustard and to nothing
+/// else), the shut-on-a-new-game check runs over THOSE, and the gate's lists
+/// are then compared with them in both directions — an omission and a stray
+/// addition each fail, naming the id and the gate.
 ///
 /// `vinegar` is the id this test exists to watch. Mustard drinks it and so
-/// does the shipped ketchup line, so it must NOT be in the gate's list: a
-/// gate on it would lock the starting factory out of its own ingredient.
+/// does the shipped ketchup line, so it must NOT be gated: a gate on it would
+/// lock the starting factory out of its own ingredient. That is also why the
+/// raw side is derived from `used_in` and not from "every raw a mustard
+/// recipe touches" — the second phrasing would demand vinegar be gated.
 #[test]
 fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
+    // --- what the content says the tier is, read without the gate ---------
+    let ordered_mustard: BTreeSet<String> = ContractRegistry::bundled()
+        .ordered()
+        .iter()
+        .filter(|c| c.mix.iter().any(|(item, _)| item == "boxed_mustard"))
+        .map(|c| c.id.clone())
+        .collect();
+    let book = World::new(recipes()).cookbook();
+    let mustard_raws: BTreeSet<String> = book
+        .ingredients
+        .iter()
+        .filter(|page| page.used_in == ["boxed_mustard"])
+        .map(|page| page.id.clone())
+        .collect();
+    assert!(
+        !ordered_mustard.is_empty() && !mustard_raws.is_empty(),
+        "data/contracts.ron must order boxed_mustard and the recipe graph must have a raw that \
+         feeds nothing else, or the mustard_sauce gate has nothing to hold back and this test \
+         proves nothing"
+    );
+    assert!(
+        !mustard_raws.contains("vinegar"),
+        "vinegar feeds the shipped ketchup line as well, so it is not mustard's to gate"
+    );
+
+    // --- a new game can reach none of it -----------------------------------
+    // These loops run over the DERIVED ids, so an id dropped from the gate
+    // fails here by name rather than quietly shortening a list.
+    let shut = world_at_deliveries(0);
+    let market = shut.ingredients_snapshot();
+    let board = shut.economy_snapshot();
+    for id in &mustard_raws {
+        assert!(
+            !shut.ingredient_unlocked(id),
+            "'{id}' feeds nothing but mustard, so a new game must not be able to buy it — the \
+             mustard_sauce gate in data/unlocks.ron has to name it in `ingredients`"
+        );
+        assert!(
+            !market.entries.iter().any(|e| &e.id == id),
+            "'{id}' must not be listed in the market at nought deliveries — the mustard_sauce \
+             gate in data/unlocks.ron has to name it in `ingredients`"
+        );
+    }
+    for id in &ordered_mustard {
+        assert!(
+            !shut.contract_unlocked(id),
+            "'{id}' orders a case of mustard, so a new game must not be able to sign it — the \
+             mustard_sauce gate in data/unlocks.ron has to name it in `contracts`, or the board \
+             offers an order for a sauce that cannot be made yet and it runs to strikes"
+        );
+        assert!(
+            !board.board.iter().any(|o| &o.id == id),
+            "'{id}' must not be offered at nought deliveries — the mustard_sauce gate in \
+             data/unlocks.ron has to name it in `contracts`"
+        );
+    }
+    assert!(
+        shut.ingredient_unlocked("vinegar"),
+        "the first line's own fluid is on sale from the first tick"
+    );
+
+    // --- and the gate's own lists are exactly that, no more ----------------
     let unlocks = UnlockRegistry::bundled();
     let mustard = unlocks
         .get("mustard_sauce")
@@ -251,49 +329,52 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
         mustard.after_deliveries,
         bbq.after_deliveries
     );
+    let listed_raws: BTreeSet<String> = mustard.ingredients.iter().cloned().collect();
+    let listed_contracts: BTreeSet<String> = mustard.contracts.iter().cloned().collect();
+    let names = |ids: &BTreeSet<String>, other: &BTreeSet<String>| -> String {
+        ids.difference(other)
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
     assert!(
-        !mustard.ingredients.contains(&"vinegar".to_string()),
-        "gating vinegar would lock the ketchup line out of its own ingredient"
+        mustard_raws.is_subset(&listed_raws),
+        "'{}' feeds nothing but mustard and the mustard_sauce gate in data/unlocks.ron does not \
+         hold it back",
+        names(&mustard_raws, &listed_raws)
     );
-
-    // Nothing of the tier is reachable in a fresh world, and the market and
-    // the board agree with the rule the simulation is enforcing.
-    let shut = world_at_deliveries(0);
-    let market = shut.ingredients_snapshot();
-    let board = shut.economy_snapshot();
-    for id in &mustard.ingredients {
-        assert!(!shut.ingredient_unlocked(id), "'{id}' must start locked");
-        assert!(
-            !market.entries.iter().any(|e| &e.id == id),
-            "'{id}' must not be listed in the market at nought deliveries"
-        );
-    }
-    for id in &mustard.contracts {
-        assert!(!shut.contract_unlocked(id), "'{id}' must start locked");
-        assert!(
-            !board.board.iter().any(|o| &o.id == id),
-            "'{id}' must not be offered at nought deliveries"
-        );
-    }
     assert!(
-        shut.ingredient_unlocked("vinegar"),
-        "the first line's own fluid is on sale from the first tick"
+        listed_raws.is_subset(&mustard_raws),
+        "the mustard_sauce gate in data/unlocks.ron holds back '{}', which the recipe graph says \
+         is not a mustard-only raw",
+        names(&listed_raws, &mustard_raws)
+    );
+    assert!(
+        ordered_mustard.is_subset(&listed_contracts),
+        "'{}' in data/contracts.ron asks for boxed_mustard and the mustard_sauce gate in \
+         data/unlocks.ron does not hold it back",
+        names(&ordered_mustard, &listed_contracts)
+    );
+    assert!(
+        listed_contracts.is_subset(&ordered_mustard),
+        "the mustard_sauce gate in data/unlocks.ron holds back '{}', which asks for no mustard",
+        names(&listed_contracts, &ordered_mustard)
     );
 
     // One short of the threshold the tier is still shut, while the tier
     // BELOW it is open — which is what makes this gate its own and not a
     // side effect of the BBQ one.
     let nearly = world_at_deliveries(mustard.after_deliveries - 1);
-    for id in &mustard.ingredients {
+    for id in &mustard_raws {
         assert!(
             !nearly.ingredient_unlocked(id),
-            "'{id}' must still be locked one delivery short"
+            "'{id}' must still be locked one delivery short of the mustard_sauce gate"
         );
     }
-    for id in &mustard.contracts {
+    for id in &ordered_mustard {
         assert!(
             !nearly.contract_unlocked(id),
-            "'{id}' must still be locked one delivery short"
+            "'{id}' must still be locked one delivery short of the mustard_sauce gate"
         );
     }
     for id in bbq.ingredients.iter().chain(bbq.contracts.iter()) {
@@ -303,28 +384,28 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
         );
     }
 
-    // And on the threshold, every id in the gate's two lists, at once.
+    // And on the threshold, every id the content calls mustard's, at once.
     let open = world_at_deliveries(mustard.after_deliveries);
     let market = open.ingredients_snapshot();
     let board = open.economy_snapshot();
-    for id in &mustard.ingredients {
+    for id in &mustard_raws {
         assert!(
             open.ingredient_unlocked(id),
-            "'{id}' must be on sale on the threshold delivery"
+            "'{id}' must be on sale on the mustard_sauce gate's threshold delivery"
         );
         assert!(
             market.entries.iter().any(|e| &e.id == id),
-            "'{id}' must be listed in the market the tick the gate opens"
+            "'{id}' must be listed in the market the tick the mustard_sauce gate opens"
         );
     }
-    for id in &mustard.contracts {
+    for id in &ordered_mustard {
         assert!(
             open.contract_unlocked(id),
-            "'{id}' must be on the board on the threshold delivery"
+            "'{id}' must be on the board on the mustard_sauce gate's threshold delivery"
         );
         assert!(
             board.board.iter().any(|o| &o.id == id),
-            "'{id}' must be offered the tick the gate opens"
+            "'{id}' must be offered the tick the mustard_sauce gate opens"
         );
     }
     let announced = board
