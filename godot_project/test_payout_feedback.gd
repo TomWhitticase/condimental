@@ -153,7 +153,10 @@ func _initialize() -> void:
 	var payout_tick := -1
 	for i in range(TICK_BUDGET):
 		main.sim.tick()
+		# The two polls `_process` makes, in its order: the clipboard notices
+		# payouts, the buffers notice cases arriving.
 		main._update_contract_panel()
+		main._refresh_buffers()
 		if main.payout_events > 0:
 			payout_tick = main.sim.current_tick()
 			break
@@ -191,6 +194,17 @@ func _initialize() -> void:
 	if coins_in_flight > main.COIN_POOL:
 		_fail("%d coins in flight from a pool of %d" % [coins_in_flight, main.COIN_POOL])
 		return
+	# Every coin leaves from the dock that paid, read off its own
+	# `last_paid_tick` — the one dock of this line.
+	var paying_docks: Array = main._docks_paid_since(payout_tick - 1)
+	if paying_docks.size() != 1:
+		_fail("one dock paid, but %d report paying on tick %d" % [paying_docks.size(), payout_tick])
+		return
+	var paid_anchor: Vector3 = main._dock_nodes[paying_docks[0]]["anchor"]
+	for coin in main._coins:
+		if int(coin["start_tick"]) >= 0 and (coin["origin"] as Vector3) != paid_anchor:
+			_fail("a coin left from %s, not the paying dock at %s" % [coin["origin"], paid_anchor])
+			return
 	if main._payout_flyout.text != "+%d" % expected_payout:
 		_fail("the flyout reads '%s', expected '+%d'" % [main._payout_flyout.text, expected_payout])
 		return
@@ -339,33 +353,84 @@ func _initialize() -> void:
 		_fail("a contract seen for the first time with 40 deliveries behind it celebrated a payout")
 		return
 
-	# --- The frequent moment: a case landing on the dock -------------------
+	# --- Coins leave from the docks that paid, and from no other ----------
+	# The owner's report of 2026-09-26: a payout threw coins over EVERY dock.
+	# A second dock is stood beside the line's one, by hand, so the two-dock
+	# case needs no second line to be built.
+	var real_dock: String = main._dock_nodes.keys()[0]
+	var idle_anchor := Vector3(40.0, 0.0, 40.0)
+	main._dock_nodes["99,99"] = {"anchor": idle_anchor, "slots": []}
+	var saved_states: Dictionary = main._dock_states
+	main._dock_states = {
+		real_dock: {"last_paid_tick": 300},
+		"99,99": {"last_paid_tick": 120},
+	}
+	var paid_now: Array = main._docks_paid_since(299)
+	if paid_now != [real_dock]:
+		_fail("only the dock that paid on tick 300 paid since 299, got %s" % [paid_now])
+		return
+	main._update_coins(1 << 20) # every coin still in flight lands
+	main._burst_coins(first_pay, 300, paid_now)
+	if main._active_coin_count() < main.COIN_MIN:
+		_fail("the paying dock threw only %d coins" % main._active_coin_count())
+		return
+	for coin in main._coins:
+		if int(coin["start_tick"]) >= 0 and (coin["origin"] as Vector3) == idle_anchor:
+			_fail("a dock that gave nothing to the payment threw a coin")
+			return
+	main._update_coins(1 << 20)
+	main._burst_coins(first_pay, 301, [])
+	if main._active_coin_count() != 0:
+		_fail("a payment no dock paid threw %d coins from somewhere" % main._active_coin_count())
+		return
+	main._dock_nodes.erase("99,99")
+
+	# --- The frequent moment: a case landing on a dock ---------------------
+	# Per dock, off each dock's own `shipped_total` — a case arriving at one
+	# dock pops that dock and no other.
 	main._audio.plays.clear()
-	main._dock_stock_seen = -1
-	main._detect_dock_arrivals([["boxed_ketchup", 2]], 200)
+	main._dock_received_seen = {}
+	main._dock_pops = {}
+	main._dock_states = {
+		"5,0": {"shipped_total": 7, "used": 2},
+		"9,0": {"shipped_total": 4, "used": 1},
+	}
+	main._detect_dock_arrivals(200)
 	if int(main._audio.plays.get(main._audio.DELIVERY, 0)) != 0:
 		_fail("the first dock poll knocked — a loaded save with a full dock must be silent")
 		return
-	main._detect_dock_arrivals([["boxed_ketchup", 3]], 201)
+	main._dock_states["5,0"] = {"shipped_total": 8, "used": 3}
+	main._detect_dock_arrivals(201)
 	if int(main._audio.plays.get(main._audio.DELIVERY, 0)) != 1:
 		_fail("a case arriving did not fire the delivery cue")
 		return
-	if main._dock_pop_slot != 2:
-		_fail("the third case should pop slot index 2, popped %d" % main._dock_pop_slot)
+	if int(main._dock_pops.get("5,0", {}).get("slot", -1)) != 2:
+		_fail("the third case should pop slot index 2 of its dock, pops are %s" % main._dock_pops)
 		return
-	# A contract consuming the pool is not an arrival.
-	main._detect_dock_arrivals([["boxed_ketchup", 1]], 202)
+	if main._dock_pops.has("9,0"):
+		_fail("a case arriving at one dock popped another")
+		return
+	# A contract consuming a dock's stock is not an arrival.
+	main._dock_states["5,0"] = {"shipped_total": 8, "used": 1}
+	main._detect_dock_arrivals(202)
 	if int(main._audio.plays.get(main._audio.DELIVERY, 0)) != 1:
-		_fail("the pool going DOWN fired a delivery cue")
+		_fail("a dock's stock going DOWN fired a delivery cue")
+		return
+	# A dock placed after the first poll is seeded, not knocked.
+	main._dock_states["12,0"] = {"shipped_total": 30, "used": 30}
+	main._detect_dock_arrivals(203)
+	if int(main._audio.plays.get(main._audio.DELIVERY, 0)) != 1:
+		_fail("a dock seen for the first time knocked for its whole history")
 		return
 	# A dock arrival must never fire the big celebration.
 	if int(main._audio.plays.get(main._audio.PAYOUT, 0)) != 0:
 		_fail("a case landing on the dock played the payout chime")
 		return
 	main._update_dock_pop(201 + main.DOCK_POP_TICKS)
-	if main._dock_pop_tick != -1 or main._dock_pop_slot != -1:
+	if not main._dock_pops.is_empty():
 		_fail("the dock pop did not finish and clear itself")
 		return
+	main._dock_states = saved_states
 
 	# --- The sound itself --------------------------------------------------
 	var stream_a: AudioStreamWAV = main.FactoryAudio.payout_stream()
@@ -417,7 +482,8 @@ func _initialize() -> void:
 	print("PAYOUT_FEEDBACK_OK: first payout at tick %d paid %d by '%s' -> %d coins, '+%d', one chime; "
 		% [payout_tick, expected_payout, paid_id, coins_in_flight, expected_payout]
 		+ "seeded silently, multi-window and multi-contract deltas celebrate once, "
-		+ "everything decays to nothing, dock arrivals get the small cue, audio is deterministic")
+		+ "everything decays to nothing, coins leave only the docks that paid, "
+		+ "dock arrivals pop only their own dock, audio is deterministic")
 	quit(0)
 
 

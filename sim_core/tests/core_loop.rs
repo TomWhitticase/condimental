@@ -38,12 +38,10 @@
 //! the old behavior being tested is the behavior being removed. Finished
 //! boxes are no longer lifted out of the last machine's output buffer by
 //! `PlayerCommand::CollectOutput` (which no longer exists); they travel one
-//! more real belt into a `Dock` building, which ships them into the
-//! economy's shared delivery pool automatically, every tick. So the
-//! conservation accounting now counts the dock's own buffer as mass in the
-//! system (it is — momentarily, inside a tick), and "collected" is read from
-//! the dock's cumulative `shipped_total` instead of being tallied by the
-//! caller issuing a command. **Nothing in the test issues any command to
+//! more real belt into a `Dock` building, which holds them for a contract
+//! to take. So "left the chain" is read from the dock's cumulative
+//! `shipped_total` instead of being tallied by the caller issuing a
+//! command, and whatever still stands on the dock is inside that total. **Nothing in the test issues any command to
 //! empty the chain any more**, which is precisely the property this ticket
 //! is for.
 //!
@@ -164,21 +162,14 @@ fn full_chain_snapshot(world: &World) -> (Vec<BeltSnapshot>, Vec<MachineSnapshot
 
 /// Total `raw`-equivalent mass currently held anywhere in the sim: hoppers,
 /// belts, machine buffers, any mid-`TimedProcess` batch, **every fluid
-/// network and tank**, and the dock's own transfer buffer. Does NOT include
-/// anything the dock has already shipped into the economy's delivery pool —
-/// the caller adds that back in separately, from `shipped_total`.
+/// network and tank**. Does NOT include anything that has reached the dock —
+/// the caller adds that back in separately, from `shipped_total`, which
+/// counts every box the dock ever took off its belt: the ones still standing
+/// on it and the ones a contract has since collected alike.
 fn total_raw_equivalent(world: &World, raw: &str, recipes: &RecipeRegistry) -> Fx {
     let (belts, machines) = full_chain_snapshot(world);
     let mut total = Fx::ZERO;
     let value = |id: &str| Fx::from_num(raw_content(id, raw, recipes));
-
-    // Anything standing on the dock but not yet shipped. Between ticks this
-    // is always empty (the dock is a pass-through — `sim/dock.rs`'s module
-    // doc), but counting it is what makes this accounting independent of
-    // that decision.
-    for (item, qty) in &the_dock(world).contents {
-        total += value(item) * Fx::from_num(*qty);
-    }
 
     // Raw ingredient waiting in a hopper is mass in the system exactly the
     // way mass in a machine's input buffer is — it has been bought and
@@ -360,8 +351,7 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
 
     // No command is issued inside this loop at all — that is the point of
     // the delivery dock. The chain feeds itself from the hoppers, runs, and
-    // the dock ships the finished box into the economy's delivery pool by
-    // itself; conservation is checked, for both raw ingredients, on every
+    // the dock takes the finished box off its belt by itself; conservation is checked, for both raw ingredients, on every
     // single tick along the way.
     let mut shipped = 0u32;
     for tick_i in 0..40_000u32 {
@@ -398,16 +388,17 @@ fn full_chain_conserves_mass_end_to_end_and_reaches_the_final_product() {
          packed and shipped — with no player command whatsoever",
         ordered.len()
     );
-    // ...and it landed in the ONE shared pool every contract settles
+    // ...and it waits on the dock, in the stock every contract settles
     // against, which is the actual end of GAMEPLAY.md §1's loop.
+    assert_eq!(
+        the_dock(&world).contents,
+        vec![(final_item.clone(), 1)],
+        "the shipped box must stand on the dock it arrived at"
+    );
     assert_eq!(
         world.economy_snapshot().delivery_stock,
         vec![(final_item.clone(), 1)],
-        "the shipped box must be in the shared delivery pool, not held on the dock"
-    );
-    assert!(
-        the_dock(&world).contents.is_empty(),
-        "the dock is a pass-through: it must be empty again the tick it shipped"
+        "and be on offer to every contract"
     );
 }
 
@@ -516,7 +507,7 @@ fn an_unfed_chain_ships_nothing_and_the_dock_stays_empty() {
     assert!(dock.contents.is_empty());
     assert!(
         world.economy_snapshot().delivery_stock.is_empty(),
-        "an idle factory must not put anything in the delivery pool"
+        "an idle factory must not offer anything to a contract"
     );
 
     let (_, machines) = full_chain_snapshot(&world);

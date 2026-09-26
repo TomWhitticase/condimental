@@ -17,8 +17,7 @@
 //! to depend on.** Every drive loop below used to call
 //! `PlayerCommand::CollectOutput` whenever the last machine held product;
 //! that command no longer exists, because the chain now ends in a real
-//! belt-and-dock exit that ships into the shared delivery pool by itself
-//! every tick. The loops therefore only *feed* the line now — hopper and
+//! belt-and-dock exit that contracts collect from by themselves. The loops therefore only *feed* the line now — hopper and
 //! vinegar tank — and everything downstream happens with no player
 //! involvement at all, which is exactly the behaviour these tests should be
 //! proving in the first place.
@@ -27,9 +26,8 @@ mod common;
 
 use sim_core::sim::types::Money;
 use sim_core::sim::{
-    ContractRegistry, DELIVERY_STOCK_CAPACITY, DockSnapshot, MachineRegistry, PlayerCommand,
-    RecipeRegistry, World, linear_prefix, reference_chain_with_budget,
-    reference_chain_with_content_and_budget,
+    ContractRegistry, DOCK_CAPACITY, DockSnapshot, MachineRegistry, PlayerCommand, RecipeRegistry,
+    World, linear_prefix, reference_chain_with_budget, reference_chain_with_content_and_budget,
 };
 
 /// The reference chain's one dock — where every delivery this file measures
@@ -105,8 +103,8 @@ fn stocked(mut world: World) -> World {
     world
 }
 
-/// Runs the chain until the delivery dock has shipped `target` units into
-/// the shared delivery pool, or the tick budget runs out. Returns how many
+/// Runs the chain until the delivery dock has taken `target` units off its
+/// belt, or the tick budget runs out. Returns how many
 /// it actually shipped.
 ///
 /// Note what this does *not* do since the delivery-dock ticket: nothing here
@@ -156,7 +154,7 @@ fn full_chain_delivers_against_a_contract_and_pays_out_exactly_that_contracts_pa
          500k ticks with no collect command at all, got {shipped}"
     );
 
-    // The full mix is now sitting in the delivery pool, but the exact tick
+    // The full mix is now standing on the dock, but the exact tick
     // it landed on may fall anywhere relative to a cadence boundary — the
     // last box could have arrived just *after* the contract's check already
     // ran (and missed) this window. Advance a full extra
@@ -234,7 +232,7 @@ fn several_contracts_settle_independently_against_one_real_chain() {
     // if a cadence were shorter than the production interval (as the
     // pre-milestone-7 values of 900/3000 now are), that contract would
     // check for stock more often than new stock arrives and would drain
-    // the shared pool the instant anything lands in it, permanently
+    // the dock the instant anything lands on it, permanently
     // starving the other contract rather than the two settling on their
     // own independent schedules, which is the actual thing under test.
     let quick_cadence: u64 = 6_000;
@@ -334,8 +332,9 @@ fn one_delivered_unit_pays_one_contract_not_every_contract_that_wants_it() {
         BUDGET,
     ));
 
-    // Ship exactly one unit, then take the DOCK back off the floor so no
-    // second unit can ever reach the pool. Merely stopping the fill
+    // Ship exactly one unit, then take the belt feeding the dock back off
+    // the floor so no second unit can ever reach it. (Not the dock itself:
+    // removing a dock destroys what stands on it.) Merely stopping the fill
     // commands is not enough and used to pass only by luck: the line is
     // still full of in-flight product when the first box lands, so it goes
     // on shipping for a long while afterwards, and whether a second box
@@ -346,11 +345,13 @@ fn one_delivered_unit_pays_one_contract_not_every_contract_that_wants_it() {
     let shipped = run_until_shipped(&mut world, 1);
     assert_eq!(shipped, 1, "the chain produces one unit at a time");
     world.issue_command(PlayerCommand::Remove {
-        tile: the_dock(&world).tile,
+        tile: the_dock(&world)
+            .belt_tile
+            .expect("the dock is fed by a belt"),
     });
     assert!(
-        world.dock_snapshots().is_empty(),
-        "the exit must really be gone, or the pool can still grow"
+        the_dock(&world).belt_tile.is_none(),
+        "the feed must really be gone, or the dock can still fill"
     );
 
     let target = world.current_tick() + 1000;
@@ -362,7 +363,7 @@ fn one_delivered_unit_pays_one_contract_not_every_contract_that_wants_it() {
         earned(&world),
         Money::from_num(10),
         "one box must pay exactly one contract — if stock were credited to every matching \
-         contract this would read 20, which is the free-money bug the shared-pool rule exists \
+         contract this would read 20, which is the free-money bug the allocation rule exists \
          to prevent"
     );
     assert_eq!(
@@ -440,11 +441,11 @@ fn the_economy_snapshot_reports_one_entry_per_shipped_contract() {
     assert!(json.contains("\"contracts\":["), "{json}");
     assert!(json.contains("\"board\":["), "{json}");
     assert!(json.contains("\"delivery_stock\""), "{json}");
-    // The pool's ceiling and whether it is at it (the dock-capacity change,
-    // 2026-09-16) — what the clipboard's ON THE DOCK line draws its bar
-    // against (UI_UX.md §5e) and warns with.
+    // Every place on every dock and whether any dock is full — what the
+    // clipboard's ON THE DOCK line draws its bar against (UI_UX.md §5e) and
+    // warns with. The reference chain places one dock.
     assert!(
-        json.contains(&format!("\"delivery_capacity\":{DELIVERY_STOCK_CAPACITY}")),
+        json.contains(&format!("\"delivery_capacity\":{DOCK_CAPACITY}")),
         "{json}"
     );
     assert!(json.contains("\"delivery_full\":false"), "{json}");

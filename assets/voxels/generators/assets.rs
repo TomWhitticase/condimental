@@ -5746,7 +5746,7 @@ pub fn machine_dock(p: &Palette) -> VoxModel {
     // frame. These are the dock's status lamps: `main.gd` swaps them green
     // when stock is waiting to be sold and amber when the deck is clear, the
     // same idle/running pair every machine's lamp uses. Both swap together,
-    // which is correct — there is one shared delivery pool, not one per door.
+    // which is correct — both doors are one dock, holding one stock.
     for (x0, x1) in DOCK_DOOR_SPANS {
         let mid = (x0 + x1) / 2;
         m.cuboid(

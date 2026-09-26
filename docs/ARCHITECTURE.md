@@ -282,12 +282,15 @@ category `owed`/`unpaid`/`left_last_payday`/`can_hire`, so a panel can warn
 before a payday and announce after it), `production_snapshot_json`
 (the production-stats epic, 2026-09-13: per item and fluid, what recipes
 MADE and USED over the sim's rolling windows and for all time, plus what
-a paying contract took from the pool — the P screen's wire, polled for
+a paying contract took from the docks — the P screen's wire, polled for
 the same reason and saved with the world), and JSON forms of
 the above. The dock-capacity change (2026-09-16) added
 `delivery_capacity` and `delivery_full` to `economy_snapshot_json` and a
-`full` flag to every dock tile snapshot: the shared delivery pool now has
-a per-item ceiling (GAMEPLAY.md §9), and the presentation layer draws its
+`full` flag to every dock tile snapshot; since 2026-09-26 each dock
+holds its own stock and its snapshot carries `contents`, `places`, `used`,
+`at_capacity`, `shipped_total` and `last_paid_tick` (GAMEPLAY.md §9), and
+`delivery_stock`/`delivery_capacity` are the docks summed. The
+presentation layer draws its
 bar and its full state from the simulation's own number rather than
 inventing a full mark of its own (UI_UX.md §5e). Godot never sees internal
 representations, only snapshots. Since the pipes & conveyors overhaul

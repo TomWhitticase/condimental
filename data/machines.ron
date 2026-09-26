@@ -77,8 +77,8 @@
 // `splitter` are not. Each moves product without turning anything into
 // anything — the hopper holds raw tomatoes and meters them onto the first
 // belt, the fluid tank holds vinegar and feeds it into the pipe run, the
-// dock takes finished boxes off the last belt and ships them into the
-// economy's shared delivery pool, the splitter takes one belt's product and
+// dock takes finished boxes off the last belt and holds them for a
+// contract to collect, the splitter takes one belt's product and
 // deals it out to two — so none of them has a recipe, and all four are
 // built as their own body types (`sim_core/src/sim/hopper.rs`,
 // `sim_core/src/sim/fluid.rs`, `sim_core/src/sim/dock.rs`,
@@ -260,9 +260,9 @@
         // The chain's finished-product exit (the delivery-dock ticket) — the
         // third kind here with no recipe behind it, and the exact mirror of
         // the `hopper` above. Boxes leave the packer onto one more ordinary
-        // belt, that belt runs into this building, and the dock deposits
-        // what arrives into the economy's shared delivery pool every tick,
-        // with no player command involved. It replaced
+        // belt, that belt runs into this building, and the dock holds
+        // what arrives until a contract collects it, with no player
+        // command involved. It replaced
         // `PlayerCommand::CollectOutput`, which used to reach into the last
         // machine's own output buffer from nowhere.
         //
