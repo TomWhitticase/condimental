@@ -11,7 +11,10 @@ config_version=5
 [application]
 
 config/name="CONDIMENTAL"
-config/description="Isometric voxel presentation of the data-driven production chain (UI_UX.md)."
+config/description="A factory-automation game about making sauce."
+; The player-facing version — what a bug report quotes. It matches the
+; crates' Cargo.toml version; bump both with each tagged release.
+config/version="0.1.0"
 ; The game opens on the MAIN MENU, not straight into a factory (the
 ; "Save/load + a real main menu" epic). menu.tscn changes scene to
 ; main.tscn once the player has chosen New Game or a save to load; the
