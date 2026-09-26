@@ -536,6 +536,138 @@ pub fn open_every_gate(world: &mut World) {
     world.restore_lifetime_deliveries(every_gate_open());
 }
 
+/// The **mustard line**: the reference chain, plus the third sauce's own five
+/// stages on rows of their own — the fixture that proves a `boxed_mustard` can
+/// be made and shipped by a player who only ever issues `Purchase` and
+/// `Place`, in a world where the ketchup line is running beside it.
+///
+/// ```text
+///   y=0..2  ...the shipped ketchup line, untouched...
+///   y=4     [tank]--pipes------v vinegar
+///   y=5     [seed]--belts-->[crusher]==mash==>[ mixer ]==mix==>[ vat ]==mustard==>[bottler]--belts-->[packer]--belts-->[dock]
+///   y=6              [turmeric]--belts-------->^ (1x2)         (2x2)
+/// ```
+///
+/// Two things are worth reading twice, because each is a tile that cannot move:
+///
+/// 1. **The vinegar run approaches the crusher from the row SOUTH of the line**
+///    rather than the row north of it, which is where [`plan`] would put it.
+///    North is where the mustard mixer's turmeric lane has to run — the mixer
+///    is 1x2 and its northern inlet tile is taken by the mash pipe — so the two
+///    would collide. Nothing joins a belt to a pipe, so a belt lane crossing
+///    the line's own row is harmless; two pipe runs on one row are not.
+/// 2. **The mash run is two tiles and the mixer sits at the end of it.** This
+///    is the joint [`plan`]'s west-to-east rule cannot express, and the reason
+///    this fixture is drawn by hand like [`bbq_branch`] rather than laid out by
+///    that rule: a stage fed BOTH a pipe from the machine behind it and a belt
+///    of its own raw would have its feed lane push it four tiles east, away
+///    from the pipe run that is supposed to reach it. Mustard's crusher-to-
+///    mixer hand-off is the first of those in the shipped content.
+///
+/// **The vinegar tap is on the crusher, and that is the point of this world.**
+/// Mustard is milled wet, so the raw fluid two sauces compete for enters this
+/// line one machine earlier than it enters the ketchup line, and the mustard
+/// mixer drinks the derived `mustard_mash`. Put it on the mixer instead and
+/// every mixer in the game has two raw fluids it could be drinking: a tank run
+/// touching one narrows to neither, goes ambiguous, and cannot even be filled.
+/// `sim::recipe::tests::at_most_one_raw_fluid_enters_any_machine_kind` fences
+/// the rule in the data; `tests/mustard_line.rs` runs this factory to show it
+/// holds in a world.
+///
+/// Every progression gate is open, for the reason [`bbq_branch`]'s doc gives:
+/// mustard's two raws are gated, and a factory holding them belongs to a
+/// player who earned them.
+pub fn mustard_line(recipes: RecipeRegistry, budget: u32) -> World {
+    let mut world = build(
+        recipes,
+        MachineRegistry::bundled(),
+        ContractRegistry::bundled(),
+        Money::from_num(budget),
+        mustard_plan,
+    );
+    open_every_gate(&mut world);
+    world
+}
+
+/// The row mustard's machines sit on. Two clear tiles south of the deepest
+/// thing on the ketchup line (its vinegar run, on row 2), so that no run of one
+/// line is ever edge-adjacent to a run of the other.
+const MUSTARD_ROW_Y: i32 = 5;
+/// The row mustard's vinegar run sits on: south of the machines. See
+/// [`mustard_line`], point 1.
+const MUSTARD_TANK_ROW_Y: i32 = 4;
+/// The row mustard's turmeric lane sits on: north of the machines, feeding the
+/// mixer's northern inlet tile.
+const MUSTARD_LANE_ROW_Y: i32 = 6;
+
+/// [`plan`] for the mustard line: the ketchup line as it always was, then
+/// mustard's five stages drawn out tile by tile. See [`mustard_line`] for the
+/// picture and for why this is a hand-drawn table rather than a rule.
+fn mustard_plan(recipes: &RecipeRegistry, machines: &MachineRegistry) -> Vec<Order> {
+    let mut orders = plan(recipes, machines);
+    let row = MUSTARD_ROW_Y;
+
+    // Seed off a hopper, milled wet: the crusher's own feed lane, laid exactly
+    // as the ketchup crusher's is.
+    orders.push(Order {
+        kind: HOPPER_KIND,
+        tile: (-1, row),
+        direction: Direction::East,
+        item: Some("mustard_seed"),
+    });
+    for dx in 0..STAGE_BELT_TILES {
+        orders.push(Order::east(BELT_KIND, (dx, row)));
+    }
+    orders.push(Order::east("crusher", (4, row)));
+
+    // The vinegar the two sauces compete for, arriving from the south so the
+    // turmeric lane can have the north. The run's last tile is edge-adjacent to
+    // the crusher; the tank faces east into the run's head.
+    orders.push(Order::east(FLUID_TANK_KIND, (0, MUSTARD_TANK_ROW_Y)));
+    for n in 0..PIPE_RUN_TILES {
+        orders.push(Order::east(PIPE_KIND, (1 + n, MUSTARD_TANK_ROW_Y)));
+    }
+
+    // crusher -> mixer, off the crusher's outlet face: the derived mash.
+    for n in 0..MACHINE_PIPE_RUN_TILES {
+        orders.push(Order::east(PIPE_KIND, (5 + n, row)));
+    }
+    orders.push(Order::east("mixer", (7, row)));
+
+    // Turmeric into the mixer's northern inlet tile, since the mash pipe has
+    // the southern one.
+    orders.push(Order {
+        kind: HOPPER_KIND,
+        tile: (2, MUSTARD_LANE_ROW_Y),
+        direction: Direction::East,
+        item: Some("turmeric"),
+    });
+    for dx in 0..STAGE_BELT_TILES {
+        orders.push(Order::east(BELT_KIND, (3 + dx, MUSTARD_LANE_ROW_Y)));
+    }
+
+    // mixer -> vat -> bottler, then the ordinary solid tail, all spaced as the
+    // ketchup line spaces them.
+    for n in 0..MACHINE_PIPE_RUN_TILES {
+        orders.push(Order::east(PIPE_KIND, (8 + n, row)));
+    }
+    orders.push(Order::east("cooking_vat", (10, row)));
+    for n in 0..MACHINE_PIPE_RUN_TILES {
+        orders.push(Order::east(PIPE_KIND, (12 + n, row)));
+    }
+    orders.push(Order::east("bottler", (14, row)));
+    for dx in 0..STAGE_BELT_TILES {
+        orders.push(Order::east(BELT_KIND, (15 + dx, row)));
+    }
+    orders.push(Order::east("packer", (19, row)));
+    for dx in 0..STAGE_BELT_TILES {
+        orders.push(Order::east(BELT_KIND, (20 + dx, row)));
+    }
+    orders.push(Order::east(DOCK_KIND, (24, row)));
+
+    orders
+}
+
 /// The row the BBQ branch's machines sit on. Three north of the chain row,
 /// which is the closest the branch can get: the chain row is two tiles deep
 /// (the mixer and the vat are), and the row between the two lines carries the

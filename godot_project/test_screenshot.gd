@@ -88,6 +88,16 @@
 # Implies `--populate`. With `--board --board-end` the shot is of the BBQ
 # tier of the contracts board, mixed orders and all.
 #
+# `--mustard` builds the MUSTARD LINE (test_layouts.gd's
+# `build_mustard_line`: the third sauce, a whole SECOND line from raw rather
+# than a branch, funded, crewed and run until cases are shipping). Implies
+# `--populate`. It is the one fixture whose middle is entirely WET — the
+# crusher mills seed with vinegar and discharges a fluid, so `mustard_mash`
+# and `mustard_mix` are only ever seen in a pipe — which makes it the only
+# frame that can show whether mustard's three stages are three colours.
+# Parsed after `--bbq`, so `--cookbook-page mustard --mustard` is the book
+# open on the new sauce over the line that made it.
+#
 # `--bottleneck` builds the BOTTLENECK LINE (test_layouts.gd's
 # `build_bottleneck_line`: the reference line on auto-fill, run until it has
 # backed up behind the cooking vat), the fixture the machine-load epic's
@@ -119,6 +129,15 @@
 # `cookbook_json`, and a flag that named either would be one more place to
 # edit when the content files change. All three imply `--populate`, so the
 # factory behind the plate is running.
+#
+# `--cookbook-page ID` opens that sauce's page instead. The bare form stays
+# the default and stays wire-driven, for the reason above; the argument
+# exists because "the first unlocked node" can only ever photograph the
+# FIRST family, and from the third sauce on there are pages that flag can
+# never reach. A reviewer asking for a specific page has already named it in
+# the request, so naming it on the command line adds no place to edit — and
+# an id the book does not hold is refused in words that list the ones it
+# does, rather than photographing the wrong page.
 #
 # `--full-dock` builds the FULL-DOCK LINE (test_layouts.gd's
 # `build_full_dock_line`: the reference line on auto-fill, run until the
@@ -297,7 +316,7 @@ const FIXTURE_NAMES: PackedStringArray = [
 	"demo", "machines", "fluids", "vat", "splitter", "chain", "stress",
 	"pipes", "gallery", "items", "fluid_gallery", "bottleneck", "bbq",
 	"stalled_run", "understaffed", "shortfall", "full_dock",
-	"unclerked_dock", "warehouse", "split_docks",
+	"unclerked_dock", "warehouse", "split_docks", "mustard",
 ]
 
 ## The fixtures whose whole claim is a factory that is WORKING, and which are
@@ -314,7 +333,7 @@ const FIXTURE_NAMES: PackedStringArray = [
 ## those would be asserting the opposite of what they are for. Fixtures
 ## outside this list still get the `SCREENSHOT_HEALTH:` line; they are just
 ## not failed on it.
-const HEALTHY_FIXTURES: PackedStringArray = ["bbq", "bottleneck", "full_dock"]
+const HEALTHY_FIXTURES: PackedStringArray = ["bbq", "bottleneck", "full_dock", "mustard"]
 
 var _frames := 0
 var _on_screen := false
@@ -454,6 +473,10 @@ var _production := false
 ## shot exists to prove no `{placeholder}` reaches the screen.
 var _cookbook := false
 var _cookbook_page := false
+## `--cookbook-page ID`'s argument, or "" for the flag's wire-driven default
+## (the first unlocked node the tree draws). See this file's header for why
+## the argument exists and why the default is still the default.
+var _cookbook_page_id := ""
 var _cookbook_basics := false
 var _understaffed := false
 ## `--staff-shortfall` opens the staff panel over a line funded to less than
@@ -654,7 +677,13 @@ func _initialize() -> void:
 	if _production:
 		_pick_fixture("bottleneck", "--production")
 		_populate = true
-	_cookbook_page = args.has("--cookbook-page")
+	_cookbook_page = args.has("--cookbook-page") or _string_arg(args, "--cookbook-page") != ""
+	# `_string_arg` hands back whatever token follows, flag or not, so a bare
+	# `--cookbook-page --populate` would ask the book for a page called
+	# "--populate". Anything starting with `--` is the next flag, not an id.
+	_cookbook_page_id = _string_arg(args, "--cookbook-page")
+	if _cookbook_page_id.begins_with("--"):
+		_cookbook_page_id = ""
 	_cookbook_basics = args.has("--cookbook-basics")
 	_cookbook = _cookbook_page or _cookbook_basics or args.has("--cookbook")
 	if _cookbook:
@@ -744,6 +773,13 @@ func _initialize() -> void:
 	# epic the clipboard shows), so it has the final say.
 	if args.has("--bbq"):
 		_pick_fixture("bbq", "--bbq")
+		_populate = true
+	# After --bbq for the same reason --bbq is after --contracts: the third
+	# sauce is the one a combined flag is most likely to be aimed at, so
+	# `--cookbook-page boxed_mustard --mustard` opens the new page over the
+	# line that made it rather than over the shipped ketchup line.
+	if args.has("--mustard"):
+		_pick_fixture("mustard", "--mustard")
 		_populate = true
 	_split_docks = args.has("--split-docks")
 	if _split_docks:
@@ -1021,6 +1057,8 @@ func _build_fixture() -> void:
 			Layouts.build_bottleneck_line(_main.sim)
 		"bbq":
 			Layouts.build_bbq_running_line(_main.sim)
+		"mustard":
+			Layouts.build_mustard_line(_main.sim)
 		"stalled_run":
 			Layouts.build_stalled_pipe_run(_main.sim)
 		"understaffed":
@@ -1307,13 +1345,42 @@ func _enter_view_mode() -> void:
 ## the reason the whole feature exists — a flag naming a sauce would be a
 ## place to edit every time the content files change. It refuses in words if
 ## every family is still locked, rather than photographing the tree twice.
+##
+## `--cookbook-page ID` asks for that page by name instead. "The first
+## unlocked node" is a fine default and a dead end as the only one: it can
+## only ever open the FIRST family, so from the third sauce on there are
+## pages no flag can reach, and a reviewer asking for one of those has
+## already named it. An id the book does not hold is refused with the list of
+## ids it does — the alternative is a frame of the wrong sauce that looks
+## exactly like a frame of the right one, which is the trap `--fixture`'s own
+## no-fallback `match` was built to close (issue #70).
 func _open_first_unlocked_sauce() -> bool:
 	var book = JSON.parse_string(_main.sim.cookbook_json())
 	if not (book is Dictionary):
 		printerr("SCREENSHOT_FAIL: --cookbook-page could not read cookbook_json")
 		_refuse()
 		return false
-	for entry in (book as Dictionary).get("sauces", []):
+	var sauces: Array = (book as Dictionary).get("sauces", [])
+	if _cookbook_page_id != "":
+		var known := PackedStringArray()
+		for entry in sauces:
+			var id := String(entry.get("id", ""))
+			known.append(id)
+			if id != _cookbook_page_id:
+				continue
+			# A LOCKED page is photographed on request without complaint: the
+			# silhouette is a real screen, and reviewing a new sauce before
+			# its gate opens is exactly what it is for.
+			_main._cookbook.open("sauce", id)
+			_main._position_cookbook_panel()
+			return true
+		printerr(
+			"SCREENSHOT_FAIL: --cookbook-page %s — the book has no page with that id. It holds: %s"
+			% [_cookbook_page_id, ", ".join(known)]
+		)
+		_refuse()
+		return false
+	for entry in sauces:
 		if bool(entry.get("locked", false)):
 			continue
 		_main._cookbook.open("sauce", String(entry.get("id", "")))

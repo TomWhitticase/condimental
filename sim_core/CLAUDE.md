@@ -57,6 +57,15 @@ the plan is `docs/ARCHITECTURE.md` §3/§4/§6/§10.
   player-facing picker and no command that sets a recipe** — do not add one.
   The in-flight recipe *is* saved (`SavedMachine::recipe`): a craft under way
   has already eaten the inputs it would be re-derived from.
+- **At most one RAW fluid may enter a kind, drunk by at most one of its
+  recipes.** `resolve_network_fluids` names a run by narrowing on fluids alone
+  and `for_machine` is not gate-aware, so a second recipe on one kind drinking
+  a bought fluid makes a tank run ambiguous — unfillable, since `tank_fluid`
+  returns `None` — in a new game where that content is still locked. A new
+  sauce takes its fluid derived, a stage earlier (mustard's vinegar enters at
+  the crusher). Fenced by `recipe.rs`'s
+  `at_most_one_raw_fluid_enters_any_machine_kind`; full record 2026-09-26 in
+  `docs/DECISIONS_LOG.md`.
 - **A recipe may draw N fluid networks, matched by fluid id; it deposits into
   exactly one.** `validate_fluid_scope` refuses a recipe that names one fluid
   twice (that is one input with the units added up) and still caps

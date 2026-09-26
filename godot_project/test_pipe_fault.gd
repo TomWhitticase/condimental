@@ -22,7 +22,7 @@
 #     tile of the empty run beside them, each rendering a real imported mesh,
 #   * the clamps come DOWN again when the player turns the tank back, which
 #     is the fix the tooltip tells them to make,
-#   * hovering the dead run says DEAD RUN and names both fluids it could
+#   * hovering the dead run says DEAD RUN and names every fluid it could
 #     carry; hovering an equally empty run beside it says neither,
 #   * the vat on the dead run reports the run as its reason rather than "no
 #     supply pipe" about a pipe the player has laid,
@@ -114,7 +114,7 @@ func _run_checks() -> void:
 	# --- a clamp on every tile of every dead run, and on nothing else -----
 	# Every dead run, not only the one the tank pinned: with the smoke run
 	# unnameable the vat can no longer be told which sauce it cooks, so its
-	# OUTLET run narrows to two as well. That knock-on is the simulation's
+	# OUTLET run narrows to several as well. That knock-on is the simulation's
 	# own answer and the marking follows it exactly — which is the whole
 	# point of reading `naming` off the wire instead of guessing here.
 	var dead_tiles: Array = []
@@ -148,7 +148,7 @@ func _run_checks() -> void:
 	for candidate in Layouts.STALLED_RUN_CANDIDATES:
 		var name: String = main._item_display_name(candidate)
 		if not dead_text.contains(name):
-			_fail("the tooltip should name %s, one of the two fluids confused, got: %s" % [name, dead_text])
+			_fail("the tooltip should name %s, one of the fluids confused, got: %s" % [name, dead_text])
 			return
 	var alive_text: String = main._hover_text_at_tile(Layouts.STALLED_NEIGHBOUR_TILE)
 	if alive_text.contains("DEAD RUN"):
@@ -193,5 +193,5 @@ func _run_checks() -> void:
 		_fail("%d clamps are still standing on a run that is fixed" % main._pipe_fault_nodes.size())
 		return
 
-	print("PIPE_FAULT_OK: %d dead tiles flagged and no named run marked, the tooltip names both fluids the run could carry, the vat blames the run, and every clamp comes down when the tank is turned back" % dead_tiles.size())
+	print("PIPE_FAULT_OK: %d dead tiles flagged and no named run marked, the tooltip names every fluid the run could carry, the vat blames the run, and every clamp comes down when the tank is turned back" % dead_tiles.size())
 	quit(0)

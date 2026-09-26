@@ -41,6 +41,28 @@ See [WORKFLOW.md](WORKFLOW.md).
   pass-through into one pool) and the pool half of 2026-09-16's full dock
   (`DELIVERY_STOCK_CAPACITY`, 48 per item, `OverfullDeliveryPool`).
   > Full record in `docs/DECISIONS.md`.
+
+- 2026-09-26 **At most one RAW fluid may enter a machine kind, and at most one
+  recipe on that kind may drink it.** A new sauce whose fluid wants into a kind
+  that already drinks a bought fluid must take it as a *derived* fluid, made a
+  stage earlier by a machine of another kind — or get a kind of its own.
+  `World::resolve_network_fluids` names a pipe run by narrowing on FLUIDS
+  ALONE: it seeds a run from every recipe of every kind that touches it,
+  regardless of what those machines are actually running, and the only outside
+  fact is "a run a tank feeds carries a raw fluid". So two recipes on one kind
+  drinking the same raw leaves that kind's outlet run ambiguous, and one kind
+  whose recipes drink two different raws leaves the TANK run ambiguous — and an
+  ambiguous tank run cannot even be filled, because `World::tank_fluid` has
+  nothing to name it with. Both are stalls on a line the player already built,
+  and `RecipeRegistry::for_machine` is not gate-aware, so unreleased content
+  breaks a shipped line in a new game. Mustard is the case that found it: its
+  vinegar draws at the CRUSHER, not at the mixer beside turmeric, and the
+  mustard mixer takes the derived `mustard_mash` down a pipe. Binds
+  `data/recipes.ron` (the rule is stated in its header), and is fenced by
+  `sim_core/src/sim/recipe.rs`'s `at_most_one_raw_fluid_enters_any_machine_kind`
+  and by `sim_core/tests/mustard_line.rs`. Teaching the resolver about the
+  solid side of a recipe would lift the rule; until then it is content's to
+  obey. Full record in `docs/DECISIONS.md`.
 - 2026-09-25 **THE COOKBOOK is derived from the content files, and nothing in
   it may be written in GDScript.** The in-game encyclopedia (B, and a page on
   the pause menu) draws `SimBridge::cookbook_json` and only that: the sauce

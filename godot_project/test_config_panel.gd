@@ -903,14 +903,27 @@ func _run_checks() -> void:
 		_fail("the locked slot '%s' is drawn at full strength" % slot["item"])
 		return
 	# And the words beside the glyph: which gate, and how far off it is.
-	var gate_line := ""
+	# EVERY gate line is read, not the last one: `_with_gate_note` writes one
+	# line per unlock, so a second sauce's raws are a second line, and a check
+	# that kept only the last line started failing the moment mustard shipped
+	# a gate above BBQ's. Every locked choice has to be named by one of them,
+	# which is also the stronger claim — a padlock no line explains is exactly
+	# the defect issue #90 was about.
+	var gate_lines: Array = []
 	for line in main._config_picker_note.text.split("\n"):
 		if String(line).begins_with("🔒"):
-			gate_line = String(line)
-	if not gate_line.contains(main._item_display_name(String(slot["item"]))) \
-			or not gate_line.contains("0 of "):
-		_fail("the picker note does not say what is locked or how far off: '%s'" % gate_line)
-		return
+			gate_lines.append(String(line))
+	for id in locked_solids:
+		var named := false
+		for line in gate_lines:
+			if String(line).contains(main._item_display_name(String(id))) \
+					and String(line).contains("0 of "):
+				named = true
+		if not named:
+			_fail("the picker note does not say what is locked or how far off for '%s': %s" % [
+				id, str(gate_lines)
+			])
+			return
 	# Pressing it is refused by the SIMULATION — the hopper holds what it held.
 	var held_before := String(_hopper_snapshot(gate_hopper).get("item", ""))
 	main._on_config_picker_pressed(locked_slot)

@@ -552,6 +552,93 @@ mod tests {
         }
     }
 
+    /// **At most one RAW fluid enters any one machine kind, and at most one
+    /// recipe on that kind drinks it.** A second sauce whose fluid wants into
+    /// a kind that already drinks one has to arrive as a *derived* fluid,
+    /// made a stage earlier by a machine of some other kind.
+    ///
+    /// This is a fence around `World::resolve_network_fluids`, which names a
+    /// pipe run rather than being told what it carries. Step 1 seeds a run
+    /// from every recipe of every kind whose face or footprint touches it,
+    /// with no regard for which recipe that machine is actually running, and
+    /// a run that touches a TANK is then intersected with the raw fluids. So
+    /// two raws drinkable at one kind put two candidates on a tank run that
+    /// nothing downstream can narrow — the run goes `Ambiguous`, every
+    /// machine on it stalls with `AmbiguousPipe`, and `World::tank_fluid`
+    /// returns `None`, which means the tank cannot even be FILLED. That is
+    /// worse than a stall: the player's only lever, `SetTankFluid`, is a
+    /// declaration nothing in the shipped flow issues for them.
+    ///
+    /// Mustard is why this is written down (2026-09-26). It wanted vinegar at
+    /// the mixer, which `ketchup_mix` already drinks, and measuring it on a
+    /// NEW GAME — mustard still behind its gate — showed both failures on the
+    /// shipped ketchup line, because `for_machine` is not gate-aware and the
+    /// resolver sees locked content. Mustard's vinegar went upstream to the
+    /// crusher instead, which drank nothing, and the mixer gets the derived
+    /// `mustard_mash` down a pipe. The bill per box is identical either way;
+    /// only the machine that drinks moved.
+    ///
+    /// Breaking this is a content change that stalls a line the player has
+    /// already built, so it fails here rather than in a playtest. The fix is
+    /// never to relax the fence: it is to derive the fluid a stage earlier,
+    /// or to give the new sauce a kind of its own.
+    #[test]
+    fn at_most_one_raw_fluid_enters_any_machine_kind() {
+        use crate::sim::ingredients::raw_ingredient_ids;
+        use std::collections::BTreeSet;
+
+        let registry = RecipeRegistry::from_ron_str(include_str!("../../../data/recipes.ron"))
+            .expect("data/recipes.ron must parse");
+        let raws: BTreeSet<String> = raw_ingredient_ids(&registry).into_iter().collect();
+        let mut kinds: Vec<&str> = registry
+            .ordered()
+            .iter()
+            .map(|r| r.machine.as_str())
+            .collect();
+        kinds.sort_unstable();
+        kinds.dedup();
+
+        for kind in kinds {
+            // Every recipe on this kind that names a raw fluid, with the raws
+            // it names — in file order, so the message below names the pair a
+            // reader can find.
+            let drinkers: Vec<(&str, BTreeSet<&str>)> = registry
+                .for_machine(kind)
+                .map(|recipe| {
+                    let drunk: BTreeSet<&str> = recipe
+                        .fluid_inputs
+                        .iter()
+                        .map(|(id, _)| id.as_str())
+                        .filter(|id| raws.contains(*id))
+                        .collect();
+                    (recipe.id.as_str(), drunk)
+                })
+                .filter(|(_, drunk)| !drunk.is_empty())
+                .collect();
+
+            if let [(first, first_raws), (second, second_raws), ..] = drinkers.as_slice() {
+                panic!(
+                    "on the {kind}, '{first}' drinks {first_raws:?} and '{second}' drinks \
+                     {second_raws:?} — two recipes on one kind drinking a BOUGHT fluid. A \
+                     tank run touching that kind cannot be narrowed to one fluid, so it \
+                     goes ambiguous and cannot even be filled. Derive the second sauce's \
+                     fluid a stage earlier instead. See this test's doc comment."
+                );
+            }
+
+            let entering: BTreeSet<&str> = drinkers
+                .iter()
+                .flat_map(|(_, drunk)| drunk.iter().copied())
+                .collect();
+            assert!(
+                entering.len() <= 1,
+                "on the {kind}, one recipe drinks {entering:?} — more than one bought fluid \
+                 entering a single kind is the same ambiguity as two recipes doing it. See \
+                 this test's doc comment."
+            );
+        }
+    }
+
     /// The reason [`Recipe::display_name`] exists: the presentation layer
     /// title-cases an id to label it, and an acronym comes out of that
     /// mangled ("Bbq"). These four ids are the ones in the shipped file

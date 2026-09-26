@@ -91,6 +91,75 @@ matches what code comments and data files cite.
   meters now read against the docks' total places. That is a slightly
   looser figure than a per-item cap, but it is the true ceiling.
 
+- 2026-09-26: **At most one RAW fluid may enter a machine kind, and at most
+  one recipe on that kind may drink it.** (MUSTARD epic, ticket M1.)
+
+  **What happened.** Mustard is the third sauce and the first to want a raw
+  that another sauce already buys: `vinegar`. The obvious content shape put it
+  on the mixer — `mustard_mix` = mustard meal + turmeric + 2 vinegar, exactly
+  the way `ketchup_mix` takes paste + sugar + 2 vinegar — and it parsed, priced
+  and balanced fine. It also broke the shipped ketchup line in a brand-new
+  game, where mustard is still behind its 25-delivery gate.
+
+  **Why.** `World::resolve_network_fluids` decides what a pipe run carries by
+  narrowing rather than by being told. Step 1 seeds a run's candidates from
+  *every* recipe of *every* machine kind whose face or footprint touches it —
+  no check of what that machine is currently running, and
+  `RecipeRegistry::for_machine` does not know about unlock gates. A run that a
+  fluid tank feeds is then intersected with the raw fluids. Step 2 narrows to a
+  fixpoint, keeping a claim only when every still-feasible naming uses it. Two
+  recipes on one kind drinking the same raw are both feasible forever, so
+  nothing narrows: the tank run beside any mixer had two candidates, went
+  `Ambiguous`, and every machine on it stalled with `AmbiguousPipe`. Worse,
+  `World::tank_fluid` returns `None` on an ambiguous run, so the tank could not
+  even be FILLED — the player's only lever is `SetTankFluid`, which nothing in
+  the shipped flow issues for them. The mirror case is one kind whose recipes
+  drink two *different* raws, which leaves the tank run feeding it ambiguous
+  for the same reason. Both were measured on the shipped line before any of
+  mustard's own machines existed.
+
+  **The options.** (1) Give mustard a different acid (`white_wine` or
+  similar): content-only, but it invents a raw to dodge an engine limit, and
+  the sharing of vinegar between two lines is the whole point of the tier —
+  `data/ingredients.ron`'s note argues it as where two lines first compete for
+  one budget. A probe also showed it only moves the problem: the mixer would
+  then drink two different raws, which is the second failure above. (2) Teach
+  the resolver the solid side — a naming is infeasible when the machine cannot
+  get the recipe's solids — which is the principled fix and a `sim_core`
+  behaviour change with its own determinism and save surface, out of a content
+  ticket's scope. (3) Move mustard's vinegar upstream to the CRUSHER, which
+  drank nothing at all, and let the mustard mixer take the derived
+  `mustard_mash` down a pipe the way the BBQ mixer takes derived `ketchup`.
+
+  **Chosen: (3), plus the rule written down.** `mustard_mash` on the crusher
+  (4 mustard seed + 2 vinegar → 1 mash) replaces the old dry `mustard_meal`,
+  and `mustard_mix` is turmeric + mash. The bill per box is identical — 4x2 +
+  1x5 + 2x2 = 17 — because only the machine that drinks moved, and the cookbook
+  tests that assert 17/case and the 40.8–52 pay band passed unchanged. It also
+  restored full per-kind input disjointness, so main's stronger
+  `recipes_on_a_kind_take_disjoint_inputs` survives untouched rather than being
+  weakened, and it made the crusher a wet mill, which reads as a real thing a
+  mustard line does.
+
+  **The evidence.** `at_most_one_raw_fluid_enters_any_machine_kind` in
+  `sim_core/src/sim/recipe.rs` reads `data/recipes.ron` against
+  `raw_ingredient_ids` and fails on the shape rather than on a symptom;
+  mutation-tested by putting `("vinegar", 2)` back on `mustard_mix`, which
+  fails it with the sentence that names both recipes and the kind.
+  `sim_core/tests/mustard_line.rs` builds both lines out of real
+  `Purchase`/`Place` commands and asserts every run resolves, no machine ever
+  reports `AmbiguousPipe`, and a box of mustard reaches the dock. Two cases in
+  `sim_core/tests/pipe_naming.rs` pin the near misses the crusher's new fluid
+  recipe creates: a DRY crusher whose outlet face touches a `ketchup_mix` run
+  does not make it ambiguous (a `tomato_paste` naming uses no fluid, so the
+  narrowing drops the claim), and one vinegar run may feed a crusher and a
+  mixer at once, because both kinds draw exactly one raw and it is the same
+  one.
+
+  **What would lift the rule.** Option (2), filed as issue #184. Until a
+  resolver that reads the solid side exists, this is a constraint on content,
+  stated in `data/recipes.ron`'s header where a sauce author will hit it.
+
 - 2026-09-25: **THE COOKBOOK is derived from the content files, and nothing
   in it may be written in GDScript.** (Owner's request, after the Sauce Book
   Google Doc.)

@@ -235,6 +235,63 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-26 — Mustard can be seen, and the guard that could not see it
+
+Mustard now draws. `main.gd` gained the five tables the content needed:
+`ITEM_MODELS` for the four solids, `FLUID_TINTS` for the three fluids,
+`PRODUCT_TINTS` for the three recipes a product-showing machine runs, and
+`HOPPER_FILL_TINTS`/`RACK_LOAD_TINTS` for the two raws. `test_mustard_line.gd`
+stands the whole second line from raw through 31 real purchase-and-place
+commands and proves it ships, and `test_screenshot.gd --mustard` photographs
+it. That much was the ticket.
+
+**The interesting part is that nothing went red.** `test_fluid_gallery.gd`
+exists to catch precisely a fluid with no tint — issue #108's ruling, that a
+guard must be made to REFUSE rather than merely be given more entries — and
+it passed green on a branch where all three mustard fluids drew in
+`FLUID_TINT_FALLBACK` and all three products in `PRODUCT_TINT_FALLBACK`. It
+checked `FLUID_GALLERY_FLUIDS` against `FLUID_TINTS` in both directions,
+which looks complete and is not: both are hand-written GDScript, so a fluid
+missing from *both* is invisible to it. Two sauces had gone by under that.
+The expected set is now derived — the fluids off `cookbook_json`'s recipe
+graph, the product recipes off the same graph crossed with which machines
+emit a `liquid` material class in their own generated models — so neither
+side of the check is a copy of the other and a fourth sauce is covered by its
+content landing. Deleting any one of the six mustard rows now fails by name.
+
+**And the tints were measured, not reasoned.** The first cut spaced the three
+fluids evenly in tint space, 25.6/255 a stage, which photographed as +15.3
+then **+10.4** — inside issue #113's 10.7-11.8 noise band for reading one
+fluid twice. The pipe body's lit face maps tint luma to pixels compressively,
+and the frame is already crowded: measured on the gallery, `bbq` sits at 97.6,
+`ketchup` 125.2, `bbq_mix` 128.3, `ketchup_mix` 141.0, `liquid_smoke` 159.6
+and `vinegar` 178.2 of 255, leaving one free band. Mustard's three landed in
+it at 203.6 / 221.8 / 235.9 — +18.2 then +14.1, clearing `vinegar` by 25.4,
+which matters because vinegar is the fluid in the pipe on the *other* side of
+the same crusher. Mustard's tightest pair is wider than two pairs the game
+already ships. The band is narrow because the palette is nearly full; a
+fourth sauce will have to take value off the older two.
+
+One number the review added, recorded here because the fourth sauce will
+need it: the **pipe's own steel casing reads 209.65** in these frames, and
+every fluid is measured against its neighbours rather than against the
+casing it sits in. `mustard_mash` is 6.09 *below* the casing and
+`mustard_mix` 12.14 above it, both inside the anchor the legibility work
+uses — so those two read as fluid because an empty pipe draws no liquid body
+at all, a geometry cue, not because their tint stands off the metal. That is
+fine for three sauces and it is not a rule to keep leaning on.
+
+**One bug fell out that predates mustard.** THE COOKBOOK's sauce page read
+its nullable wire fields with `String(entry.get("tagline", ""))`. An
+`Option<String>` serialises as JSON `null`, `Dictionary.get` returns the null
+rather than the default, and `String(null)` is a hard script error in Godot 4
+— it aborts `_build_sauce_page` mid-build and the engine exits 0. Boxed BBQ
+has been shipping a blank page. Every nullable string in `cookbook_panel.gd`
+now goes through one `_text()` helper, and `test_cookbook.gd` opens *every*
+page the book holds and fails unless each puts its own display name on
+screen. Keying that assertion on a node rather than on content does not work:
+`queue_free` is deferred to end of frame, so within one `_process` the
+previous page's nodes are still findable.
 ### 2026-09-26 — A floating "!" over a full dock
 
 A dock with all 32 places taken now shows a glowing amber "!" hanging over
@@ -264,6 +321,55 @@ This supersedes the pool and its 48-per-item cap (DECISIONS_LOG
 than migrated. This is the first of three PRs for the owner's report. The
 hover's places grid and a reusable floating "!" over a full dock follow on
 this model.
+
+### 2026-09-26 — Mustard, the third sauce, and the fluid it could not drink
+
+Mustard ships as content: two raws (`mustard_seed`, `turmeric`), five stages,
+four contracts and a 25-delivery gate, all in `data/*.ron`, with no simulation
+change behind it. The interesting part is the one shape that had to change,
+and why.
+
+The obvious recipe drank `vinegar` at the mixer, beside turmeric, the way
+`ketchup_mix` does — which is the whole point of the tier, since vinegar is
+the first raw two sauces compete for out of one budget. It also broke the
+ketchup line in a brand-new game, long before a player could unlock mustard.
+`World::resolve_network_fluids` works out what a pipe run carries by narrowing
+candidates seeded from *every* recipe of *every* kind that touches the run,
+and `RecipeRegistry::for_machine` knows nothing about unlock gates. Two mixer
+recipes drinking one raw leaves nothing to narrow with: the vinegar tank's run
+goes ambiguous, every machine on it stalls with `AmbiguousPipe`, and because
+`World::tank_fluid` returns `None` on an ambiguous run the tank cannot even be
+filled. Content that is still locked can stall a line that already ships.
+
+So mustard's vinegar moved a stage upstream, to the crusher, which drank
+nothing: `mustard_mash` is 4 mustard seed milled wet with 2 vinegar, and the
+mustard mixer takes the derived mash down a pipe the way the BBQ mixer takes
+derived ketchup. The bill per box is unchanged at 17 — only the machine that
+drinks moved — and it restored full per-kind input disjointness, so the older
+and stronger `recipes_on_a_kind_take_disjoint_inputs` rule survives untouched.
+
+The rule that came out of it is recorded (2026-09-26, `docs/DECISIONS_LOG.md`)
+and fenced two ways: `at_most_one_raw_fluid_enters_any_machine_kind` reads the
+data file and fails on the shape, and `sim_core/tests/mustard_line.rs` builds
+both lines out of real commands and proves every run resolves and a box of
+mustard reaches the dock. Two more cases pin the near misses the crusher's new
+fluid recipe creates — a dry crusher whose outlet touches a `ketchup_mix` run
+does not poison it, and one vinegar run may feed a crusher and a mixer at
+once. The principled fix, a resolver that reads the solid side of a recipe
+too, is issue #184 rather than something improvised here.
+
+Review caught the gate's own tests asserting a list against itself: they looped
+over `data/unlocks.ron`'s `mustard_sauce` entry, so deleting an id from it made
+the loop vacuous and the suite stayed green with an unfulfillable mustard order
+on a new game's board. What a tier must hold back is now derived from the
+content — every contract whose mix names `boxed_mustard`, every raw the recipe
+graph feeds to mustard alone — and compared with the gate in both directions.
+The general lesson for the next sauce: a gate list is only guarded by something
+that does not read the gate.
+
+Mustard's voxels are ticket M2 (PR #179); registering them in `main.gd`'s
+model and tint tables is M3, so `test_ingredient_models.gd` and
+`test_warehouse_rack.gd` fail on the content branch alone by design.
 
 ### 2026-09-26 — THE COOKBOOK gets a BASICS section, and the prose states no numbers
 
