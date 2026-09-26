@@ -69,8 +69,11 @@ it. The wrap-up-specific parts:
   and the `review` skill), the verdict posted as a comment whose first line is
   `VERDICT: APPROVED`. A session that wrote the branch cannot supply that,
   however carefully it re-runs its own tests — so **a PR of yours awaiting
-  review is the one legitimate way to end with a PR still open**. Push it,
-  say it is waiting and on what, and do not merge it to tidy the session up.
+  review is the one legitimate way to end with a PR still open**, and only
+  once a reviewer is actually on it. With no verdict, launch the review
+  yourself as a fresh subagent (`open-pr` step 5: `general-purpose`, never
+  `fork`) rather than ending on "waiting for someone". Then say what the PR
+  is waiting on, and do not merge it to tidy the session up.
 - **Check mergeability before waiting on checks.** A PR with conflicts gets no
   CI run at all, so `--watch` waits forever on nothing:
 

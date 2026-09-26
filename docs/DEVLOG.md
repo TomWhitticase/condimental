@@ -245,6 +245,15 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-26 — A PR with no verdict gets a subagent reviewer
+
+A PR with green checks and no `VERDICT:` no longer ends its author's session
+with "waiting on review". The author now launches a fresh `general-purpose`
+subagent, never a `fork`. It runs the `review` skill in its own worktree and
+posts the verdict itself. PR #193 is the one that sat waiting. The rule is in
+`CLAUDE.md`, `docs/WORKFLOW.md` and the `open-pr`, `wrap-it-up` and `review`
+skills. Decision record: 2026-09-26 in `docs/DECISIONS.md`.
+
 ### 2026-09-26 — Open-source licence and alpha-release groundwork
 
 CONDIMENTAL has a licence: **GPL-3.0-only** plus a §7 linking exception for

@@ -96,8 +96,34 @@ skill), posted as a comment review (`gh pr review <N> --comment`) whose first
 line is `VERDICT: APPROVED`. `gh` returns that under `reviews`, not
 `comments`, so check both, and read the **latest** verdict: an approval
 followed by a later `CHANGES REQUESTED` is not an approval. Being told to
-"make a PR and merge it" does not change this. If no reviewer's verdict is
-there yet, give the URL, say the PR is waiting on review, and stop.
+"make a PR and merge it" does not change this.
+
+**No verdict yet? Get one — do not stop.** Launch a subagent to review the
+PR: the Agent tool with `subagent_type: general-purpose`, **never `fork`**.
+A fork inherits your context, so it would be the author marking their own
+work. A fresh agent starts cold, and that is the point. Its prompt should:
+
+- tell it to follow `.claude/skills/review/SKILL.md` in its own worktree;
+- give the PR number, and the `cargo` PATH line and the never-`pkill godot`
+  rule from the `verify` skill;
+- say it must post the verdict itself with `gh pr review <N> --comment`,
+  and must not edit, push to or merge the branch.
+
+Say what the PR claims, but not why you think it is right. The reviewer is
+there to check the claims, not to be talked into them. Keep working while it
+runs. Then read the verdict with the query below:
+
+- **`APPROVED`**: merge, unless a rule below holds it.
+- **`CHANGES REQUESTED`**: fix the findings on the branch, push, and launch a
+  *fresh* subagent to re-review. A re-review by the agent that asked for the
+  changes is not independent of them either.
+
+Leave the PR open and stop, giving the URL and what it is waiting on, only
+when:
+
+- no subagent can be launched;
+- the task told you not to merge (an Orca worker's coordinator merges); or
+- a rule below says the owner decides.
 
 ```
 gh pr checks <N> --watch

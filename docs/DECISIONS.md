@@ -25,6 +25,38 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-26: **An author with no review verdict commissions one: a fresh
+  subagent reviews the PR.** (Owner's rule, stated after PR #193.)
+
+  **What happened.** PR #193 was an Orca worker's ticket (the P screen's pay
+  cycle). By the end of the session its checks were green, and the
+  `wrap-it-up` skill ended correctly under the rule of 2026-09-25: no
+  verdict, so the PR stayed open, "waiting on review". Nobody had been asked
+  to do that review, so the PR had nothing to wait on. The owner's
+  instruction was: *"use a subagent to do the review, and update claudemd or
+  whatever so in future no agent gets stuck on this, they get a subagent to
+  do the review rather than stop"*.
+
+  **The rule.** The review requirement is unchanged: the verdict still has to
+  come from a session that did not write the branch. A subagent launched
+  fresh is such a session. It starts cold, builds the branch in its own
+  worktree, and has none of the author's reasoning to lean on. So the author
+  launches it, and the PR's wait ends. The subagent must be
+  `general-purpose` and never `fork`. A fork inherits the author's whole
+  conversation, which makes its review the author re-reading their own work.
+  Its prompt says what the PR claims, but not why the author believes it.
+  After `CHANGES REQUESTED`, the re-review goes to another fresh subagent,
+  not the one that asked for the changes.
+
+  **What still stops.** Three cases still end with the PR open:
+  - no subagent can be launched;
+  - the task forbids merging (an Orca worker's coordinator merges);
+  - the change also needs the owner, on top of the review: a design-doc
+    deviation, a `gdext` bump, or a save-format change.
+
+  #193 itself is the second and third case. It bumps the save schema, so
+  even with its verdict it waits for the owner.
+
 - 2026-09-26: **CONDIMENTAL is GPL-3.0-only; the name and brand are
   reserved.** (Owner's call, from a release-readiness audit.)
 
@@ -451,7 +483,9 @@ matches what code comments and data files cite.
   every PR. A post-merge review is not a substitute, because by then the
   unreviewed code is already on `main` and every other worktree branches
   from it. An instruction to merge is read as "merge once reviewed". If no
-  reviewer is available, the author stops with the PR open. `wrap-it-up`
+  reviewer is available, the author stops with the PR open. (Amended
+  2026-09-26, entry above: the author launches a subagent as the reviewer
+  rather than stopping.) `wrap-it-up`
   already treats that as the one legitimate way to end a session with a PR
   still open.
 

@@ -34,8 +34,11 @@ empty, and the player buys and places every tile.
   pull request (`gh pr create`); a `pre-push` hook refuses the alternative.
 - **No PR merges before it is reviewed.** It needs green checks AND a
   `VERDICT: APPROVED` from a session that did not write it (the `review`
-  skill). "Make a PR and merge it" means merge after that verdict; with none,
-  leave the PR open and say it is waiting on review.
+  skill). "Make a PR and merge it" means merge after that verdict. **With
+  no verdict yet, do not stop and wait: launch a fresh subagent** (the Agent
+  tool, `general-purpose`, never a `fork`) to review it with the `review`
+  skill, then act on its verdict. Leave the PR open only if the review
+  cannot be run, or the change also waits on the owner.
 - **Every PR body shows the change in a screenshot** — render with
   `scripts/screenshot-scene.sh`, read it, publish with
   `scripts/pr-screenshot.sh`, paste its markdown. A hook and CI both refuse a

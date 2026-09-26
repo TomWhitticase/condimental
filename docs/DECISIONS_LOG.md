@@ -18,6 +18,20 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-26 **An author with no review verdict commissions one: a fresh
+  subagent reviews the PR.** When a PR has green checks and no `VERDICT:`
+  yet, its author does not stop and wait for a reviewer. They launch one,
+  using the Agent tool with `subagent_type: general-purpose` and never
+  `fork`, because a fork inherits the author's context. The subagent runs
+  the `review` skill in its own worktree and posts the verdict itself. The
+  author acts on that verdict. On `CHANGES REQUESTED`, they fix the
+  findings, push, and have a *fresh* subagent re-review. Stopping with the
+  PR open is right only in three cases: no subagent can be launched, the
+  task forbids merging, or the change also waits on the owner (a design-doc
+  deviation, a `gdext` bump, a save-format change). This amends the
+  2026-09-25 rule below, which read "with no verdict, the author stops".
+  Binds `CLAUDE.md`, `docs/WORKFLOW.md` and the `open-pr`, `wrap-it-up` and
+  `review` skills. Full record in `docs/DECISIONS.md`.
 - 2026-09-26 **CONDIMENTAL is GPL-3.0-only; the name and brand are
   reserved.** The code is licensed `GPL-3.0-only` (`LICENSE`, and `license =`
   in every workspace `Cargo.toml`) **with a GPLv3 §7 additional permission**
@@ -145,7 +159,8 @@ See [WORKFLOW.md](WORKFLOW.md).
   changes get no exemption, and a review after the merge does not count. An
   instruction to "make a PR and merge it" means merge after that verdict. With
   no verdict, the author stops with the PR open and says it is waiting on
-  review. This replaces the old WORKFLOW.md wording that let authors merge
+  review. **Amended 2026-09-26: with no verdict, the author commissions a
+  subagent review (entry above), rather than stopping.** This replaces the old WORKFLOW.md wording that let authors merge
   their own routine work unreviewed. Binds `CLAUDE.md`, `docs/WORKFLOW.md`,
   `.githooks/pre-push` and the `open-pr` and `wrap-it-up` skills. Full record in `docs/DECISIONS.md`.
 - 2026-09-25 **The review render's clock is PINNED, so the same command twice

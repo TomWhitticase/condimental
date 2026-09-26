@@ -10,6 +10,12 @@ find what is wrong before `main` does, not to bless it, so **trust none of
 the author's claims**: not the PR body, not the green checks, not the
 screenshots, and not "the new test passes".
 
+That still holds when the author launched you as a subagent to review their
+PR (`open-pr` step 5). The prompt you were given describes the change, and
+that description is one more claim to check. Being launched by the author
+does not make you theirs to agree with. Post the verdict yourself, and make
+it the one this document calls for.
+
 ## 0. Your own worktree, your own build
 
 Never edit, push to or merge the branch under review.
