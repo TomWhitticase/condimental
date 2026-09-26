@@ -88,10 +88,16 @@
   "item_bottle_bbq": [
     "matte"
   ],
+  "item_bottle_mustard": [
+    "matte"
+  ],
   "item_box": [
     "matte"
   ],
   "item_box_bbq": [
+    "matte"
+  ],
+  "item_box_mustard": [
     "matte"
   ],
   "item_ketchup_pail": [
@@ -100,6 +106,10 @@
     "liquid"
   ],
   "item_liquid_smoke": [
+    "matte",
+    "metal"
+  ],
+  "item_meal_pail": [
     "matte",
     "metal"
   ],
@@ -113,6 +123,10 @@
     "metal",
     "liquid"
   ],
+  "item_mustard_seed": [
+    "matte",
+    "metal"
+  ],
   "item_paste_pail": [
     "matte",
     "metal",
@@ -125,6 +139,9 @@
     "matte"
   ],
   "item_tomato": [
+    "matte"
+  ],
+  "item_turmeric": [
     "matte"
   ],
   "item_vinegar": [

@@ -383,6 +383,18 @@ pub const ASSETS: &[Asset] = &[
         name: "item_liquid_smoke",
         build: item_liquid_smoke,
     },
+    // The third sauce's two raws (the MUSTARD epic). Both ride belts, so
+    // both are authored for the game camera as well as vengi's; the row
+    // argument that shaped the BBQ three is what shaped these, and it is
+    // eight raws wide now (see `item_mustard_seed`).
+    Asset {
+        name: "item_mustard_seed",
+        build: item_mustard_seed,
+    },
+    Asset {
+        name: "item_turmeric",
+        build: item_turmeric,
+    },
     Asset {
         name: "item_paste_pail",
         build: item_paste_pail,
@@ -394,6 +406,13 @@ pub const ASSETS: &[Asset] = &[
     Asset {
         name: "item_ketchup_pail",
         build: item_ketchup_pail,
+    },
+    // The mustard line's one bulk solid. A fourth pail livery and the first
+    // with matte contents — `item_meal_pail` records why milled seed is not
+    // a liquid.
+    Asset {
+        name: "item_meal_pail",
+        build: item_meal_pail,
     },
     Asset {
         name: "item_bottle",
@@ -420,6 +439,18 @@ pub const ASSETS: &[Asset] = &[
     Asset {
         name: "item_box_bbq",
         build: item_box_bbq,
+    },
+    // The third sauce's two finished goods (the MUSTARD epic), registered
+    // BEFORE `data/` has the items for the reason the BBQ pair above was:
+    // the epic's content ticket is a separate branch, and ITEM_MODEL_FALLBACK
+    // ships an unmodelled item in a plain shipping box with every test green.
+    Asset {
+        name: "item_bottle_mustard",
+        build: item_bottle_mustard,
+    },
+    Asset {
+        name: "item_box_mustard",
+        build: item_box_mustard,
     },
     // The coin a paid contract throws off the dock (the payout-feedback
     // ticket). Not an item and not a building — the one asset in this list
@@ -1674,7 +1705,8 @@ pub fn item_vinegar(p: &Palette) -> VoxModel {
 /// jug was drawn to end.
 ///
 /// **They are designed as a ROW, not as three objects**, because the frame
-/// that has to work is the market, where all six raws stand side by side:
+/// that has to work is the market, where every raw on sale stands side by
+/// side — six of them when this was written, eight since the mustard branch:
 /// a red sphere (tomato), a kraft sack (sugar), an amber jug (vinegar), and
 /// then these three. So each takes a silhouette none of the others has — a
 /// tied paper bag, a squat capped jar, a straight-sided ribbed drum — and a
@@ -1702,7 +1734,7 @@ pub fn item_vinegar(p: &Palette) -> VoxModel {
 ///
 /// **A SACK, and deliberately `item_sugar`'s sack one size down** — the
 /// project owner's call, 2026-09-21. This was an open steel tin with the
-/// blend heaped above its rim, drawn wide and low so that no two of the six
+/// blend heaped above its rim, drawn wide and low so that no two of the
 /// raws in the market row shared an outline; the row argument above is
 /// still the one that matters, which is why the SIZE is as load-bearing
 /// here as the colour. Two bags of bulk dry goods are told apart the way
@@ -1886,6 +1918,140 @@ pub fn item_liquid_smoke(p: &Palette) -> VoxModel {
     m
 }
 
+/// The mustard branch's two raw ingredients — bulk **mustard seed** in an
+/// open tote and a **hand of turmeric** (the third-sauce epic's art ticket).
+///
+/// **The row is still the frame that has to work**, and it is now eight raws
+/// wide: a red sphere (tomato), two paper sacks (sugar, spice blend), an
+/// amber jug (vinegar), a capped jar (molasses), a straight drum (liquid
+/// smoke) and then these two. Adding to a row is harder than starting one,
+/// because every silhouette worth having is taken, so each of these takes
+/// the one shape the other seven do not have. The seed goes in a **wide,
+/// low, OPEN, rectangular** vessel with its contents heaped through the
+/// mouth — nothing else in the row is open, and nothing else is rectangular.
+/// The turmeric is **not a container at all**: it is the ingredient itself,
+/// knobbly and lying nearly flat, which makes it the row's one irregular
+/// outline and its answer to the tomato (the row's other bare ingredient,
+/// and a perfect sphere).
+///
+/// The open tote deliberately reoccupies the shape the retired spice TIN
+/// used to hold — that became a sack on the project owner's 2026-09-21 call,
+/// which left the slot vacant while the argument for it stayed true. An open
+/// vessel is the only way a dry raw's own colour reaches the surface BOTH
+/// cameras look down on (§2b point 11 for the game's, point 35 for vengi's),
+/// and bulk seed is bought by the tonne and handled in exactly this.
+///
+/// `seed_tan` is measured against the steel it sits in rather than against
+/// the row (31.0/255 under `steel`, 72.2 under `steel_light`), because on an
+/// open tote the fill and the vessel are the only two colours there are;
+/// `palette.ron`'s entry carries the arithmetic. The rim is `steel_light` so
+/// the vessel's outline holds the brightest pixel (UI_UX.md §4) and the heap
+/// is read against it.
+pub fn item_mustard_seed(p: &Palette) -> VoxModel {
+    let mut m = item_volume();
+    let steel = p.idx("steel");
+    // Walls and base solid, then hollowed — `pail`'s order, for `pail`'s
+    // reason: a vessel filled to its own brim is a block with a lid on it.
+    m.cuboid((2, 13), (3, 12), (0, 5), steel);
+    m.carve_cuboid((3, 12), (4, 11), (1, 5));
+    // The rolled rim: a RING, drawn wide and re-opened, so the tote stays
+    // open from above where both cameras can see into it.
+    m.cuboid((2, 13), (3, 12), (6, 6), p.idx("steel_light"));
+    m.carve_cuboid((3, 12), (4, 11), (6, 6));
+    // The seed: the cavity filled, then heaped two voxels proud of the rim.
+    // The heap has to BREAK the outline — a tote filled flush reads as an
+    // empty tote, which is what the old spice tin's note records.
+    let seed = p.idx("seed_tan");
+    m.cuboid((3, 12), (4, 11), (1, 5), seed);
+    m.ellipsoid((8, 8, 5), (4.4, 3.4, 4.0), seed);
+    // A few seeds spilled on the floor beside it — the pairing
+    // `item_sugar`'s crystal makes, since a vessel alone is a vessel. They
+    // go at the DIAGONAL corners, clear of the walls in both axes, because
+    // the first two passes put them alongside a wall and the render came
+    // back with four little feet under the tote: a lone voxel touching a
+    // silhouette joins it. Fixed positions, never random — a review
+    // screenshot has to repeat.
+    for (x, y) in [(0, 1), (1, 0), (15, 14), (14, 15)] {
+        m.set(x, y, 0, seed);
+    }
+    m
+}
+
+/// One hand of turmeric: a knobbly rhizome with fingers off it, a snapped
+/// stub standing up out of the knob, and a dusting of ground root on the
+/// floor.
+///
+/// **The bright colour is on top and on the +X end, and nowhere else.** The
+/// skin of a turmeric root is dull brown; what says "turmeric" is the cut
+/// face, so the model is `cardboard_dark` almost everywhere with
+/// `turmeric_orange` only where the root is broken. Both cameras look down
+/// (§2b points 11 and 35), so the stub's snapped end points UP — the one
+/// surface each of them gets — and the finger's snapped end points +X, the
+/// face the game's fixed isometric sees. That is the same answer
+/// `item_spice_mix` reached with its spill at the mouth, and for the same
+/// reason: an identifying mark on a side face this camera shades is a mark
+/// the player never gets.
+///
+/// **Small and bright beats large and bright here**, which is why the root
+/// is not simply painted yellow. `turmeric_orange` cannot clear the
+/// reads-reliably threshold from `hazard_yellow` in luma — the gap between
+/// `vinegar_amber` and `hazard_yellow` is only 48.1/255 wide, so nothing
+/// inside it clears 26 from both ends, and `palette.ron`'s entry works the
+/// arithmetic through. It separates by HUE (17.5 degrees, dE76 22.6 from
+/// hazard yellow) and by AREA instead: a small saturated cut face on a dark
+/// body is not signage, whatever its hue, because signage in this game is a
+/// large flat panel. The dark skin also buys the cut face 42.6/255 of local
+/// contrast, which is more than any yellow-on-yellow arrangement could.
+///
+/// Ellipsoids and short cylinders rather than one straight shape, because
+/// straightness is what identifies `item_liquid_smoke`'s drum in the same
+/// row, and a root that reads as machined reads as a fitting.
+pub fn item_turmeric(p: &Palette) -> VoxModel {
+    let mut m = item_volume();
+    let skin = p.idx("cardboard_dark");
+    // A hand of rhizomes: a knuckle with two fat fingers off it at
+    // different angles and a lobe at the far end, all lying low.
+    // Overlapping ellipsoids rather than one shape, so nothing about the
+    // outline is straight or symmetric — straightness is what identifies
+    // `item_liquid_smoke`'s drum in the same row, and a root that reads as
+    // machined reads as a fitting.
+    m.ellipsoid((6, 7, 2), (2.4, 2.4, 2.4), skin);
+    m.ellipsoid((9, 6, 2), (4.0, 1.9, 1.9), skin);
+    m.ellipsoid((5, 10, 2), (1.9, 3.4, 1.9), skin);
+    m.ellipsoid((11, 8, 1), (2.0, 1.8, 1.6), skin);
+    // The snapped stub, standing out of the knuckle — the tallest thing on
+    // the root and the part that is visible whatever else overlaps it.
+    m.cylinder_z((6, 7), 1.7, (3, 6), skin);
+    let flesh = p.idx("turmeric_orange");
+    // The CUTS. The stub's top face is a disc of exactly the stub's radius,
+    // so it is the broken end of that stub and not a plate resting on it,
+    // and it faces the one direction both cameras look from (§2b points 11
+    // and 35).
+    m.cylinder_z((6, 7), 1.7, (6, 6), flesh);
+    // The second cut is the +X-facing skin of the long finger and the lobe,
+    // repainted over the form the root already has rather than drawn as
+    // another primitive — `item_vinegar`'s fill line does the same, and for
+    // the same reason: a bright end cap drawn with a primitive sticks out
+    // past the shape it is supposed to be the end of. +X is the face the
+    // game's fixed isometric camera sees (point 11), so a belt gets a cut
+    // root and the market gets the stub.
+    for z in 0..ITEM_VOXELS as i32 {
+        for y in 0..ITEM_VOXELS as i32 {
+            for x in 11..ITEM_VOXELS as i32 {
+                if m.filled(x, y, z) && !m.filled(x + 1, y, z) {
+                    m.set(x, y, z, flesh);
+                }
+            }
+        }
+    }
+    // Ground root dusted on the floor, `item_spice_mix`'s pairing again,
+    // and clear of the root for `item_mustard_seed`'s reason.
+    for (x, y) in [(2, 13), (13, 3), (9, 14)] {
+        m.set(x, y, 0, flesh);
+    }
+    m
+}
+
 /// The chain's three bulk liquid stages, in belt order: crushed
 /// **tomato paste**, the **ketchup mix** the vinegar goes into, and the
 /// cooked-down **ketchup** itself.
@@ -1937,14 +2103,47 @@ pub fn item_ketchup_pail(p: &Palette) -> VoxModel {
     pail(p, "paint_red", "liquid_ketchup", "steel_light")
 }
 
+/// Crushed mustard meal, on the belt between the mustard crusher and the
+/// mustard mixer — the third sauce's one solid intermediate.
+///
+/// **A fourth livery, and the first pail whose contents are NOT a liquid.**
+/// What a crusher does to mustard seed is mill it, so `meal_flour` is
+/// `matte` where the three stages above are `liquid`: giving a dry powder
+/// that gloss would read as sauce standing in a bin, which is the rule
+/// `palette.ron`'s `bulk_pale` already writes down for the hopper. It is
+/// also the answer to whether the mustard chain needs a `liquid_*` palette
+/// entry — it does not. The two fluids it has (`mustard_mix`, `mustard`)
+/// never ride a belt, so like `bbq_mix` and `bbq` they are `fluid_pale`
+/// tinted per fluid in `main.gd`, and the one thing that does ride a belt in
+/// bulk is this flour.
+///
+/// The body is `tote_grey`, the darkest of the four pail bodies, for that
+/// colour's own recorded reason: the fill is the only part of an open pail
+/// that carries meaning, and against this body it is the brightest thing on
+/// the item by 104/255 of luma. That inversion is also the whole difference
+/// from the ketchup line at play zoom — a pale fill in a dark pail, against
+/// three dark fills in pale ones — which is `item_bottle_bbq`'s
+/// separate-by-VALUE argument applied to the bulk stages.
+pub fn item_meal_pail(p: &Palette) -> VoxModel {
+    pail(p, "tote_grey", "meal_flour", "brass")
+}
+
 /// A food-grade pail with a bail handle, holding a visible body of liquid.
 ///
 /// Order matters throughout, and the carve is the whole trick: the walls are
 /// drawn solid, hollowed out, and only then is the rim ring laid on and the
 /// product surface dropped into the cavity. Drawing the rim as a disc (what
 /// this used to do) caps the pail; filling the cavity to the rim hides that
-/// it is a cavity at all. `contents` must name a `liquid`-class colour — the
-/// gloss is the point, see the callers above.
+/// it is a cavity at all.
+///
+/// **`contents` names the class as well as the colour, and both readings are
+/// deliberate.** The three ketchup stages above pass a `liquid`-class colour
+/// because the gloss is what says a pail of paste is wet (see their own
+/// note); [`item_meal_pail`] passes a `matte` one because crushed mustard is
+/// a flour and the same gloss on it would read as sauce in a bin
+/// (`palette.ron`'s `bulk_pale` records that rule). So this helper does not
+/// police the class — `a_pail_s_contents_take_the_class_of_the_substance`
+/// does, per caller, which is the only place the answer can be right.
 fn pail(p: &Palette, body: &str, contents: &str, handle: &str) -> VoxModel {
     let mut m = item_volume();
     // Walls and base, then hollowed from the inside so the pail has a real
@@ -1970,7 +2169,7 @@ fn pail(p: &Palette, body: &str, contents: &str, handle: &str) -> VoxModel {
 /// label — the colour the whole chain has been working toward since the
 /// tomato.
 pub fn item_bottle(p: &Palette) -> VoxModel {
-    bottle(p, "ketchup_red", "label_cream")
+    bottle(p, "ketchup_red", "label_cream", "cap_white")
 }
 
 /// The BBQ bottle (the second-sauce epic, `docs/BBQ_SAUCE_PLAN.md`).
@@ -1990,18 +2189,50 @@ pub fn item_bottle(p: &Palette) -> VoxModel {
 /// same label in different light, while kraft against the dark body is
 /// plainly a different livery.
 pub fn item_bottle_bbq(p: &Palette) -> VoxModel {
-    bottle(p, "bbq_brown", "label_kraft")
+    bottle(p, "bbq_brown", "label_kraft", "cap_white")
+}
+
+/// The mustard bottle (the third-sauce epic).
+///
+/// The same vessel a third time — one bottler makes all three sauces, so
+/// this has to read as that bottle carrying something else — and the
+/// distinction is `item_bottle_bbq`'s VALUE argument run the other way.
+/// `bbq_brown` went far darker than `ketchup_red`; `mustard_gold` goes far
+/// brighter, and is in fact the brightest body colour in the game. The three
+/// bottles therefore spread across the whole value range (mustard sits
+/// 135.6/255 of luma above ketchup and 148.6 above BBQ, with ketchup between
+/// them) rather than crowding one end of it, which is what keeps three of
+/// them tellable apart at the ~16px an item renders at on a belt.
+///
+/// **Its cap and label band are dark, and that is not a livery choice.** A
+/// bright body under `cap_white` loses the top of its silhouette:
+/// `mustard_gold` is 5.0/255 from `glass_pale`, the neck every bottle
+/// shares, so body, neck and cap would be one pale column. `label_mustard`
+/// does both jobs instead — see [`bottle`], which grew the `cap` parameter
+/// for this, and `palette.ron`, which records why one dark colour serves as
+/// band and cap where the other two bottles use two.
+pub fn item_bottle_mustard(p: &Palette) -> VoxModel {
+    bottle(p, "mustard_gold", "label_mustard", "label_mustard")
 }
 
 /// A bottle of finished sauce: a body of `contents` with a `label` band
-/// around it, a narrower glass neck and a cap.
+/// around it, a narrower glass neck and a `cap`.
 ///
-/// Parameterised over its two colours rather than copied per sauce (the
+/// Parameterised over its colours rather than copied per sauce (the
 /// second-sauce epic): the shoulder ellipsoid has to be the same colour as
 /// the body and sit exactly where the cylinder ends or the neck reads as a
 /// jar's, which is precisely the relationship a second hand-written
 /// generator drifts on.
-fn bottle(p: &Palette, contents: &str, label: &str) -> VoxModel {
+///
+/// **The cap became a parameter for the third sauce**, and not for variety's
+/// sake. Both earlier bottles are a dark body under a bright `cap_white`, so
+/// the cap tops the silhouette by contrast; `mustard_gold` is the brightest
+/// body in the game and sits 5.0/255 of luma from `glass_pale`, the neck
+/// every bottle shares, so on a mustard bottle a white cap would merge body,
+/// neck and cap into one pale column and the bottle would lose its top. A
+/// dark cap restores the same contrast the other way up — which is
+/// `box_of_sauce`'s reversed print direction applied to a bottle.
+fn bottle(p: &Palette, contents: &str, label: &str, cap: &str) -> VoxModel {
     let mut m = item_volume();
     m.cylinder_z((8, 8), 4.0, (0, 7), p.idx(contents));
     m.cylinder_z((8, 8), 4.2, (2, 4), p.idx(label));
@@ -2009,7 +2240,7 @@ fn bottle(p: &Palette, contents: &str, label: &str) -> VoxModel {
     // cap sits straight on the body and the silhouette reads as a jar.
     m.ellipsoid((8, 8, 8), (4.0, 4.0, 2.0), p.idx(contents));
     m.cylinder_z((8, 8), 1.6, (10, 12), p.idx("glass_pale"));
-    m.cylinder_z((8, 8), 2.4, (13, 14), p.idx("cap_white"));
+    m.cylinder_z((8, 8), 2.4, (13, 14), p.idx(cap));
     m
 }
 
@@ -2043,6 +2274,36 @@ pub fn item_box(p: &Palette) -> VoxModel {
 /// the lid rather than a bigger label — see [`box_of_sauce`].
 pub fn item_box_bbq(p: &Palette) -> VoxModel {
     box_of_sauce(p, "label_bbq")
+}
+
+/// The mustard case (the third-sauce epic), and the one asset in this set
+/// whose distinction is NOT carried by value.
+///
+/// The carton does not change: the project owner's ruling on the BBQ case
+/// holds for every sauce, so all three cases are `cardboard` with print on
+/// them. That leaves print, and print has only two ends of the value range —
+/// ketchup took the bright one (`label_cream`, 83/255 over the carton) and
+/// BBQ the dark one (`label_bbq`, 88 under it). A third ink can only land
+/// between them, where it would read as an unprinted box, so mustard's ink
+/// is the sauce's own `mustard_gold` and the channel carrying it is CHROMA:
+/// 27.6/255 of luma from `label_cream` but 55.8 of CIELAB dC, against the
+/// 4.0 same-carton dC noise floor DECISIONS.md's 2026-09-20 record measured.
+///
+/// **That record found chroma the weaker channel, and it was right about the
+/// pair it tested.** A dark red ink on warm kraft barely moves chroma at
+/// all, so cream-versus-BBQ had to be a value difference. But the channel it
+/// left empty is exactly the one a saturated yellow fills, so the three
+/// cases end up separated bright / dark / SATURATED and no case needs a
+/// third value. The PR that added this measured all three pairs on one
+/// frame; mustard-versus-ketchup is the weakest of the three in luma and the
+/// strongest in chroma, and that trade-off is stated rather than hidden.
+///
+/// Bright ink rather than dark for one more reason: a dark mark on kraft can
+/// read as a hole (§2b point 21), and the BBQ case gets away with it only
+/// because a `cardboard_dark` tape seam already crosses the same face. A
+/// bright saturated patch on kraft can only read as print.
+pub fn item_box_mustard(p: &Palette) -> VoxModel {
+    box_of_sauce(p, "mustard_gold")
 }
 
 /// A taped shipping case, printed on both of its long faces and on its lid.
@@ -7234,29 +7495,42 @@ mod tests {
         );
     }
 
-    /// The two sauces' finished goods are the SAME OBJECTS in a different
-    /// livery (`docs/BBQ_SAUCE_PLAN.md`): one bottler makes both bottles and
-    /// one packer makes both cases, so a BBQ bottle that had gained a
-    /// different silhouette would be claiming a machine the factory has not
-    /// got. Occupied voxels identical, colours not — which is also what
-    /// keeps `bottle`/`box_of_sauce` honest as shared helpers, since a
-    /// second hand-written generator is free to drift and this would say so.
+    /// Every sauce's finished goods are the SAME OBJECTS in a different
+    /// livery (`docs/BBQ_SAUCE_PLAN.md`, and the mustard epic after it): one
+    /// bottler makes all three bottles and one packer makes all three cases,
+    /// so a bottle that had gained a different silhouette would be claiming
+    /// a machine the factory has not got. Occupied voxels identical, colours
+    /// not — which is also what keeps `bottle`/`box_of_sauce` honest as
+    /// shared helpers, since a second hand-written generator is free to
+    /// drift and this would say so.
+    ///
+    /// Written over a list of sauces rather than a pair, because the third
+    /// one arriving is when a helper stops being shared: `bottle` grew a
+    /// `cap` parameter for mustard, and this is what says the parameter
+    /// changed colours and nothing else.
     #[test]
-    fn a_bbq_item_is_its_ketchup_counterpart_in_another_livery() {
+    fn every_sauce_s_item_is_its_ketchup_counterpart_in_another_livery() {
         let p = palette();
-        for (ketchup, bbq, what) in [
-            (item_bottle(&p), item_bottle_bbq(&p), "bottle"),
-            (item_box(&p), item_box_bbq(&p), "case"),
+        for (ketchup, other, sauce, what) in [
+            (item_bottle(&p), item_bottle_bbq(&p), "BBQ", "bottle"),
+            (item_box(&p), item_box_bbq(&p), "BBQ", "case"),
+            (
+                item_bottle(&p),
+                item_bottle_mustard(&p),
+                "mustard",
+                "bottle",
+            ),
+            (item_box(&p), item_box_mustard(&p), "mustard", "case"),
         ] {
             let shape: Vec<_> = ketchup.voxels.keys().collect();
-            let bbq_shape: Vec<_> = bbq.voxels.keys().collect();
+            let other_shape: Vec<_> = other.voxels.keys().collect();
             assert_eq!(
-                shape, bbq_shape,
-                "the BBQ {what} has the ketchup {what}'s silhouette"
+                shape, other_shape,
+                "the {sauce} {what} has the ketchup {what}'s silhouette"
             );
             assert_ne!(
-                ketchup.voxels, bbq.voxels,
-                "the BBQ {what} is not the ketchup {what} repainted in the same colours"
+                ketchup.voxels, other.voxels,
+                "the {sauce} {what} is not the ketchup {what} repainted in the same colours"
             );
         }
     }
@@ -7265,7 +7539,9 @@ mod tests {
     /// (the project owner's call, `docs/BBQ_SAUCE_PLAN.md`). A box is the
     /// smallest thing on a belt, and a second sauce shipping in a differently
     /// coloured carton would read as different packaging rather than as
-    /// different contents.
+    /// different contents. It held for the third sauce too, which is why the
+    /// mustard case's whole distinction is a saturated ink and not a
+    /// yellow box.
     ///
     /// Stated as "exactly the print voxels differ" rather than by counting
     /// them: the print is panels of a known size, and the interesting
@@ -7278,40 +7554,42 @@ mod tests {
     /// and "the box may differ" are one voxel apart — the tape seam at
     /// `x = 7..8` and the carton's edges have to stay out of it.
     #[test]
-    fn only_a_case_s_print_tells_the_two_sauces_apart() {
+    fn only_a_case_s_print_tells_the_sauces_apart() {
         let p = palette();
         let ketchup = item_box(&p);
-        let bbq = item_box_bbq(&p);
-        let differing: Vec<_> = ketchup
-            .voxels
-            .iter()
-            .filter(|(at, colour)| bbq.voxels.get(at) != Some(colour))
-            .map(|(at, _)| *at)
-            .collect();
-        assert!(
-            !differing.is_empty(),
-            "the two cases are not the same model"
-        );
-        for (x, y, z) in differing {
-            // Both print regions leave the carton's side edges and the tape
-            // seam between the panels in plain kraft.
+        for (sauce, case) in [("BBQ", item_box_bbq(&p)), ("mustard", item_box_mustard(&p))] {
+            let differing: Vec<_> = ketchup
+                .voxels
+                .iter()
+                .filter(|(at, colour)| case.voxels.get(at) != Some(colour))
+                .map(|(at, _)| *at)
+                .collect();
             assert!(
-                (3..=6).contains(&x) || (9..=12).contains(&x),
-                "only a print panel differs, at ({x}, {y}, {z})"
+                !differing.is_empty(),
+                "the {sauce} case is not the ketchup case"
             );
-            let on_a_labelled_face = (y == 2 || y == 13) && (4..=8).contains(&z);
-            let on_the_lid = z == 10 && (4..=11).contains(&y);
-            assert!(
-                on_a_labelled_face || on_the_lid,
-                "only a labelled face or the lid differs, at ({x}, {y}, {z})"
-            );
+            for (x, y, z) in differing {
+                // Every print region leaves the carton's side edges and the
+                // tape seam between the panels in plain kraft.
+                assert!(
+                    (3..=6).contains(&x) || (9..=12).contains(&x),
+                    "only a print panel differs on the {sauce} case, at ({x}, {y}, {z})"
+                );
+                let on_a_labelled_face = (y == 2 || y == 13) && (4..=8).contains(&z);
+                let on_the_lid = z == 10 && (4..=11).contains(&y);
+                assert!(
+                    on_a_labelled_face || on_the_lid,
+                    "only a labelled face or the lid differs on the {sauce} case, \
+                     at ({x}, {y}, {z})"
+                );
+            }
         }
     }
 
     /// **The lid print paints voxels that were already carton** (issue #40):
     /// a case's SILHOUETTE is unchanged by it, which is what lets a fix for
     /// "the two cases look alike" ship without touching the packer, the
-    /// belt or `a_bbq_item_is_its_ketchup_counterpart_in_another_livery`.
+    /// belt or `every_sauce_s_item_is_its_ketchup_counterpart_in_another_livery`.
     /// Asserted against the lid's own geometry rather than a stored fixture,
     /// since the claim is about the top FACE being solid, not about a count.
     #[test]
@@ -7348,9 +7626,300 @@ mod tests {
         (span(|at| at.0), span(|at| at.1), span(|at| at.2))
     }
 
+    /// **The mustard branch adds two outlines the row did not have.** Eight
+    /// raws now stand on the market plate at 64px, where a thing is
+    /// identified by the proportion of its parts (§2b point 31), and the two
+    /// new ones are deliberately the row's broad-and-low pair: the seed tote
+    /// is the widest thing on the plate and the turmeric hand the shortest
+    /// and the sparsest. Everything the BBQ three were measured against
+    /// still holds — this test is the same claim extended to eight, and it
+    /// exists because adding a raw is exactly when a row stops working.
+    ///
+    /// Stated as orderings and distinct outlines rather than as fixed
+    /// numbers: the claim is that no two raws share a silhouette, not that
+    /// any one of them keeps a particular size for ever.
+    #[test]
+    fn the_mustard_raws_add_two_outlines_the_row_did_not_have() {
+        let p = palette();
+        let row = [
+            (
+                "tomato",
+                extent(&item_tomato(&p)),
+                item_tomato(&p).voxels.len(),
+            ),
+            (
+                "sugar",
+                extent(&item_sugar(&p)),
+                item_sugar(&p).voxels.len(),
+            ),
+            (
+                "vinegar",
+                extent(&item_vinegar(&p)),
+                item_vinegar(&p).voxels.len(),
+            ),
+            (
+                "spice",
+                extent(&item_spice_mix(&p)),
+                item_spice_mix(&p).voxels.len(),
+            ),
+            (
+                "molasses",
+                extent(&item_molasses(&p)),
+                item_molasses(&p).voxels.len(),
+            ),
+            (
+                "smoke",
+                extent(&item_liquid_smoke(&p)),
+                item_liquid_smoke(&p).voxels.len(),
+            ),
+            (
+                "seed",
+                extent(&item_mustard_seed(&p)),
+                item_mustard_seed(&p).voxels.len(),
+            ),
+            (
+                "turmeric",
+                extent(&item_turmeric(&p)),
+                item_turmeric(&p).voxels.len(),
+            ),
+        ];
+        for (i, a) in row.iter().enumerate() {
+            for b in &row[i + 1..] {
+                assert_ne!(
+                    (a.1.0, a.1.2),
+                    (b.1.0, b.1.2),
+                    "{} and {} would draw the same outline ({:?} vs {:?})",
+                    a.0,
+                    b.0,
+                    a.1,
+                    b.1
+                );
+            }
+        }
+        let widest = row.iter().max_by_key(|r| r.1.0).unwrap();
+        assert_eq!(
+            widest.0, "seed",
+            "the open seed tote is the widest thing in the row, not {} ({:?})",
+            widest.0, widest.1
+        );
+        let shortest = row.iter().min_by_key(|r| r.1.2).unwrap();
+        assert_eq!(
+            shortest.0, "turmeric",
+            "the turmeric hand lies lowest in the row, not {} ({:?})",
+            shortest.0, shortest.1
+        );
+        let sparsest = row.iter().min_by_key(|r| r.2).unwrap();
+        assert_eq!(
+            sparsest.0, "turmeric",
+            "and it is the least of the eight by volume, not {} ({} voxels)",
+            sparsest.0, sparsest.2
+        );
+        // The two new ones are the row's only two broader than they are
+        // tall — an open tote and a root lying down, against six standing
+        // containers. This is what the plate reads first.
+        for (name, (w, _, h), _) in row {
+            let broad = w > h;
+            assert_eq!(
+                broad,
+                name == "seed" || name == "turmeric",
+                "{name} is {w} wide by {h} tall, and only the mustard raws lie down"
+            );
+        }
+    }
+
+    /// **The seed tote is genuinely OPEN and its heap genuinely breaks the
+    /// rim** — the two things that make it read as bulk seed rather than as
+    /// a painted steel block, and the two a later edit is most likely to
+    /// undo (the old spice tin's note records the same pair of mistakes).
+    /// The rim is a ring: fill the centre of it and the tote is lidded, and
+    /// at 64px a lidded tote is a crate.
+    #[test]
+    fn the_seed_tote_is_open_and_its_heap_stands_proud_of_the_rim() {
+        let p = palette();
+        let tote = item_mustard_seed(&p);
+        let seed = p.idx("seed_tan");
+        let rim = p.idx("steel_light");
+        let top_of = |c: u8| {
+            tote.voxels
+                .iter()
+                .filter(|e| *e.1 == c)
+                .map(|e| e.0.2)
+                .max()
+                .expect("the tote has both a rim and a fill")
+        };
+        assert!(
+            top_of(seed) > top_of(rim),
+            "the heap ({}) stands above the rim ({})",
+            top_of(seed),
+            top_of(rim)
+        );
+        assert_eq!(
+            tote.voxels.get(&(8, 8, top_of(rim))),
+            Some(&seed),
+            "the rim is a RING with the heap coming through it, not a lid"
+        );
+        // And the vessel's brightest pixel is its outline (UI_UX.md §4), not
+        // the substance in it.
+        let luma = |c: u8| {
+            let [r, g, b] = p.rgb_of(c).expect("a palette colour");
+            0.2126 * r as f64 + 0.7152 * g as f64 + 0.0722 * b as f64
+        };
+        assert!(
+            luma(rim) > luma(seed),
+            "the steel rim is brighter than the seed inside it"
+        );
+    }
+
+    /// **Turmeric is dark with a bright CUT, and the cut has to reach both
+    /// cameras.** Its colour is the reason it is in the recipe, but a root
+    /// painted mostly that colour reads as a hazard marking, so the bright
+    /// flesh is a small accent — placed on the topmost face (both cameras
+    /// look down, §2b points 11 and 35) and on the +X end the game's fixed
+    /// isometric sees (point 11). Asserted as placement and proportion
+    /// rather than voxel counts: those are the two properties
+    /// `palette.ron`'s `turmeric_orange` entry spends its argument on.
+    #[test]
+    fn the_turmeric_root_shows_its_cut_faces_to_both_cameras() {
+        let p = palette();
+        let root = item_turmeric(&p);
+        let flesh = p.idx("turmeric_orange");
+        let skin = p.idx("cardboard_dark");
+        let top = root.voxels.keys().map(|at| at.2).max().unwrap();
+        let far = root.voxels.keys().map(|at| at.0).max().unwrap();
+        assert!(
+            root.voxels
+                .iter()
+                .filter(|e| e.0.2 == top)
+                .all(|e| *e.1 == flesh),
+            "the highest face of the root is all cut flesh"
+        );
+        assert!(
+            root.voxels.iter().any(|e| e.0.0 == far && *e.1 == flesh),
+            "and a second cut faces +X, where the game camera is"
+        );
+        let cut = root.voxels.values().filter(|&&c| c == flesh).count();
+        let body = root.voxels.values().filter(|&&c| c == skin).count();
+        assert!(
+            cut * 4 < body,
+            "the cut stays an accent on a dark root ({cut} flesh against {body} skin)"
+        );
+    }
+
+    /// **A pail's contents take the class of the SUBSTANCE, not of the
+    /// pail.** The `liquid` class is a gloss that says "this is wet", so the
+    /// three ketchup stages have it and `item_meal_pail` must not: milled
+    /// mustard seed is a flour, and `palette.ron`'s `bulk_pale` already
+    /// records that the same gloss on a dry solid reads as sauce in a tank
+    /// rather than product in a bin.
+    ///
+    /// This is the test [`pail`] defers to. Its contract used to be
+    /// "`contents` is a `liquid` colour", which a fourth caller made wrong;
+    /// the check belongs per-caller, where each one can be right for its own
+    /// reason. It also pins the answer to whether the mustard chain needs a
+    /// `liquid_*` entry of its own — it does not, because the only bulk
+    /// mustard that ever rides a belt is this flour, and the fluids are
+    /// tinted `fluid_pale` in a pipe like every other one.
+    #[test]
+    fn a_pail_s_contents_take_the_class_of_the_substance() {
+        let p = palette();
+        for (name, model, colour, class) in [
+            (
+                "item_paste_pail",
+                item_paste_pail(&p),
+                "liquid_paste",
+                MaterialClass::Liquid,
+            ),
+            (
+                "item_mix_pail",
+                item_mix_pail(&p),
+                "liquid_mix",
+                MaterialClass::Liquid,
+            ),
+            (
+                "item_ketchup_pail",
+                item_ketchup_pail(&p),
+                "liquid_ketchup",
+                MaterialClass::Liquid,
+            ),
+            (
+                "item_meal_pail",
+                item_meal_pail(&p),
+                "meal_flour",
+                MaterialClass::Matte,
+            ),
+        ] {
+            let contents = p.idx(colour);
+            assert_eq!(
+                p.class_of(contents),
+                class,
+                "{colour} is the `{}` class, because of what it IS",
+                class.name()
+            );
+            assert!(
+                model.voxels.values().any(|&c| c == contents),
+                "{name} shows `{colour}` and nothing else stands in for it"
+            );
+            // And the surface keeps its headspace, so whichever class it is
+            // is visible from above rather than reading as a lid.
+            let fill = model
+                .voxels
+                .iter()
+                .filter(|e| *e.1 == contents)
+                .map(|e| e.0.2)
+                .max()
+                .unwrap();
+            assert!(
+                fill < 9 && !model.filled(8, 8, 9),
+                "{name}'s mouth is open above a fill line at {fill}"
+            );
+        }
+    }
+
+    /// **A bottle's cap has to contrast with the neck it stands on**, and
+    /// which direction that contrast runs depends on the sauce. Every bottle
+    /// shares a `glass_pale` neck, so `cap_white` tops a dark ketchup or BBQ
+    /// bottle and would vanish into a `mustard_gold` one — 5.0/255 of luma
+    /// from the neck — which is why [`bottle`] takes a `cap` at all.
+    ///
+    /// Asserted as the PROPERTY rather than as the colours: a cap that is
+    /// 26/255 from both the neck and the body tops the silhouette whatever
+    /// paint a fourth sauce picks, and a fourth sauce copying `cap_white`
+    /// onto a pale body fails here instead of in a screenshot.
+    #[test]
+    fn a_bottle_s_cap_contrasts_with_the_neck_and_the_body() {
+        let p = palette();
+        let luma = |c: u8| {
+            let [r, g, b] = p.rgb_of(c).expect("a palette colour");
+            0.2126 * r as f64 + 0.7152 * g as f64 + 0.0722 * b as f64
+        };
+        for (name, model) in [
+            ("item_bottle", item_bottle(&p)),
+            ("item_bottle_bbq", item_bottle_bbq(&p)),
+            ("item_bottle_mustard", item_bottle_mustard(&p)),
+        ] {
+            let at = |z| *model.voxels.get(&(8, 8, z)).expect("the bottle's axis");
+            let (body, neck, cap) = (at(0), at(11), at(14));
+            assert_eq!(
+                neck,
+                p.idx("glass_pale"),
+                "{name} has the shared glass neck"
+            );
+            assert!(
+                (luma(cap) - luma(neck)).abs() >= 26.0,
+                "{name}'s cap is {:.1} from its neck, and 26 is what reads",
+                (luma(cap) - luma(neck)).abs()
+            );
+            assert!(
+                (luma(cap) - luma(body)).abs() >= 26.0,
+                "{name}'s cap is {:.1} from its body",
+                (luma(cap) - luma(body)).abs()
+            );
+        }
+    }
+
     /// **The BBQ branch's three raws part company by OUTLINE before they
     /// part by colour** (issue #67). They are bought from one plate that
-    /// shows all six ingredients at 64px side by side, where a thing is
+    /// shows every unlocked ingredient at 64px side by side, where a thing is
     /// identified by the proportion of its parts (UI_UX §2b point 31) — so
     /// the bag is the shortest of the three, the jar is narrow and tall,
     /// and the drum is the widest. This is the claim two rework passes were

@@ -388,5 +388,96 @@
         // and the powder the bright one, the same way round as sugar's
         // white crystal on pale kraft.
         (name: "sack_spice",      rgb: "#6E2F13", class: "matte"),
+
+        // --- MUSTARD, the game's third sauce, and the yellow trap it walks
+        // into (the mustard epic's art ticket) ---
+        // `mustard_gold` is what is IN a `bottled_mustard` bottle and what
+        // is printed on a case of them, and choosing it is most of that
+        // ticket — because the obvious answer is already spoken for. This
+        // game paints signage, meters and machine trim `hazard_yellow`
+        // #D9A21B, and a sauce wearing the signage colour is a bug, not a
+        // livery. So this is the same family moved two ways at once: **28.8
+        // of 255 of luma ABOVE it** (192.7 against 163.9, Rec.709 over
+        // 0..255 — past the ~26 "reads reliably" anchor DECISIONS.md's
+        // 2026-09-20 record sets) and 13.7 degrees round toward green
+        // (CIELAB h 95.8 against 82.1), which leaves hazard yellow the
+        // darker, oranger, flatter of the two wherever they share a frame.
+        // It clears `vinegar_amber` #AD6B23, the other near neighbour, by
+        // 76.9, and the two sauces it shares a belt with by 135.6
+        // (`ketchup_red`) and 148.6 (`bbq_brown`): three bottles that part
+        // company by VALUE, which is the channel that survives half a tile
+        // — `bbq_brown`'s note above read the other way up, since mustard is
+        // the BRIGHT one.
+        // 192.7 rather than brighter is a deliberate compromise with
+        // `label_cream` #E5DCC5, 27.6 above it, because this same colour is
+        // the print on a mustard CASE and ketchup's print is that cream. A
+        // brighter mustard clears signage by more and the ketchup case by
+        // less; a value near the midpoint is the only one that clears 26
+        // from BOTH, and a case is the smallest thing on the belt.
+        // Matte, for exactly `bbq_brown`'s reason: mustard is only ever seen
+        // through a bottle's glass or printed on a carton. Nothing carries
+        // it in an open pail — what the crusher fills a pail with is
+        // `meal_flour` below, a dry solid — and the fluid standing in a pipe
+        // stays `fluid_pale` tinted by `main.gd`'s FLUID_TINTS, whose
+        // mustard entry should be derived from this number (0.863, 0.776,
+        // 0.235), the rule `vinegar_amber` states.
+        (name: "mustard_gold",    rgb: "#DCC63C", class: "matte"),
+        // The mustard bottle's label band AND its cap, where ketchup's are
+        // `label_cream`/`cap_white` and BBQ's are `label_kraft`/`cap_white`.
+        // A DARK accent on a bright bottle — the other two bottles' contrast
+        // direction reversed, the trick `label_bbq` plays on a case. It is
+        // not decoration: `glass_pale`, the neck every bottle shares, is
+        // 5.0 from `mustard_gold`, so a pale cap on a gold body would merge
+        // with it and the top of the silhouette would go. One entry doing
+        // both jobs because a band and a cap in one dark ink is what a jar
+        // of Dijon looks like, and because ketchup's band and cap are 4.0
+        // apart already — that pair is one accent too.
+        (name: "label_mustard",   rgb: "#3B3A14", class: "matte"),
+
+        // --- the mustard branch's two RAW ingredients ---
+        // `seed_tan` is bulk mustard seed heaped in its tote: a dull
+        // olive-gold, deliberately the DARKEST member of the mustard family
+        // and 61.8 under the sauce it becomes, so the line reads dull seed
+        // -> pale meal -> bright sauce end to end, the way
+        // `liquid_paste`/`liquid_mix`/`liquid_ketchup` read darkening the
+        // other. The number was set against the STEEL it sits in (31.0
+        // under `steel`, 72.2 under the `steel_light` rim), not against the
+        // market row: a heap inside a bright tote is the adjacency that can
+        // swallow it.
+        (name: "seed_tan",        rgb: "#A18234", class: "matte"),
+        // Crushed mustard meal, standing in the pail the crusher fills, and
+        // the one palette judgement this ticket had to make: it is MATTE.
+        // The three `liquid_*` entries above exist because a pail of tomato
+        // paste is a wet surface; de-hulled crushed mustard is a flour, and
+        // `bulk_pale` already writes the rule down — the liquid class's
+        // gloss on a dry solid "would read as sauce in a tank rather than
+        // product in a bin". So the mustard chain adds no `liquid_*` entry
+        // at all, and `item_meal_pail` is the first pail in the game whose
+        // contents are matte.
+        // Pale, for the readout `tote_grey` argues for: the fill is the only
+        // thing in a pail's opening that carries meaning, and at 104.0 over
+        // that body it is by a long way the brightest thing in it. 29.4 over
+        // `mustard_gold` as well, because a meal pail and a case of finished
+        // bottles can stand on the same floor, and "half made" has to look
+        // different from "finished".
+        (name: "meal_flour",      rgb: "#EDDFAA", class: "matte"),
+        // Turmeric's cut flesh — the one raw whose own colour IS the reason
+        // it is in the recipe, and the one number here that **cannot** clear
+        // 26 of luma from both of its neighbours, because no number can:
+        // `vinegar_amber` sits at 115.8 and `hazard_yellow` at 163.9, an
+        // interval 48.1 wide, and the market row stands all the raws side by
+        // side. So this one is separated by HUE and by AREA instead, and the
+        // numbers are stated rather than implied: 20.8 of luma under hazard
+        // yellow with 17.5 degrees of CIELAB hue between them (h 64.6
+        // against 82.1) for dE76 22.6, and 27.3 over vinegar amber for dE76
+        // 23.0 — both about twice the 11.6 dE76 the dock's clipboard icons
+        // are read by. Chroma magnitude is NOT the channel here (dC 2.1 from
+        // hazard yellow; `item_liquid_smoke`'s note records where it was).
+        // The area half matters as much: the rhizome's mass is
+        // `cardboard_dark` skin, 42.6 under this, so the orange is an ACCENT
+        // on a dark object, where signage is a flat plate on a machine. A
+        // root painted mostly this colour is the one that would read as a
+        // hazard marking.
+        (name: "turmeric_orange", rgb: "#E3821A", class: "matte"),
     ],
 )
