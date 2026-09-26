@@ -1435,6 +1435,16 @@ Four consequences worth knowing before changing it:
   `Control` draws every cell (`_draw_places_grid`), because the hover is
   rebuilt every frame. The words above it still name the items and the
   count, so the grid is the second reading of a fact, not the only one (§7).
+- **A floating "!" marks a placement that needs the player** (2026-09-26).
+  It is a glowing amber bar over a dot (`warning_marker`, square about the
+  tile's midline, so it reads the same from every side and never turns). It
+  hangs a tile above what it marks and bobs off the simulation tick (§6a).
+  A dock with every place taken raises one first, off the snapshot's
+  `at_capacity`. The marker says WHERE to look. The hover says what is wrong
+  (`⚠ FULL`, the places grid), and the lamp still pulses, so it is never the
+  only signal. It is built to be reused: `_set_world_warning(key, anchor,
+  on)` in `main.gd` takes any placement, so a rack out of bays or a stuck
+  machine raises the same marker under a key of its own.
 
 ## 8. What this doc does not cover
 

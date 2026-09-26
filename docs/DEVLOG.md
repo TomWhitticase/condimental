@@ -245,6 +245,15 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-26 — A floating "!" over a full dock
+
+A dock with all 32 places taken now shows a glowing amber "!" hanging over
+it, so a floor with a stuck dock shows where the problem is before you hover
+anything. The marker is a general one. Racks and machines can raise it under
+their own key, through the same `_set_world_warning` call, when they need
+the player's attention. Together with the hover's places grid, this closes
+the owner's report on the docks.
+
 ### 2026-09-26 — a spend that starves the next payday asks first
 
 Money leaves a CONDIMENTAL factory three ways, and wages are the only
