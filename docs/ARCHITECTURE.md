@@ -385,8 +385,9 @@ reads as "this save predates a change" rather than as a parse failure. No
 release has ever written a save, so this is as cheap as a bump will ever
 be; the next one is not, and a migration is still not the answer — see
 `docs/DECISIONS.md`. Version 3 (2026-09-26) is per-dock stock; version 4
-(2026-09-26) is the production ledger's pay cycle — `save.rs`'s module doc
-records why each could not be a default.
+(2026-09-26) is the production ledger's pay cycle, plus the understaffed
+marker's `refusal_hold` — `save.rs`'s module doc records why each could not
+be a default.
 
 **Interop training-data gap:** `SimBridge` appears in no training corpus.
 Keep worked, runnable examples of every call pattern in-repo (the headless

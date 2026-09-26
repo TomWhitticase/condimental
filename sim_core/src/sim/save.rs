@@ -143,7 +143,9 @@
 //! [`SavedItemStats`]'s `produced_this_cycle` / `produced_last_cycle`. No
 //! ring can re-derive them — a payday falls mid-bucket — and a v3 file has
 //! no honest value for them: zero this cycle would read as a factory that
-//! made nothing since payday. Rejected like every older version.
+//! made nothing since payday. Rejected like every older version. The same
+//! unreleased bump carries [`SavedMachine::refusal_hold`] (the understaffed
+//! marker's refusal window).
 //!
 //! A field addition from here on is a bump, for real this time. Adding one
 //! `#[serde(default)]` and leaving the version alone would mean a v2 file
@@ -479,9 +481,10 @@ pub struct SavedMachine {
     #[serde(default)]
     pub refused_by: Option<String>,
     /// `Machine::refusal_hold`, for the same reason as `refused_by`: it
-    /// decides `MachineLoadEntry::understaffed`. `#[serde(default)]` — a save
-    /// without it loads with no recent refusal, so the red person returns on
-    /// the machine's next refusal rather than straight away.
+    /// decides `MachineLoadEntry::understaffed`. Part of `schema_version` 4
+    /// (see the module doc); `#[serde(default)]` like every other field of
+    /// this record, so a machine record written without it reads as no
+    /// recent refusal.
     #[serde(default)]
     pub refusal_hold: u32,
     /// Which of its kind's recipes this machine is running
