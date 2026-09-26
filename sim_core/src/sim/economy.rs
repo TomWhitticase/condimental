@@ -99,7 +99,7 @@
 //! needs the offer's terms at command time and nothing else in `World`
 //! holds a registry after construction.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::contracts::{Contract, ContractRegistry};
 use super::inventory::Inventory;
@@ -666,6 +666,17 @@ impl Economy {
             .mix
             .iter()
             .all(|(item, qty)| stock.has_at_least(item, *qty))
+    }
+
+    /// Every item some active contract's mix names — what a dock has to
+    /// hold for its logistics crew to have work (`World::tick` step 6). A
+    /// dock holding only goods nobody has ordered asks for nobody, so it
+    /// never holds a head another dock's orders need.
+    pub fn wanted(&self) -> BTreeSet<ItemId> {
+        self.contracts
+            .iter()
+            .flat_map(|active| active.contract.mix.iter().map(|(item, _)| item.clone()))
+            .collect()
     }
 
     /// Advances every active contract's own cadence clock and settles any

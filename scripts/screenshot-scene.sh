@@ -229,10 +229,12 @@
 #
 # Pass --split-docks to build the SPLIT-DOCK LINE (test_layouts.gd's
 # `build_split_dock_line`): the BBQ branch, with its two docks, run on until
-# ONE of them is backing up and the other is not. Each dock holds its own
-# stock, so a BBQ dock with every place taken leaves the ketchup dock taking
-# boxes perfectly happily, and only the jammed dock's lamp pulses. The
-# clipboard still reads ⚠ FULL, correctly: a dock in the world is full.
+# ONE of them is backing up and the other is not. The fixture's mixed exit
+# feeds BBQ onto the ketchup dock too, and that dock fills with the BBQ the
+# orders cannot absorb, while the branch's own dock keeps taking boxes. Each
+# dock holds its own stock, so only the jammed dock's lamp pulses and only
+# it raises the "!". The clipboard still reads ⚠ FULL, correctly: a dock in
+# the world is full.
 # Honours --dock-lamp dark for the other half of the pulse, as --full-dock
 # does, and refuses to claim the fixture if the docks never disagreed.
 #

@@ -3652,10 +3652,14 @@ impl World {
     ///    already moved this tick, so nothing crosses two tiles in one tick
     ///    — a splitter included, since an item handed *onto* it this tick
     ///    lands at the start of its segment and is not at the end yet.
-    /// 6. **Docks crew up.** A dock holding something claims its crew like
-    ///    a machine; refused, it reads `understaffed` and cannot ship this
-    ///    tick (it keeps taking boxes until its places are full, then the
-    ///    belt backs up; nothing is lost). A mothballed dock claims nobody.
+    /// 6. **Docks crew up.** A dock holding something an active contract
+    ///    orders ([`Economy::wanted`]) claims its crew like a machine;
+    ///    refused, it reads `understaffed` and cannot ship this tick (it
+    ///    keeps taking boxes until its places are full, then the belt backs
+    ///    up; nothing is lost). A dock holding only goods nobody has ordered
+    ///    asks for nobody and is not `understaffed` — it has no work — so a
+    ///    clog of an unordered product never holds a head another dock's
+    ///    orders need. A mothballed dock claims nobody.
     /// 7. **Contracts settle**, one cadence check per active contract,
     ///    against what stands on every dock that can ship this tick — not
     ///    mothballed, not refused its crew in step 6 — lent to the economy
@@ -3896,6 +3900,7 @@ impl World {
 
         // 6. Docks crew up.
         let docks = std::mem::take(&mut self.topology.docks);
+        let wanted = self.economy.wanted();
         for &dock in &docks {
             let kind = self.placement_of(dock).kind;
             let flag_flipped = {
@@ -3911,14 +3916,23 @@ impl World {
                     // held goods stay held; `try_absorb_belt_into_dock`
                     // refuses, so the belt behind it backs up.
                     body.set_understaffed(false);
-                } else if !body.is_empty() {
-                    // Nothing held, nobody asked for, and the verdict of the
-                    // last loaded tick stands; otherwise the crew is claimed
-                    // every tick the dock is holding stock for a contract.
+                } else if body.contents().any(|(item, _)| wanted.contains(item)) {
+                    // Crew is claimed every tick the dock holds something a
+                    // contract orders: that stock is the crew's work.
+                    // Claiming for ANY stock let a dock clogged with a
+                    // product nobody orders hold the only head forever and
+                    // starve the dock whose stock was ordered (PR #182
+                    // review).
                     let crew: &[(String, u32)] =
                         self.machines.get(&kind).map_or(&[], |k| k.staff.as_slice());
                     body.set_understaffed(self.staff.claim(crew).is_err());
+                } else if !body.is_empty() {
+                    // Holding only what nobody ordered: no work, nobody
+                    // asked for, no shortage to report — as for a mothball.
+                    body.set_understaffed(false);
                 }
+                // An empty dock asks for nobody either, and the verdict of
+                // the last tick it held work stands.
                 body.understaffed() != was
             };
             if flag_flipped {

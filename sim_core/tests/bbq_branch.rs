@@ -482,3 +482,77 @@ fn a_ketchup_payment_is_paid_from_the_ketchup_dock_alone() {
         "the BBQ dock paid nothing: no contract on the board asks for BBQ"
     );
 }
+
+/// Two docks on the one logistics head a new game starts with, one of them
+/// holding BBQ nobody has ordered. A dock claims its crew only while it
+/// holds something an active contract orders (`World::tick` step 6), so the
+/// head goes to the ketchup dock whose stock is wanted. Claiming it on every
+/// tick a dock held anything gave the first dock in topology order the head
+/// forever: the BBQ dock's unordered stock kept the ketchup dock
+/// `understaffed` on every tick and its cases unsold (PR #182 review).
+#[test]
+fn two_docks_share_the_starting_logistics_crew() {
+    let mut world = bbq_branch(recipes(), BUDGET);
+    stock_up(&mut world);
+    let logistics = |world: &World| {
+        world
+            .staff_snapshot()
+            .categories
+            .into_iter()
+            .find(|category| category.id == "logistics")
+            .expect("data/staff.ron has a logistics category")
+    };
+    assert_eq!(
+        logistics(&world).headcount,
+        1,
+        "the fixture runs on the starting logistics crew of one: {:?}",
+        logistics(&world)
+    );
+    for _ in 0..100_000u32 {
+        supply(&mut world);
+        world.tick();
+        if dock_at(&world, KETCHUP_DOCK).used >= 4 && !dock_at(&world, BBQ_DOCK).contents.is_empty()
+        {
+            break;
+        }
+    }
+    assert!(
+        dock_at(&world, KETCHUP_DOCK).used >= 4 && !dock_at(&world, BBQ_DOCK).contents.is_empty(),
+        "both lines must reach their docks on the starting crew: ketchup {:?}, bbq {:?} at tick {}",
+        dock_at(&world, KETCHUP_DOCK),
+        dock_at(&world, BBQ_DOCK),
+        world.current_tick()
+    );
+    world.issue_command(PlayerCommand::SignContract {
+        id: "corner_shop".to_string(),
+    });
+    assert!(world.economy().contract("corner_shop").is_some());
+
+    let signed_on = world.current_tick();
+
+    let mut ketchup_short = 0u32;
+    for _ in 0..20_000u32 {
+        supply(&mut world);
+        world.tick();
+        if dock_at(&world, KETCHUP_DOCK).understaffed {
+            ketchup_short += 1;
+        }
+    }
+    assert_eq!(
+        ketchup_short, 0,
+        "the BBQ dock's unordered stock must not hold the one logistics head"
+    );
+    let ketchup = dock_at(&world, KETCHUP_DOCK);
+    assert!(
+        ketchup.last_paid_tick.is_some_and(|tick| tick > signed_on),
+        "the ketchup dock ships on the shared head: {ketchup:?}"
+    );
+    assert!(
+        !dock_at(&world, BBQ_DOCK).contents.is_empty(),
+        "and the BBQ dock still holds what nobody ordered"
+    );
+    assert!(
+        !dock_at(&world, BBQ_DOCK).understaffed,
+        "asking for nobody, so it reports no shortage"
+    );
+}

@@ -863,18 +863,24 @@ static func build_bbq_running_line(sim) -> void:
 ## is not, which is the whole subject of the per-dock lamp change.
 ##
 ## Built on `build_bbq_running_line` because it is the only fixture with two
-## docks, each holding a different product. BBQ is the sauce
-## that caps: the branch out-produces the orders on the board while the
-## shipped line is throttled to its share of the vat (the same asymmetry
-## `tests/bbq_branch.rs` relies on).
+## docks. BBQ is the sauce that caps: the branch out-produces the orders on
+## the board while the shipped line is throttled to its share of the vat (the
+## same asymmetry `tests/bbq_branch.rs` relies on).
 ##
-## The wait is long, and has to be: the board keeps BUYING. Ketchup sits
-## around 2 on its dock for the whole run because its contracts settle as
-## fast as the line ships, and BBQ climbs only ~3 per 4 000 ticks against
-## what the two BBQ orders take — so the ceiling arrives somewhere past tick
-## 70 000. That gap is the point of the shot rather than an inconvenience:
-## one product outruns its demand, the other does not, and only one dock
-## should say so.
+## WHICH dock fills is this fixture's, not the Rust one's. `build_mixed_exit`
+## splits the branch's BBQ onto the ketchup line's exit, so the ketchup dock
+## at (26, 0) takes both sauces while the branch's own dock at (31, -3) takes
+## BBQ alone. Contracts draw on the docks in topology order and (31, -3)
+## comes first, so the BBQ orders keep that dock nearly empty and the BBQ
+## they cannot absorb piles up on (26, 0). At tick 71 733 that dock holds 3
+## ketchup and 29 BBQ, every place taken, and (31, -3) holds 2. The Rust
+## fixture has no mixed exit, which is why its full dock is the BBQ one.
+##
+## The wait is long, and has to be: the board keeps BUYING, and BBQ outruns
+## what the two BBQ orders take only slowly, so the ceiling arrives somewhere
+## past tick 70 000. That gap is the point of the shot rather than an
+## inconvenience: stock outruns its demand on one dock and not the other,
+## and only one dock should say so.
 ##
 ## Returns with the docks disagreeing, or having run out of patience — the
 ## caller checks `split_dock_lamps_found` rather than trusting the frame.

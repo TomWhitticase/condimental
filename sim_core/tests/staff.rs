@@ -558,11 +558,18 @@ fn firing_the_logistics_head_makes_the_dock_hold_and_loses_nothing() {
     assert!(dock.shipped_total > 0, "the line reaches the dock by now");
     assert!(!dock.understaffed);
 
+    // A dock claims its crew only while it holds something a contract
+    // orders (`World::tick` step 6), so the wait below stays inside the
+    // starter order's life: it would strike out at tick 3000 with the
+    // dock's head gone, and a dock holding what nobody ordered asks for
+    // nobody.
+    assert!(world.economy().contract("corner_shop").is_some());
+
     let delivered_before = world.economy().lifetime_deliveries;
     fire(&mut world, "logistics");
     assert_eq!(headcount(&world, "logistics"), 0);
 
-    for _ in 0..1_200 {
+    for _ in 0..400 {
         common::supply(&mut world);
         world.tick();
     }

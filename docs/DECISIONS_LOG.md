@@ -27,7 +27,10 @@ See [WORKFLOW.md](WORKFLOW.md).
   not refused crew in step 6), in topology order; a contract is satisfied
   if the SUM covers its mix and consumes each line dock by dock in that
   order. `ContractEvent::Paid { id, from }` names the docks it drew on, and
-  every such dock records `last_paid_tick` (saved) — the coins rise over
+  every such dock records `last_paid_tick` (saved). Step 6 claims a dock's
+  logistics crew only while it holds something an active contract orders
+  (`Economy::wanted`); a dock of unordered goods asks for nobody, so it never
+  holds a head another dock's orders need. The coins rise over
   those docks only, and an arrival pops only the dock whose
   `shipped_total` rose. `EconomySnapshot::delivery_stock` /
   `delivery_capacity` / `delivery_full` are the docks summed / total places

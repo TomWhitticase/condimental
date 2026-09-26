@@ -60,8 +60,8 @@ matches what code comments and data files cite.
     with no valve. Now the valve is removing the dock, whose stock is
     destroyed by the ordinary `Remove` rule. The clog is also local: the
     other docks keep taking.
-  - 32 is pinned as a relationship (1.6x the largest single mix) by
-    `tests/dock.rs`.
+  - 32 is pinned as a relationship (at least 1.5x the largest single mix;
+    1.6x today) by `tests/dock.rs`.
   - Settlement walks the docks able to ship this tick, in topology order,
     so the split is deterministic and nothing is credited twice. A dock
     that is mothballed or was refused crew does not ship, which keeps
@@ -69,6 +69,22 @@ matches what code comments and data files cite.
   - `Paid` names the contributors. `last_paid_tick` is persisted rather
     than derived, because a save/load lockstep test showed a reloaded world
     diverging in its snapshot.
+  - **A dock claims its logistics crew only while it holds something an
+    active contract orders** (`Economy::wanted`, `World::tick` step 6). The
+    first cut claimed on every tick a dock held anything. The review of
+    PR #182 measured what that did to the BBQ branch on the starting crew of
+    one logistics head: the first dock in topology order held the head on
+    every tick, and the other dock read `understaffed` for 40 000 of
+    40 000 ticks with 32 cases unsold. On the old pool a dock asked for
+    crew only on the tick a box passed through, so two docks shared one
+    head without anyone designing it. Claiming only for ordered stock gives
+    the work to the dock whose stock is wanted, keeps a clog of an unordered
+    product from holding a head, and makes "the clog is local" true for
+    crew as well as for places. A dock holding only unordered goods asks
+    for nobody and does not read `understaffed`. Two docks both holding
+    ordered stock need two heads, which is what the establishment
+    (`required`) has always said they need. `tests/bbq_branch.rs`'s
+    `two_docks_share_the_starting_logistics_crew` pins it.
 
   **Cost.** The save schema goes 2 → 3, and v2 saves are rejected per
   `save.rs`'s no-migration policy (pre-alpha). The clipboard's per-item

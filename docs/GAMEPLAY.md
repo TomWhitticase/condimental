@@ -260,7 +260,10 @@ implementation history (epics, tickets, balancing passes) behind each one.
   line from those docks in topology order — the first dock gives what it
   has, then the next — so goods are never credited to two contracts at once
   and the split is deterministic. A dock that is mothballed or was refused
-  its logistics crew this tick is not drawn from. Every dock a payout took
+  its logistics crew this tick is not drawn from. A dock asks for its
+  logistics crew only while it holds something an active contract orders:
+  shipping is that crew's work, so a dock of goods nobody has ordered asks
+  for nobody and never keeps a head from the dock whose stock is wanted. Every dock a payout took
   from is the dock that paid: the coins rise over it and no other.
 - **A dock has a ceiling: `DOCK_CAPACITY` (32) places, one case each,
   whatever the case holds.** Production nobody has ordered is a real loss
@@ -275,8 +278,8 @@ implementation history (epics, tickets, balancing passes) behind each one.
   docks keep taking. (The 2026-09-16 shared pool was capped per item for
   exactly that deadlock, since it had no valve.) The number is a
   *relationship*, not a literal, like `STARTING_MONEY`: it must comfortably
-  exceed the largest single mix quantity on the board (20, so 32 is 1.6x
-  it), and `tests/dock.rs` pins that against `contracts.ron` rather than
+  exceed the largest single mix quantity on the board (at least 1.5x it —
+  20 today, so 32 is 1.6x), and `tests/dock.rs` pins that against `contracts.ron` rather than
   the figure.
 - **The contract board is sized in a line's worth of demand**: a starter
   tier one kept-fed line can just serve, plus a growth tier of larger,
@@ -377,8 +380,9 @@ implementation history (epics, tickets, balancing passes) behind each one.
   economy::Economy`**, owned by `World`, not ECS entities — no per-entity
   multiplicity to justify that. `money` is a single fixed-point (`types::Money`,
   `I48F16`) counter (ARCHITECTURE.md §3.9). `Economy` holds a `Vec<ActiveContract>`
-  (each with its own cadence clock) plus the one shared `delivery_buffer`;
-  several contracts are a `Vec` inside one struct, not a reason for ECS
+  (each with its own cadence clock); what waits to be sold stands on the docks
+  themselves (`dock::Dock`), lent to `Economy::tick` as a `DeliveryStock`
+  on the tick it settles. Several contracts are a `Vec` inside one struct, not a reason for ECS
   machinery. Exposed to Godot as `SimBridge::economy_snapshot_json`.
 
 ---

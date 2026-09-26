@@ -106,7 +106,7 @@ pub const DOCK_KIND: &str = "dock";
 /// the docks hold its whole mix at once, so ONE dock must comfortably hold
 /// the largest single order on the board, or a factory with one dock could
 /// never fill it. `export_pallet` asks for 20 boxes in one window, and 32 is
-/// 1.6x that: the pallet order can be building up while a small order
+/// 1.6x that (the test asks for at least 1.5x): the pallet order can be building up while a small order
 /// skims a few off the same dock. `tests/dock.rs` pins the relationship
 /// against `data/contracts.ron` rather than the literal, so adding a bigger
 /// order fails a test instead of quietly breaking that contract.
