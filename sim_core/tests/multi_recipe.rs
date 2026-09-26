@@ -2,11 +2,14 @@
 //! kind may run several recipes, and a recipe may draw several fluids.**
 //!
 //! Both are content capabilities, so both are proven against a test fixture
-//! rather than against `data/recipes.ron` — the shipped file keeps its five
-//! entries and its single-recipe kinds until the sauce itself lands, and
-//! `fluid_production.rs` and `fluids.rs` go on asserting that the ketchup
-//! line behaves exactly as it did. What this file adds is the three things
-//! only the whole `World` can show:
+//! rather than against `data/recipes.ron` — a capability has to hold for
+//! content nobody has written yet, and `fluid_production.rs` and `fluids.rs`
+//! go on asserting that the ketchup line behaves exactly as it did. The
+//! shipped file has since used both capabilities twice over (BBQ's four
+//! entries, then mustard's five), and the one test here that does read it is
+//! `the_shipped_file_is_two_lines_and_every_recipe_in_it_starts_from_the_market`
+//! below. What this file adds is the three things only the whole `World` can
+//! show:
 //!
 //! - a recipe with **two** fluid inputs draws them from two *distinct*
 //!   networks, matched **by fluid id** rather than by position — here from
@@ -35,6 +38,8 @@
 //! both in the one layout.
 
 mod common;
+
+use std::collections::BTreeSet;
 
 use sim_core::sim::machines::MachineRegistry;
 use sim_core::sim::save::{SaveData, SavedBody};
@@ -619,6 +624,99 @@ fn two_independent_production_lines_construct_fine() {
     assert!(
         world.query_tile((0, 0)).is_some(),
         "the second line is real content — its mixer buys and places like any other"
+    );
+}
+
+/// And with mustard, that shape is the shipped content rather than a
+/// fixture (issue #42's case stops being hypothetical): `data/recipes.ron`
+/// holds a tomato line and a mustard line that share no solid id at all and
+/// meet only at the vinegar the market sells them both.
+///
+/// The reachability half is `validate_chain`'s own fixpoint, run here as an
+/// assertion instead of a panic so that a failure names the recipe: every
+/// entry in the file must be startable from ids the market prices, working
+/// forwards. A new sauce whose input id is a typo shows up as a stage that
+/// never becomes reachable.
+#[test]
+fn the_shipped_file_is_two_lines_and_every_recipe_in_it_starts_from_the_market() {
+    let recipes = RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
+        .expect("bundled data/recipes.ron must parse");
+    let consumes = |recipe: &sim_core::sim::Recipe| -> Vec<String> {
+        recipe
+            .inputs
+            .iter()
+            .chain(recipe.fluid_inputs.iter())
+            .map(|(id, _)| id.clone())
+            .collect()
+    };
+    let produces = |recipe: &sim_core::sim::Recipe| -> Vec<String> {
+        recipe
+            .outputs
+            .iter()
+            .chain(recipe.fluid_outputs.iter())
+            .map(|(id, _)| id.clone())
+            .collect()
+    };
+
+    // What the market sells is what no recipe makes — the same definition
+    // `World::raw_items` and `data/ingredients.ron` use.
+    let made: BTreeSet<String> = recipes.ordered().iter().flat_map(produces).collect();
+    let mut obtainable: BTreeSet<String> = recipes
+        .ordered()
+        .iter()
+        .flat_map(consumes)
+        .filter(|id| !made.contains(id))
+        .collect();
+    let mut started: BTreeSet<String> = BTreeSet::new();
+    loop {
+        let before = started.len();
+        for recipe in recipes.ordered() {
+            if started.contains(&recipe.id) {
+                continue;
+            }
+            if consumes(recipe).iter().all(|id| obtainable.contains(id)) {
+                started.insert(recipe.id.clone());
+                obtainable.extend(produces(recipe));
+            }
+        }
+        if started.len() == before {
+            break;
+        }
+    }
+    for recipe in recipes.ordered() {
+        assert!(
+            started.contains(&recipe.id),
+            "'{}' can never be started: nothing the market sells reaches it",
+            recipe.id
+        );
+    }
+
+    // The independence claim, as ids rather than as prose. Mustard's five
+    // stages eat mustard's own products, mustard's own two raws, and the one
+    // fluid the ketchup mixer also drinks — and nothing else. An id from the
+    // tomato side appearing here would make this a branch, which is the BBQ
+    // tier's job and not this one's.
+    let mustard_side: BTreeSet<String> = recipes
+        .ordered()
+        .iter()
+        .filter(|recipe| recipe.id.contains("mustard"))
+        .flat_map(consumes)
+        .collect();
+    let expected: BTreeSet<String> = [
+        "mustard_seed",
+        "turmeric",
+        "vinegar",
+        "mustard_mash",
+        "mustard_mix",
+        "mustard",
+        "bottled_mustard",
+    ]
+    .iter()
+    .map(|id| (*id).to_string())
+    .collect();
+    assert_eq!(
+        mustard_side, expected,
+        "the mustard line is fed from the market and from itself, and shares only vinegar"
     );
 }
 

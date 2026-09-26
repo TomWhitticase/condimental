@@ -502,7 +502,7 @@ func _build_topic_page(id: String) -> void:
 	title.text = _fill(String(topic.get("title", "")))
 	body.add_child(title)
 
-	var tagline := String(topic.get("tagline", ""))
+	var tagline := _text(topic.get("tagline"))
 	if tagline != "":
 		_paragraph(body, "TopicTagline", _fill(tagline), ACCENT)
 
@@ -743,7 +743,7 @@ func _build_node(entry: Dictionary, rect: Rect2) -> Button:
 	column.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	button.add_child(column)
 
-	var icon := _icon(id, String(entry.get("icon", "")), _px(NODE_ICON), locked)
+	var icon := _icon(id, _text(entry.get("icon")), _px(NODE_ICON), locked)
 	icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	column.add_child(icon)
 
@@ -790,6 +790,36 @@ func _gate_progress(gate) -> String:
 # The sauce page
 # --------------------------------------------------------------------------
 
+## A wire field that may arrive as JSON `null`, read as the string it is or
+## as "".
+##
+## Every `Option<String>` in `cookbook_json` — `tagline`, `blurb`, `icon`,
+## `machine_icon` — serialises as `null`, NOT as an absent key.
+## So `Dictionary.get("tagline", "")` hands back that null and never the
+## default, and `String(null)` in Godot 4 is not a lenient conversion: it is
+## `Invalid call. Nonexistent 'String' constructor.`, a hard script error
+## that abandons the function it is in.
+##
+## That is worse than it sounds, and it is how this was found. The error
+## aborted `_build_sauce_page` at its FIRST line — the title row — so the
+## page came out as a breadcrumb, two horizontal rules with nothing between
+## them, and a BACK button. Godot then carried on and exited 0. `Boxed BBQ`,
+## whose root recipe authors a blurb and no tagline, has had exactly that
+## page since the book shipped; every headless check passed, because the
+## crash is in the panel and the wire it reads is perfect. Mustard is the
+## second sauce to author no tagline, which is what put it in a frame.
+##
+## Used at every one of those call sites rather than only the two that bit:
+## a content file is allowed to leave any of them out (`data/recipes.ron`
+## says so in as many words), so a call site that does not expect null is a
+## page waiting to go blank. The nullable fields that are NOT strings —
+## `pay_low`/`pay_high`, `gate`, `from_sauce` as a link rather than as text
+## — already test for null explicitly, because each of them changes what the
+## page SAYS and not merely which characters it prints.
+static func _text(value) -> String:
+	return value if value is String else ""
+
+
 func _build_sauce_page(id: String) -> void:
 	var entry := _sauce(id)
 	if entry.is_empty():
@@ -801,7 +831,7 @@ func _build_sauce_page(id: String) -> void:
 		_build_locked_page(entry)
 		return
 
-	_title_row(id, String(entry.get("icon", "")), _name(id), String(entry.get("tagline", "")))
+	_title_row(id, _text(entry.get("icon")), _name(id), _text(entry.get("tagline")))
 
 	var inputs := _section("INGREDIENTS", "per case, all the way back to raw")
 	for line in entry.get("inputs", []):
@@ -822,7 +852,7 @@ func _build_sauce_page(id: String) -> void:
 			names.append(String(name))
 		_paragraph(board, "CookbookContracts", "  ·  ".join(names), INK)
 
-	var blurb := String(entry.get("blurb", ""))
+	var blurb := _text(entry.get("blurb"))
 	if blurb != "":
 		_paragraph(body, "CookbookBlurb", blurb, INK_DIM)
 
@@ -832,7 +862,7 @@ func _build_sauce_page(id: String) -> void:
 ## would make the silhouette decorative.
 func _build_locked_page(entry: Dictionary) -> void:
 	var id := String(entry.get("id", ""))
-	_title_row(id, String(entry.get("icon", "")), "🔒 LOCKED", "", true)
+	_title_row(id, _text(entry.get("icon")), "🔒 LOCKED", "", true)
 
 	var gate = entry.get("gate")
 	var block := _section("THE GATE", "")
@@ -878,7 +908,7 @@ func _input_row(line: Dictionary) -> Button:
 	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	button.add_child(row)
 
-	row.add_child(_icon(id, String(line.get("icon", "")), _px(ROW_ICON), locked))
+	row.add_child(_icon(id, _text(line.get("icon")), _px(ROW_ICON), locked))
 
 	var count := Label.new()
 	count.name = "Count"
@@ -963,7 +993,7 @@ func _step_plate(step: Dictionary) -> Button:
 	column.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	button.add_child(column)
 
-	var icon := _icon(machine, String(step.get("machine_icon", "")), _px(STEP_ICON), false)
+	var icon := _icon(machine, _text(step.get("machine_icon")), _px(STEP_ICON), false)
 	icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	column.add_child(icon)
 
@@ -1037,7 +1067,7 @@ func _build_machine_page(id: String) -> void:
 		_paragraph(body, "CookbookMissing", "no page for %s" % id, INK_DIM)
 		return
 
-	_title_row(id, String(entry.get("icon", "")), _name(id), "")
+	_title_row(id, _text(entry.get("icon")), _name(id), "")
 
 	var facts := _section("THE MACHINE", "")
 	_line(facts, "Footprint", "%d × %d tiles" % [int(entry.get("width_tiles", 1)), int(entry.get("height_tiles", 1))])
@@ -1058,7 +1088,7 @@ func _build_machine_page(id: String) -> void:
 			names.append(_name(String(recipe)))
 		_paragraph(recipes, "CookbookMakes", "  ·  ".join(names), INK)
 
-	var blurb := String(entry.get("blurb", ""))
+	var blurb := _text(entry.get("blurb"))
 	if blurb != "":
 		_paragraph(body, "CookbookBlurb", blurb, INK_DIM)
 
@@ -1070,7 +1100,7 @@ func _build_ingredient_page(id: String) -> void:
 		return
 
 	var locked := bool(entry.get("locked", false))
-	_title_row(id, String(entry.get("icon", "")), _name(id), "", locked)
+	_title_row(id, _text(entry.get("icon")), _name(id), "", locked)
 
 	var facts := _section("THE INGREDIENT", "")
 	_line(facts, "Price", "%.0f each" % float(entry.get("price", 0.0)))
@@ -1084,7 +1114,7 @@ func _build_ingredient_page(id: String) -> void:
 		for sauce_id in used_in:
 			uses.add_child(_sauce_link(String(sauce_id)))
 
-	var blurb := String(entry.get("blurb", ""))
+	var blurb := _text(entry.get("blurb"))
 	if blurb != "":
 		_paragraph(body, "CookbookBlurb", blurb, INK_DIM)
 
@@ -1110,7 +1140,7 @@ func _sauce_link(id: String) -> Button:
 	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	button.add_child(row)
 
-	row.add_child(_icon(id, String(entry.get("icon", "")), _px(ROW_ICON), locked))
+	row.add_child(_icon(id, _text(entry.get("icon")), _px(ROW_ICON), locked))
 
 	var name_label := Label.new()
 	name_label.name = "Name"

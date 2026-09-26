@@ -607,14 +607,29 @@ fn a_machine_tap_and_a_machine_producer_are_reported_on_the_tapped_tile() {
     assert_eq!(mix.producers.len(), 1);
     assert_eq!(mix.producers[0].segment_index, 0);
 
-    // A machine with no fluid in its recipe connects to nothing, however
-    // close the pipe is.
+    // A machine with no fluid in ANY of its recipes connects to nothing,
+    // however close the pipe is. That example used to be the crusher; since
+    // mustard is milled wet (`mustard_mash` draws vinegar and pipes mash out)
+    // the crusher both taps and produces, so the machine that touches no
+    // fluid at all is the packer, which only ever puts bottles into boxes.
     let mut world = funded();
-    build(&mut world, "crusher", (0, 0), East);
+    build(&mut world, "packer", (0, 0), East);
     build(&mut world, "pipe", (1, 0), East);
     build(&mut world, "pipe", (0, 1), East);
     assert_eq!(pipe(&world, (1, 0)), pipe_links(vec![]));
     assert_eq!(pipe(&world, (0, 1)), pipe_links(vec![]));
+
+    // And the crusher, which does connect now, reports both ports the same
+    // way the mixer does: the touching tile is a tap, the tile off the
+    // outlet face is a producer. This is the whole visible consequence of
+    // moving mustard's vinegar upstream — a kind that was solids-only grew a
+    // pipe port.
+    let mut world = funded();
+    build(&mut world, "crusher", (0, 0), East);
+    build(&mut world, "pipe", (1, 0), East);
+    build(&mut world, "pipe", (0, 1), East);
+    assert_eq!(pipe(&world, (1, 0)), pipe_links(vec![conn(West, Machine)]));
+    assert_eq!(pipe(&world, (0, 1)), pipe_links(vec![conn(South, Machine)]));
 }
 
 /// The 2x2 vat, tapped on a far corner of its footprint and facing south,
@@ -910,7 +925,7 @@ fn world_layout_json_matches_the_documented_shape_byte_for_byte() {
         ",",
         r#"{"kind":"fluid_tank","tile":[0,1],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[0,1]],"recipe":null,"crewed":true}"#,
         ",",
-        r#"{"kind":"pipe","tile":[1,1],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[1,1]],"recipe":null,"crewed":true,"links":{"connections":[{"to":"east","kind":"pipe"},{"to":"west","kind":"tank"}]}}"#,
+        r#"{"kind":"pipe","tile":[1,1],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[1,1]],"recipe":null,"crewed":true,"links":{"connections":[{"to":"east","kind":"pipe"},{"to":"south","kind":"machine"},{"to":"west","kind":"tank"}]}}"#,
         ",",
         r#"{"kind":"pipe","tile":[2,1],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[2,1]],"recipe":null,"crewed":true,"links":{"connections":[{"to":"west","kind":"pipe"}]}}"#,
         "]",

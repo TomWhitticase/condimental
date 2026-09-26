@@ -272,10 +272,23 @@ fn returning_a_machine_to_service_resumes_the_craft_it_was_part_way_through() {
         }
         _ => None,
     };
+    // Bounded on purpose: this used to be a bare `while`, so a vat that never
+    // starts a craft at all hung the whole `cargo test -p sim_core` run
+    // instead of failing it. A vat crafts every 240-600 ticks when it is fed,
+    // so 5_000 is a decade of slack; running out of them is a real defect
+    // upstream of this test and says so.
+    let mut budget = 5_000;
     while !matches!(progress(&world), Some((elapsed, required)) if elapsed > 10 && elapsed + 10 < required)
     {
         common::supply(&mut world);
         world.tick();
+        budget -= 1;
+        assert!(
+            budget > 0,
+            "the cooking vat never got a craft under way, so there is no \
+             paused batch to test: stall is {:?}",
+            stall_of(&world, vat)
+        );
     }
     let (elapsed_at_switch_off, required_ticks) = progress(&world).unwrap();
 

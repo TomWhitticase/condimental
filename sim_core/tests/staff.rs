@@ -490,10 +490,21 @@ fn hiring_the_head_back_resumes_the_paused_craft_with_no_lost_progress() {
     let mut world = running_line(1_500);
     let vat = tile_of(&world, "cooking_vat");
     // Make sure the vat is genuinely mid-craft when it loses its crew.
+    // Bounded: a bare `while` here hung the whole `cargo test -p sim_core`
+    // run when the vat never crafted at all, instead of failing and naming
+    // the reason. A fed vat crafts every 240-600 ticks, so 5_000 is slack.
+    let mut budget = 5_000;
     while !matches!(progress_of(&world, vat), Some((elapsed, required)) if elapsed > 10 && elapsed + 10 < required)
     {
         common::supply(&mut world);
         world.tick();
+        budget -= 1;
+        assert!(
+            budget > 0,
+            "the cooking vat never got a craft under way, so there is no \
+             paused craft to test: stall is {:?}",
+            stall_of(&world, vat)
+        );
     }
     let (elapsed_at_fire, required) = progress_of(&world, vat).unwrap();
 

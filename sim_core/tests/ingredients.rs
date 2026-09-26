@@ -305,6 +305,8 @@ fn every_raw_ingredient_the_shipped_chain_needs_is_priced_and_buyable() {
             "spice_mix".to_string(),
             "molasses".to_string(),
             "liquid_smoke".to_string(),
+            "mustard_seed".to_string(),
+            "turmeric".to_string(),
         ]
     );
 
@@ -340,7 +342,9 @@ fn every_raw_ingredient_the_shipped_chain_needs_is_priced_and_buyable() {
             "tomato".to_string(),
             "sugar".to_string(),
             "spice_mix".to_string(),
-            "molasses".to_string()
+            "molasses".to_string(),
+            "mustard_seed".to_string(),
+            "turmeric".to_string()
         ]
     );
 }
