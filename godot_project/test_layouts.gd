@@ -914,8 +914,9 @@ static func split_dock_lamps_found(sim) -> bool:
 ## The mistake is the one the branch was actually built with. A fluid tank
 ## discharges only into the pipe it FACES, so the liquid-smoke tank at
 ## (16, -1), turned off its run, stops pinning that run to liquid smoke; the
-## run narrows to two fluids instead of one, the simulation refuses to guess
-## which, and every machine on it waits forever. Nothing about it used to be
+## run narrows to every fluid a cooking vat could be cooking instead of one,
+## the simulation refuses to guess which, and every machine on it waits
+## forever. Nothing about it used to be
 ## visible: an unnamed run and a run merely waiting for its first fill are
 ## both empty pipe.
 ##
@@ -938,7 +939,10 @@ const STALLED_TANK := Vector2i(16, -1)
 const STALLED_RUN_TILE := Vector2i(18, -1)
 const STALLED_NEIGHBOUR_TILE := Vector2i(15, -3)
 ## What the dead run narrowed to, in the order the simulation reports it.
-const STALLED_RUN_CANDIDATES := ["ketchup_mix", "liquid_smoke"]
+## One entry per sauce the cooking vat on this run knows how to make, so a
+## third sauce is a third candidate — that growth is the point of the fault,
+## not a regression in it.
+const STALLED_RUN_CANDIDATES := ["ketchup_mix", "liquid_smoke", "mustard_mix"]
 
 
 ## Hires into every category the simulation reports short, until none is.

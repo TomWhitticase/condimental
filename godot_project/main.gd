@@ -11392,7 +11392,7 @@ var _config_stock_label: Label
 var _config_auto_button: Button
 var _config_auto_enabled := false
 var _config_picker_box: VBoxContainer
-var _config_picker_row: HBoxContainer
+var _config_picker_row: GridContainer
 var _config_picker_heading: Label
 var _config_picker_note: Label
 var _config_picker_slots: Array = [] # [{item, button, mark}]
@@ -11417,8 +11417,17 @@ var _config_mothballed := false
 ## the player never said.
 const HOPPER_PICKER_NOTE := "switching empties the hopper"
 ## The panel's fixed content width. Fixed rather than derived so the level
-## bar has a width to scale against on the frame the panel opens, and so the
-## picker row does not resize the whole panel when a third ingredient ships.
+## bar has a width to scale against on the frame the panel opens, and so a
+## long note does not decide how wide the panel is.
+##
+## It is a floor and not a ceiling: `get_combined_minimum_size` takes the
+## WIDEST child, so any row wider than this widens the whole panel. The
+## picker used to be that row — one `HBoxContainer` with a slot per raw
+## ingredient — and mustard's two raws (six slots, 567px) pushed the panel to
+## 603px, wider than the 572px of clear space left of the contracts
+## clipboard at 1280x720. There is no position for a panel that wide, so it
+## was drawn straight over the clipboard. `CONFIG_PICKER_COLUMNS` is why the
+## row cannot do that again.
 const CONFIG_PANEL_WIDTH := 260.0 * UI_SCALE
 ## Where the panel sits relative to the building's projected centre — up and
 ## to the right, so it stands BESIDE the thing it configures rather than on
@@ -11430,6 +11439,17 @@ const CONFIG_LEVEL_BAR_HEIGHT := 14.0 * UI_SCALE
 ## side brought "Liquid Smoke", which wrapped and spilled out of the slot
 ## over the note beneath it.
 const CONFIG_PICKER_SLOT_SIZE := Vector2(58.0, 78.0) * UI_SCALE
+## The gap between slots, in both axes now that they wrap.
+const CONFIG_PICKER_SLOT_GAP := 6.0 * UI_SCALE
+## How many slots fit across `CONFIG_PANEL_WIDTH` — the picker WRAPS at this
+## many rather than growing the panel sideways for ever (see the width's own
+## note). Derived rather than typed so a slot resize cannot leave a stale
+## number behind, and floored at one so a hypothetical slot wider than the
+## panel still lays out. Four at today's sizes: 4x87 + 3x9 = 375 of the
+## available 390.
+const CONFIG_PICKER_COLUMNS := maxi(
+	1, int((CONFIG_PANEL_WIDTH + CONFIG_PICKER_SLOT_GAP) / (CONFIG_PICKER_SLOT_SIZE.x + CONFIG_PICKER_SLOT_GAP))
+)
 const CONFIG_PICKER_ICON_SIZE := Vector2(30.0, 30.0) * UI_SCALE
 ## How small the slot's name may be shrunk to keep a word whole (issue #106,
 ## `_fit_config_picker_name`). Two steps under the name's own size: enough to
@@ -11604,9 +11624,11 @@ func _build_config_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void
 	_config_picker_heading.text = "CONTENTS"
 	_config_picker_box.add_child(_config_picker_heading)
 
-	_config_picker_row = HBoxContainer.new()
+	_config_picker_row = GridContainer.new()
 	_config_picker_row.name = "ConfigPickerRow"
-	_config_picker_row.add_theme_constant_override("separation", _ui_i(6))
+	_config_picker_row.columns = CONFIG_PICKER_COLUMNS
+	_config_picker_row.add_theme_constant_override("h_separation", int(CONFIG_PICKER_SLOT_GAP))
+	_config_picker_row.add_theme_constant_override("v_separation", int(CONFIG_PICKER_SLOT_GAP))
 	_config_picker_box.add_child(_config_picker_row)
 
 	_config_picker_note = Label.new()
