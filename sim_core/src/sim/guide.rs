@@ -117,8 +117,8 @@ pub enum GuideFact {
     OpenContractCount,
     /// How many of those are `starter: true`: active in a new game without
     /// being signed. Not "the ones a new player may sign", which is
-    /// [`GuideFact::OpenContractCount`] — only `corner_shop` is a starter,
-    /// while nine of the thirteen are ungated.
+    /// [`GuideFact::OpenContractCount`] — the shipped board has no starter,
+    /// while most of its orders are ungated.
     StarterContracts,
     /// `dock::DOCK_CAPACITY`: the places on one dock.
     DockCapacity,

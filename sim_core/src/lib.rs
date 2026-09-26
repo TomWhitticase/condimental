@@ -590,7 +590,7 @@ impl SimBridge {
     ///
     /// **The contract-board epic (2026-09-10) added to this, without
     /// removing anything.** `contracts` now lists only the ACTIVE contracts
-    /// — a new game has just the board's starter(s) — and each entry also
+    /// — a new game has none (the shipped board has no starter) — and each entry also
     /// carries `"satisfied": false` (would the window pay if it ended now),
     /// `"window_start_tick": 0` (the other end of the countdown),
     /// `"price": 40.0` (what it costs to sign, or re-sign after losing it),
@@ -602,8 +602,8 @@ impl SimBridge {
     /// "board": [
     ///   {"id": "corner_shop", "name": "Corner Shop Standing Order",
     ///    "mix": [["boxed_ketchup", 2]], "cadence_ticks": 1000,
-    ///    "payout": 50.0, "price": 40.0, "strikes": 3, "starter": true,
-    ///    "active": true, "affordable": true, "times_lost": 0},
+    ///    "payout": 50.0, "price": 40.0, "strikes": 3, "starter": false,
+    ///    "active": false, "affordable": true, "times_lost": 0},
     ///   ...
     /// ]
     /// ```

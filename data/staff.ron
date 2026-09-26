@@ -55,7 +55,7 @@
 //      bill. A first factory runs without a visit to the staff panel and
 //      the SECOND line is what makes the player hire.
 //      `sim_core/tests/staff.rs` pins that relationship, not the literals.
-//   2. The whole crew costs 14 per 1000 ticks against the starter contract's
+//   2. The whole crew costs 14 per 1000 ticks against the starter tier's
 //      payouts, so wages are felt from the first payday without being able
 //      to sink a line that is delivering. Checked against the numbers on
 //      2026-09-13: one kept-fed line makes about 4 boxes per 1000 ticks

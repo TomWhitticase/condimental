@@ -25,6 +25,44 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-26: **A new game starts with no contract.** (Owner's call;
+  supersedes call (1)'s "at least one offer must be a `starter`" in the
+  2026-09-10 contract-board record below.)
+
+  **What was asked.** The owner asked that a new game start with no
+  contracts already purchased. Until now `corner_shop` was the board's one
+  `starter: true` offer, active from tick 0 without being signed, and the
+  loader refused a board with no starter (`ContractLoadError::NoStarter`).
+
+  **Why the old rule stopped holding.** The 2026-09-10 rule existed so "a
+  new game is never a factory with nobody to sell to". But the world starts
+  empty and the player buys and places every tile, so the starter contract
+  ran for minutes before any machine existed and its countdown did nothing but
+  burn strikes — the player's first sight of the contract system was a
+  contract failing for a reason they could not act on. Signing the first
+  order is the same act as buying the first tile: a choice made from the
+  money counter once the player knows what they are building.
+
+  **What replaced the guard.** The "nobody to sell to" risk is now carried
+  by the UI, not the data: the empty clipboard reads "no contracts — press C
+  to sign one", so a fresh game names the key that fixes it. The board is
+  still cheap to enter — the cheapest signature is 40 against a starting
+  balance of 3000 — and an idle, unsigned opening only pays the starting
+  crew's wages (14 a period), which leaves around 200 periods of runway.
+  The `spend_preview` payday check (#183) assumes no contract income, so it
+  is unaffected.
+
+  **What did not change.** `starter` stays an optional field in schema 2, so
+  a future board may mark one again without a schema bump; the loader simply
+  no longer insists on one. Saves keep whatever contracts they hold. The
+  starter *tier* (the three cheap offers sized to one line) is unchanged —
+  it is a sizing rule, not an activation rule. Fixtures that need a running
+  order now sign one explicitly through the real `SignContract` command
+  (`sim::reference_chain`, `test_layouts.gd`'s `build_reference_line`) and
+  fail loudly if the signature does not take: the Rust fixture asserts the
+  contract is active, and the GDScript one prints `REFERENCE_FIXTURE_FAIL:`,
+  which `scripts/verify-core-loop.sh` treats as a failed script.
+
 - 2026-09-26: **CONDIMENTAL is GPL-3.0-only; the name and brand are
   reserved.** (Owner's call, from a release-readiness audit.)
 
@@ -5573,7 +5611,9 @@ matches what code comments and data files cite.
   recover contract cannot be lost in any sense that matters; a zero-strike
   contract can never be lost at all, which is v1's contract and v1 is gone
   on purpose), and at least one offer must be a `starter`, so a new game is
-  never a factory with nobody to sell to.
+  never a factory with nobody to sell to. *(Superseded on 2026-09-26 by "A new
+  game starts with no contract" above: no offer is a starter and the loader
+  no longer requires one.)*
 
   (2) **The economy owns the board and the active list is a subset of
   it.** `Economy` now holds a clone of the `ContractRegistry` beside

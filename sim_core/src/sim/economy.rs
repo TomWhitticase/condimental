@@ -72,7 +72,8 @@
 //! thing you buy, and a thing you can lose.**
 //!
 //! - `data/contracts.ron` is a **board of offers**. A new game activates
-//!   only the offers flagged `starter`; everything else is signed by the
+//!   only the offers flagged `starter` (the shipped board flags none, so a
+//!   new game runs no contract); everything else is signed by the
 //!   player through [`Economy::try_sign`] (the `SignContract` command) for
 //!   the offer's `price`, out of the same money counter everything else
 //!   debits. **One signature per offer**: signing an active contract is
@@ -1365,10 +1366,9 @@ mod tests {
     #[test]
     fn the_bundled_contracts_build_a_working_economy() {
         let econ = Economy::bundled();
-        assert_eq!(
-            econ.contracts.len(),
-            1,
-            "a new game starts with exactly one contract — the starter — and buys the rest"
+        assert!(
+            econ.contracts.is_empty(),
+            "a new game starts with no contract and signs every one it runs"
         );
         assert!(
             econ.board().len() > econ.contracts.len(),
