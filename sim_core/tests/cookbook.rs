@@ -437,6 +437,11 @@ fn every_fact_the_guide_can_ask_for_is_answered_from_the_content_files() {
     // A rebalance therefore moves the prose, which is the point.
     assert_eq!(fact("starting_money").number, 3000.0);
     assert_eq!(fact("starting_money").kind, "money");
+    // One dock's places, not the retired shared pool's per-item cap of 48.
+    assert_eq!(
+        fact("dock_capacity").number,
+        f64::from(sim_core::sim::DOCK_CAPACITY)
+    );
     assert_eq!(fact("sauce_count").number, book.sauces.len() as f64);
     assert_eq!(
         fact("raw_count").number,
