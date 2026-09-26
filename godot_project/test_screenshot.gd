@@ -2572,7 +2572,10 @@ func _frame_health() -> String:
 		return "the economy/production snapshot did not parse"
 	var active := 0
 	var lost := 0
-	for offer in economy.get("contracts", []):
+	# `board`, not `contracts`: only a board entry carries `active` and
+	# `times_lost`, so reading them off `contracts` counted 0 and 0 for every
+	# frame and the lost-contract refusal below could never fire.
+	for offer in economy.get("board", []):
 		if bool(offer.get("active", false)):
 			active += 1
 		lost += int(offer.get("times_lost", 0))
