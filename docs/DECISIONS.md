@@ -5228,11 +5228,13 @@ matches what code comments and data files cite.
      scan the `links` field was built to remove, and it would drift from
      the sim's rule the first time the rule changed. The would-be links of
      an unplaced tile are a fact the sim has not computed, and
-     ARCHITECTURE.md §4's planned `preview_command` is the mechanism for
-     asking it; when that lands the ghost reads its shape from the answer.
-     Until then the ghost's job is the tile, the facing (the arrow on the
-     straight tile) and whether the click will succeed, and the corner
-     appears the instant the tile is placed, since placing rebuilds. The
+     ARCHITECTURE.md §4's `preview_command` is the mechanism for asking it.
+     **It landed in PR #171**, and PR #172 has the ghost read its `valid`,
+     its `reason` and its `result_kind` — which is how a crossing's ghost
+     knows to draw as a crossing. It still does not return a would-be SHAPE,
+     so the build ghost is still the straight tile with its facing arrow,
+     and the corner still appears the instant the tile is placed. Shape is
+     the next thing to add to the answer, not a second scan in GDScript. The
      REMOVE ghost, which is over a placed tile, does show the real shape.
 
   6. **The retired names are deleted, not kept as aliases.** `belt`,
@@ -6701,10 +6703,15 @@ matches what code comments and data files cite.
   The affordance is printed on the slot's own owned line and in the menu
   footer.
 
-  (5) **Ghost validity is a pure Godot-side, footprint-aware check against
-  the occupancy map, and it is signalled by glyph and word as well as
-  colour** (UI_UX.md §7): **✔ PLACE** / **✗ BLOCKED** / **✗ NONE OWNED** in a
-  prompt beside the cursor, plus a tint and a matching panel border. The
+  (5) **Ghost validity is signalled by glyph and word as well as colour**
+  (UI_UX.md §7): **✔ PLACE** / **✗ BLOCKED** / **✗ NONE OWNED** in a
+  prompt beside the cursor, plus a tint and a matching panel border. It was
+  a pure Godot-side, footprint-aware check against the occupancy map when
+  this was written; since the belt/pipe crossing epic (PR #171, PR #172) the
+  ghost asks the sim's `preview_command` instead and prints the reason the
+  sim gives, because a crossing is valid on an occupied tile and a second
+  copy of that rule in GDScript would have had to be kept in step. The
+  signalling above is unchanged. The
   ghost's tint MULTIPLIES over the model's own vertex colours rather than
   replacing them — the first cut replaced them and a rendered frame showed a
   belt ghost as a featureless green rectangle, which says a tile is involved

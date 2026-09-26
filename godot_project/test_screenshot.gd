@@ -274,6 +274,20 @@ const FIXTURE_NAMES: PackedStringArray = [
 ## not failed on it.
 const HEALTHY_FIXTURES: PackedStringArray = ["bbq", "bottleneck", "full_dock"]
 
+## The fixtures that are meaningless standing still, and so are settled
+## whether or not `--populate` was asked for. A fixture whose subject is
+## something MOVING — product under a crossing's arch, fluid along a run —
+## photographs as bare geometry when it is only built, and bare geometry
+## looks like art that has not landed rather than like a fixture nobody ran.
+##
+## This list cannot be the only protection, because a list is what gets
+## forgotten: `crossing` shipped absent from it and every frame of a dead
+## line passed. So the fixture ALSO carries a check that it is showing what
+## it claims (`Layouts.crossing_line_idle`), run below just before the
+## shutter. The list makes the good frame the default; the check makes the
+## bad frame impossible.
+const SETTLED_FIXTURES: PackedStringArray = ["crossing"]
+
 var _frames := 0
 var _on_screen := false
 var _frames_drawn_seen := -1
@@ -719,6 +733,12 @@ func _initialize() -> void:
 	if not _parse_ghost_at(args):
 		return
 	_resolve_fixture()
+	# Applied AFTER `_resolve_fixture`, so it covers a fixture named with
+	# `--fixture` as well as one a convenience flag picked — which is the gap
+	# `crossing` fell through, having no flag of its own to set `_populate`
+	# beside (see the settings above that do).
+	if SETTLED_FIXTURES.has(_fixture):
+		_populate = true
 	_apply_fluid_gallery_defaults(args)
 	_apply_warehouse_defaults(args)
 	# The world this frame actually came from, printed whether or not
@@ -2394,6 +2414,15 @@ func _frame_health() -> String:
 	print("SCREENSHOT_HEALTH: contracts=%d lost=%d made=%s" % [
 		active, lost, ",".join(made) if made.size() > 0 else "nothing",
 	])
+	# Asked of every fixture that has its own "am I showing what I claim"
+	# check, ahead of the `HEALTHY_FIXTURES` gate rather than inside it: the
+	# crossing line makes nothing and ships nothing, so `produced == 0` is
+	# its healthy state and the contract/production test says nothing at all
+	# about it. What it has to prove instead is that it MOVED.
+	if _fixture == "crossing" and not _allow_unhealthy:
+		var idle := Layouts.crossing_line_idle(_main.sim)
+		if idle != "":
+			return "the crossing line is built but dead — %s" % idle
 	if _allow_unhealthy or not HEALTHY_FIXTURES.has(_fixture):
 		return ""
 	if lost > 0:

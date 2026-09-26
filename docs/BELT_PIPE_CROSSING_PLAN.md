@@ -32,12 +32,20 @@ spans z 11–19. That is true about the belt and useless about the belt's
 `item_bottle` is 15 voxels tall, so what crosses the tile fills z 10–24,
 inside a bore at z 12–19. Rendered, the flat bridge impales a box mid-tile.
 
-The shipped shape is `pipe_gantry` (commit `f1751d8`): the run lifts to
-exactly one tile above the floor (`GANTRY_AXIS_Z = 32`), putting the tube's
-lowest voxel at 27, two clear of the tallest bottle, on risers of the run's
-own radius flush against either side of the belt lane. Its two open faces are
-ordinary bores on the pipe axis at `PIPE_AXIS_Z`, so a crossing drops into an
-existing north–south run with no fitting and no change to its neighbours.
+The shape is the spike's `pipe_gantry` (commit `f1751d8`), which shipped
+under the name `pipe_crossing` — T2 renamed it for what it had become. The
+run lifts to exactly one tile above the floor (`GANTRY_AXIS_Z =
+TILE_VOXELS`, 32), on risers of the run's own radius flush against either
+side of the belt lane. Measured on the shipped model, its lowest voxel
+*between the risers* — y 8..23, which contains `CROSSING_ITEM_Y` (10..21) —
+is z = 28, three clear (25..27) of `CROSSING_ITEM_TOP_Z` (24); the spike's
+figure of 27 was one voxel out. Not "anywhere over the lane": the risers
+stand **on** the lane's boundary rows, y 7 and y 24 (elbows at y 3 and 28,
+outer radius 4.5), and carry steel from z 13 up. Nothing travels those two
+rows, which is why the clearance that matters is the one between them. Its two
+open faces are ordinary bores on the pipe axis at `PIPE_AXIS_Z`, so a
+crossing drops into an existing north–south run with no fitting and no
+change to its neighbours.
 
 ## Decisions already taken
 
@@ -144,6 +152,14 @@ four ways, so this one matters. Read `assets/voxels/CLAUDE.md` first.
 **Acceptance:** `cargo test -p voxgen` green; the asset read at play zoom and
 at 1:1 in a rendered frame, not judged from the generator; the icon judged at
 its real 64px on the real plate.
+
+**What shipped** (PR #169): `pipe_gantry` became `pipe_crossing`, with
+`pipe_fluid_crossing` as its raised liquid body and a separate icon-only
+`crossing` model with a frozen belt and bottle baked in. `pipe_bridge_flat`
+was **deleted**; `a_crossing_clears_what_the_belt_is_carrying` keeps its
+counter-example by turning an ordinary straight across the lane instead, so
+the guard survived without a rejected model living in `ASSETS` forever.
+Neither name below outlives this note — grep for `pipe_crossing`.
 
 ### T3 — godot: draw it and let the player build it
 

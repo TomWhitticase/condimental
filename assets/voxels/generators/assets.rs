@@ -2976,8 +2976,11 @@ const CROSSING_ITEM_TOP_Z: i32 = BELT_CLEAT_Z + 14;
 /// that constant, this is the box a crossing must leave empty.
 const CROSSING_ITEM_Y: (i32, i32) = (10, 21);
 /// Height of the raised run, one full tile above the floor. Measured, the
-/// lowest voxel of [`pipe_crossing`] anywhere over the lane is z = 28, which
-/// leaves three voxels of daylight (25..27) over [`CROSSING_ITEM_TOP_Z`].
+/// lowest voxel of [`pipe_crossing`] BETWEEN THE RISERS — y 8..23, which
+/// contains [`CROSSING_ITEM_Y`] — is z = 28, which leaves three voxels of
+/// daylight (25..27) over [`CROSSING_ITEM_TOP_Z`]. Not "over the lane": the
+/// risers stand on the lane's own boundary rows, y 7 and y 24, and carry
+/// steel from z 13 up. Nothing travels those rows.
 /// Lower and the bottles graze it, which reads as the same mistake as
 /// passing through it.
 const GANTRY_AXIS_Z: i32 = TILE_VOXELS as i32;
