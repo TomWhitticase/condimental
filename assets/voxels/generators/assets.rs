@@ -3190,9 +3190,11 @@ pub fn pipe_fault(p: &Palette) -> VoxModel {
 pub fn warning_marker(p: &Palette) -> VoxModel {
     let mut m = VoxModel::tile();
     let amber = p.idx("status_amber");
-    // The dot, a gap as tall as half the dot, then the bar to the top.
-    m.cuboid((12, 19), (12, 19), (0, 6), amber);
-    m.cuboid((12, 19), (12, 19), (11, 31), amber);
+    // The dot, a gap as tall as the dot, then the bar to the top. The gap is
+    // six voxels because Godot draws the marker at 0.75: a four-voxel gap
+    // nearly closed at play zoom and read as one lit bar.
+    m.cuboid((12, 19), (12, 19), (0, 5), amber);
+    m.cuboid((12, 19), (12, 19), (12, 31), amber);
     m
 }
 
@@ -7025,12 +7027,8 @@ mod tests {
         }
     }
 
-    /// The fault clamp (issue #54) is overlaid on a tile whose own facing is
-    /// whatever its run's is, and `main.gd` stands it at a fixed yaw rather
-    /// than at its host's. That is only safe while the model is unchanged by
-    /// a quarter turn — otherwise the striping would run one way on an
-    /// east/west run and the other on a north/south one, which is §2b point
-    /// 29's defect with the check skipped rather than passed.
+    /// The warning marker stands at a fixed yaw over whatever it marks, so
+    /// it has to be the same shape from every side it can be seen from.
     #[test]
     fn a_warning_marker_is_unchanged_by_a_quarter_turn() {
         let bang = warning_marker(&palette());
@@ -7048,12 +7046,25 @@ mod tests {
         let p = palette();
         let bang = warning_marker(&p);
         let amber = p.idx("status_amber");
-        let lit_at = |z: u32| bang.voxels.iter().any(|(&(_, _, vz), &c)| c == amber && vz == z);
+        let lit_at = |z: u32| {
+            bang.voxels
+                .iter()
+                .any(|(&(_, _, vz), &c)| c == amber && vz == z)
+        };
         assert!(lit_at(0), "the dot must stand at the foot");
-        assert!(!(7..=10).any(lit_at), "the dot and the bar must have a gap between them");
+        assert!(
+            !(6..=11).any(lit_at),
+            "the dot and the bar must have a gap between them"
+        );
         assert!(lit_at(31), "the bar must reach the head");
     }
 
+    /// The fault clamp (issue #54) is overlaid on a tile whose own facing is
+    /// whatever its run's is, and `main.gd` stands it at a fixed yaw rather
+    /// than at its host's. That is only safe while the model is unchanged by
+    /// a quarter turn — otherwise the striping would run one way on an
+    /// east/west run and the other on a north/south one, which is §2b point
+    /// 29's defect with the check skipped rather than passed.
     #[test]
     fn a_pipe_fault_clamp_is_unchanged_by_a_quarter_turn() {
         let clamp = pipe_fault(&palette());

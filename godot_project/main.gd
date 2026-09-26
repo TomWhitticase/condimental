@@ -3377,6 +3377,8 @@ func _build_placement(placement: Dictionary) -> void:
 				# positions, which are laid out for four cases and are not
 				# obliged to stay symmetric about it.
 				"anchor": _footprint_centre(origin, size, DOCK_DECK_Y),
+				# Its floating "!"'s key, built once rather than every frame.
+				"warning_key": "dock:" + key,
 			}
 		_:
 			# A machine: a recipe-running kind. Its status lamp and (for the
@@ -4237,7 +4239,9 @@ func _update_dock_stock(dock_states: Dictionary, current_tick := 0) -> void:
 		# — a dock whose places are all taken needs a contract or a removal
 		# whether or not a box happened to arrive this tick to be refused.
 		_set_world_warning(
-			"dock:" + key, nodes.get("anchor", Vector3.ZERO), bool(snapshot.get("at_capacity", false))
+			nodes.get("warning_key", "dock:" + key),
+			nodes.get("anchor", Vector3.ZERO),
+			bool(snapshot.get("at_capacity", false))
 		)
 
 
@@ -4464,6 +4468,8 @@ func _world_warning_position(anchor: Vector3, tick: int) -> Vector3:
 
 ## Moves every raised marker to this tick's point in its bob.
 func _update_world_warnings(current_tick: int) -> void:
+	if _world_warnings.is_empty():
+		return
 	for key in _world_warnings.keys():
 		var node: Node3D = _world_warnings[key]
 		if node == null or not is_instance_valid(node):
@@ -16540,10 +16546,15 @@ func _apply_hover_panel_state(state: Dictionary, yielded := 0) -> void:
 		_hover_places_grid.visible = not places.is_empty()
 		if not places.is_empty():
 			var count := int(places.get("places", 0))
-			_hover_places_grid.set_meta("places", count)
-			_hover_places_grid.set_meta("cells", places.get("cells", []))
-			_hover_places_grid.custom_minimum_size = _places_grid_size(count)
-			_hover_places_grid.queue_redraw()
+			var cells: Array = places.get("cells", [])
+			# The hover is re-applied every frame; redraw only when what the
+			# grid shows has changed.
+			if int(_hover_places_grid.get_meta("places", -1)) != count \
+					or _hover_places_grid.get_meta("cells", []) != cells:
+				_hover_places_grid.set_meta("places", count)
+				_hover_places_grid.set_meta("cells", cells)
+				_hover_places_grid.custom_minimum_size = _places_grid_size(count)
+				_hover_places_grid.queue_redraw()
 	var meter: Dictionary = state.get("meter", {})
 	if _hover_meter != null:
 		_hover_meter.visible = not meter.is_empty()
@@ -16588,22 +16599,34 @@ func _places_grid_size(count: int) -> Vector2:
 ## room" and "room for what" are one picture. Filled in snapshot order, left
 ## to right, top row first.
 func _draw_places_grid(grid: Control) -> void:
-	var count := int(grid.get_meta("places", 0))
-	var cells: Array = grid.get_meta("cells", [])
 	var border := maxf(1.0, _ui_px(1.5))
 	var inset := _ui_px(2.0)
-	for i in range(count):
-		var cell := Vector2(i % HOVER_PLACES_COLUMNS, floori(float(i) / HOVER_PLACES_COLUMNS))
-		var rect := Rect2(cell * (HOVER_PLACE_CELL + HOVER_PLACE_GAP), Vector2.ONE * HOVER_PLACE_CELL)
-		if i < cells.size():
+	for socket in _places_grid_sockets(int(grid.get_meta("places", 0)), grid.get_meta("cells", [])):
+		var rect: Rect2 = socket["rect"]
+		var item := String(socket["item"])
+		if not item.is_empty():
 			grid.draw_rect(rect, HOVER_PLACE_FILLED)
-			var icon := _icon_for(String(cells[i]))
+			var icon := _icon_for(item)
 			if icon != null:
 				grid.draw_texture_rect(icon, rect.grow(-inset), false)
 			grid.draw_rect(rect, HOVER_PLACE_FILLED_BORDER, false, border)
 		else:
 			grid.draw_rect(rect, METER_TRACK_COLOR)
 			grid.draw_rect(rect, METER_BORDER_COLOR, false, border)
+
+
+## Every socket `_draw_places_grid` draws, one per place: its rect, and the
+## item it holds or "" for a free one. Pure, so a test can assert the picture
+## the drawing makes without a layout pass.
+func _places_grid_sockets(count: int, cells: Array) -> Array:
+	var sockets: Array = []
+	for i in range(count):
+		var cell := Vector2(i % HOVER_PLACES_COLUMNS, floori(float(i) / HOVER_PLACES_COLUMNS))
+		sockets.append({
+			"rect": Rect2(cell * (HOVER_PLACE_CELL + HOVER_PLACE_GAP), Vector2.ONE * HOVER_PLACE_CELL),
+			"item": String(cells[i]) if i < cells.size() else "",
+		})
+	return sockets
 
 
 ## Where a panel that points at something in the WORLD goes — the hover
