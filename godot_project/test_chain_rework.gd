@@ -110,6 +110,19 @@ func _stock_of(item_id: String) -> int:
 	return 0
 
 
+## Answers the payday warning (2026-09-26) with SPEND ANYWAY if it is up.
+##
+## A new game already owes a starting crew a wage, so any spend made from a
+## balance funded down below that bill raises the confirmation — and the market
+## section below deliberately funds itself down to two units of sugar to test
+## the "buy all you can afford" arithmetic. The market is what this script is
+## about, so it says yes and carries on; `test_payday_warning.gd` is what
+## proves the panel, both its answers and its numbers.
+func _spend_anyway() -> void:
+	if main._payday_confirm_open:
+		main._on_payday_confirm_yes()
+
+
 ## Which fluid the network covering `tile` carries, or "" if no network does.
 func _fluid_at(tile: Vector2i) -> String:
 	for network in JSON.parse_string(main.sim.fluid_snapshots_json()):
@@ -356,6 +369,7 @@ func _run_checks() -> void:
 	# THE CLICK ITSELF: one command, the whole affordable quantity, and the
 	# balance spent down to less than one more unit.
 	main._buy_all_from_slot(sugar_slot)
+	_spend_anyway()
 	var bought_stock := 0
 	for entry in JSON.parse_string(main.sim.ingredients_snapshot_json()).get("entries", []):
 		if String(entry["id"]) == "sugar":
@@ -431,6 +445,7 @@ func _run_checks() -> void:
 	shift_click.shift_pressed = true
 	var gesture_stock := _stock_of("sugar")
 	main._on_market_slot_gui_input(shift_click, sugar_slot)
+	_spend_anyway()
 	if _stock_of("sugar") != gesture_stock + 3:
 		_fail("SHIFT+left-click moved sugar stock %d -> %d, expected +3" % [
 			gesture_stock, _stock_of("sugar")

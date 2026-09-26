@@ -14,7 +14,8 @@
 #   * a row's words and bar are pure functions of the wire's category
 #     (`hired N`, `assigned / demand` printed on the meter, `N short` in
 #     the warning colour, FIRE disabled at 0, the maintenance idle note),
-#   * HIRE reads the wire's own `can_hire` (ticket 1's hire-refusal rule),
+#   * HIRE is gated on the establishment alone and the wire's own
+#     `hire_warns` only warns beside it (2026-09-26 — it used to refuse),
 #     and a row's `status_text` names heads idled or lost by a payday,
 #   * the WHY line under a row (`_staff_demand_sources_for`/
 #     `_staff_demand_text`): kind ×count per placement asking for a
@@ -195,22 +196,25 @@ func _run_checks() -> void:
 	if bool(nobody_asked["hire_enabled"]):
 		_fail("HIRE is closed on a category with no establishment (the maintenance money sink)")
 
-	# --- 1b. HIRE reads the wire's own can_hire; the row's AFTER-payday
-	# status line (ticket 4) -----------------------------------------------
+	# --- 1b. HIRE is gated on the ESTABLISHMENT ALONE, and a payday that
+	# cannot cover the hire warns beside a button that still works
+	# (2026-09-26); the row's AFTER-payday status line (ticket 4) ----------
 	var hireable: Dictionary = main._staff_row_state({
 		"id": "manufacturing", "name": "Manufacturing", "headcount": 4, "wage": 2,
-		"demand": 4, "assigned": 4, "required": 4, "short": 0, "can_hire": true,
+		"demand": 4, "assigned": 4, "required": 4, "short": 0, "hire_warns": false,
 	})
 	if not bool(hireable["hire_enabled"]):
-		_fail("can_hire true on the wire means HIRE is enabled")
+		_fail("a category the machinery asks for has HIRE enabled")
 	var unhireable: Dictionary = main._staff_row_state({
 		"id": "manufacturing", "name": "Manufacturing", "headcount": 4, "wage": 2,
-		"demand": 4, "assigned": 4, "required": 4, "short": 0, "can_hire": false,
+		"demand": 4, "assigned": 4, "required": 4, "short": 0, "hire_warns": true,
 	})
-	if bool(unhireable["hire_enabled"]):
-		_fail("can_hire false on the wire (ticket 1's hire-refusal rule) means HIRE is disabled")
+	if not bool(unhireable["hire_enabled"]):
+		_fail("hire_warns on the wire is a WARNING, not a disabled button (2026-09-26)")
 	if main._staff_row_state({"id": "manufacturing", "required": 1})["hire_enabled"] != true:
-		_fail("a snapshot older than can_hire defaults HIRE to enabled")
+		_fail("an establishment with no hire_warns field on it still hires")
+	if bool(main._staff_row_state({"id": "manufacturing", "required": 0})["hire_enabled"]):
+		_fail("a category with no establishment still closes HIRE")
 	if unhireable["status_text"] != "":
 		_fail("nothing unpaid or left says nothing, got '%s'" % unhireable["status_text"])
 	var idled: Dictionary = main._staff_row_state({
@@ -280,8 +284,8 @@ func _run_checks() -> void:
 		_fail("FIRE does not warn about notice pay ('%s')" % fire_notice)
 	if String(_row("manufacturing")["fire_button"].tooltip_text) != fire_notice:
 		_fail("the FIRE button carries no notice-pay tooltip")
-	if main._staff_hire_blocked_text({"can_hire": true, "wage": 2}, {}) != "":
-		_fail("a hireable row says nothing extra")
+	if main._staff_hire_blocked_text({"hire_warns": false, "wage": 2}, {}) != "":
+		_fail("a row whose payday covers the hire says nothing extra")
 	var blocked_snapshot := {
 		"money": 8.0,
 		"categories": [
@@ -291,12 +295,12 @@ func _run_checks() -> void:
 		],
 	}
 	var blocked_text: String = main._staff_hire_blocked_text(
-		{"id": "manufacturing", "wage": 2, "can_hire": false}, blocked_snapshot)
-	for needle in ["cannot hire", "8 in hand", "%d due" % main._staff_next_bill(blocked_snapshot), "2 / period"]:
+		{"id": "manufacturing", "wage": 2, "hire_warns": true}, blocked_snapshot)
+	for needle in ["would go short", "8 in hand", "%d due" % main._staff_next_bill(blocked_snapshot), "2 / period"]:
 		if blocked_text.find(needle) < 0:
-			_fail("a blocked HIRE says WHY in words ('%s'), got '%s'" % [needle, blocked_text])
-	if blocked_text.find("✗") != 0:
-		_fail("the blocked sentence leads with a glyph, not colour alone (UI_UX §7), got '%s'" % blocked_text)
+			_fail("a warned HIRE says WHY in words ('%s'), got '%s'" % [needle, blocked_text])
+	if blocked_text.find("▲") != 0:
+		_fail("the warning leads with a glyph, not colour alone (UI_UX §7), got '%s'" % blocked_text)
 
 	# --- 1f. what hiring would unblock, from the same demand sources the WHY
 	# line names (the staffing ticket, requirement 5) -------------------------
@@ -605,7 +609,7 @@ func _run_checks() -> void:
 		if row["fire_button"].disabled == bool(state["fire_enabled"]):
 			_fail("row %s's FIRE button must be %s" % [id, "enabled" if state["fire_enabled"] else "disabled"])
 		if row["hire_button"].disabled == bool(state["hire_enabled"]):
-			_fail("row %s's HIRE button must be %s (the wire's can_hire, ticket 1's hire-refusal rule)" % [id, "enabled" if state["hire_enabled"] else "disabled"])
+			_fail("row %s's HIRE button must be %s (the establishment alone gates it)" % [id, "enabled" if state["hire_enabled"] else "disabled"])
 	if main._staff_money_label.text != "Money: %.0f" % float(live.get("money", 0.0)):
 		_fail("the panel's balance is the snapshot's money, got '%s'" % main._staff_money_label.text)
 	if main._staff_footer_label.text != main._staff_footer_text(main._staff_snapshot, main.sim.current_tick()):
@@ -626,10 +630,16 @@ func _run_checks() -> void:
 		_fail("the cascade leaves exactly 3 heads unpaid, got %d" % main._staff_unpaid_count_if_payday_now(main._staff_snapshot))
 	if main._staff_footer_label.text.find("▲ next payday short by 6 — 3 heads go unpaid") < 0:
 		_fail("the panel's footer carries the ticket's own wording, got:\n%s" % main._staff_footer_label.text)
+	# A payday it cannot pay WARNS and leaves the button alone (2026-09-26):
+	# the row says why in words, and `_staff_hire` puts the confirmation up.
 	for row in main._staff_rows:
 		var category: Dictionary = _category(String(row["id"]))
-		if not bool(category.get("can_hire", true)) and not row["hire_button"].disabled:
-			_fail("row %s cannot afford the next bill plus a wage, so HIRE must be disabled" % row["id"])
+		if not bool(category.get("hire_warns", false)):
+			continue
+		if row["hire_button"].disabled and int(category.get("required", 0)) > 0:
+			_fail("row %s warns about the payday; it must not disable HIRE" % row["id"])
+		if row["blocked_label"].text.find("would go short") < 0:
+			_fail("row %s warns in words, got '%s'" % [row["id"], row["blocked_label"].text])
 	main._set_staff_open(false)
 	var payday_tick := int(main._staff_snapshot.get("next_payday_tick", 0))
 	while main.sim.current_tick() < payday_tick + 1:
@@ -638,8 +648,8 @@ func _run_checks() -> void:
 	if main._contract_notice.text.find("packaging") < 0 and main._contract_notice.text.find("logistics") < 0:
 		_fail("the payday that actually ran announces the categories it idled, got '%s'" % main._contract_notice.text)
 
-	# Restore the funded reference line: sections 4/5 hire and fire real
-	# heads, which the underfunded fixture's `can_hire: false` would refuse.
+	# Restore the funded reference line: sections 4/5 hire and fire real heads,
+	# and the underfunded fixture would put a payday confirmation over each.
 	main.sim.new_game()
 	Layouts.build_reference_line(main.sim)
 	Layouts.stock_larder(main.sim, 64)

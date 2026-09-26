@@ -106,10 +106,11 @@ assets/voxels/
 
 Point numbers are cited by code comments; keep them stable — a number is
 never reused and never moves. Full narrative in DECISIONS.md Part B. There is
-no point 10, and the list runs 1-28, 35-37, 29-34, 38-39: the three entries the
-factory-floor work added were written as a second 27, a third 27 and a second
-28, and were given the next free numbers on 2026-09-16 rather than renumbered
-into sequence. They sit where they were discovered.
+no point 10, and the list runs 1-28, 35-37, 29-34, 41, 38-40: the three entries
+the factory-floor work added were written as a second 27, a third 27 and a
+second 28, and were given the next free numbers on 2026-09-16 rather than
+renumbered into sequence; 41 was written as a second 35 and took the next free
+number the same way on 2026-09-26. They sit where they were discovered.
 
 1. **The `.vox` encoder is hand-written** (`generators/vox.rs`, ~150 lines) —
    no Rust crate writes the chunks the Godot importer needs. It puts a
@@ -268,7 +269,7 @@ into sequence. They sit where they were discovered.
     not, show the plain tile and let the prompt (§5a) say the rest in
     words.
 
-35. **A list that scrolls is capped by what the window has left, measured,
+41. **A list that scrolls is capped by what the window has left, measured,
     not by a constant.** The main menu's save list had a flat 450px cap,
     which fit while the title sat inside the plate. The wordmark then moved
     out of the plate and grew to 114pt for the title screen (§5d), and at
@@ -307,6 +308,49 @@ into sequence. They sit where they were discovered.
     browser — which cannot drift from the pipeline precisely because it
     derives everything from repo files — had nothing to derive and drew every
     lamp lit (issue #81).
+
+40. **A spend with a delayed consequence is confirmed before it happens, not
+    explained after it.** A purchase that leaves the balance below the next
+    payday's wage bill raises a modal naming the subject, the balance it would
+    leave, the bill, the gap and when payday lands in seconds, with SPEND
+    ANYWAY and CANCEL (2026-09-26). The staff panel already warned about a
+    shortfall, but only on a screen the player has to be looking at, and the
+    consequence — heads idled, and gone if a second payday misses — arrives a
+    thousand ticks after the click that caused it. So the warning moved to the
+    moment of the spend. Four rules came out of building it:
+
+    * **The decision is the simulation's, not the panel's.** `spend_preview_json`
+      takes the exact command Godot is about to issue and answers `warn` for it,
+      because the test needs the whole factory's wage bill and the price rule
+      of the specific spend. Godot renders the answer and re-issues the command
+      on YES; a panel that computed its own verdict would be gameplay logic in
+      GDScript and would disagree with the sim the first time a price moved.
+    * **One funnel, not a check per spend site.** Equipment, ingredient stock,
+      a contract fee, a hire and SHIFT's replacement purchase all pass through
+      `_spend_with_confirm`. A site that forgot the check would be the whole
+      feature missing in exactly the place a player was spending.
+    * **It does not pause the world**, which is why the command goes through
+      `issue_command_json` when the player answers rather than being replayed:
+      money may have moved while the panel sat there, and the tick that takes
+      the money is the one entitled to refuse.
+    * **The tail of an interrupted action runs on either answer.** SHIFT's
+      rebuy is the case: cancelling it must still end build mode when the
+      placement spent the last unit, or the player is left with a ghost that
+      can never be built.
+    * **A spend the balance cannot cover is a refusal, not a dilemma.** It
+      raises no panel and gets the plain refusal cue it always got, because
+      the economy would decline it anyway: the payday is left exactly as short
+      as it already was. `affordable` on the preview is what says so, and
+      asking "are you sure?" there would replace the one answer the player
+      needs — *you cannot afford this* — with a warning about a consequence
+      that cannot follow.
+
+    No suppression, and no exception for a player already short: the owner's
+    call, so a factory running its payroll close keeps being asked, and the day
+    the panel stops appearing is the day the bill is covered. The same change
+    turned the hire refusal (`money >= next_bill + wage`) into a warning, so
+    all four spends behave alike — a button that is dead for a reason the
+    player cannot see is worse than a question they can answer.
 
 ## 3. Theme & setting
 
@@ -441,8 +485,11 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   mark. The two numbers are printed ON the bar, `2 short` stands beside it
   in the one warning red while the bar is red (§7: position, digits, word,
   colour), and HIRE / FIRE are the build menu's own buttons — FIRE disabled
-  at zero, HIRE disabled the moment the wire's own `can_hire` says a head
-  cannot be afforded, not only after the click is refused. A category
+  at zero, HIRE disabled only where the machinery asks for nobody. A head
+  the next payday could not pay used to disable it (the wire's `can_hire`);
+  since 2026-09-26 the wire warns instead (`hire_warns`), the row says why
+  in words beside a live button, and the click raises the payday
+  confirmation §2b point 40 describes. A category
   says so in a sentence in place of an empty bar
   (`nothing to maintain yet`). **A row is two lines, not seven**
   (2026-09-18, issue #7): name and verdict chip over `hired 4  ·  wage 2 /

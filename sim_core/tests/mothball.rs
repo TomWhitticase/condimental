@@ -566,7 +566,7 @@ fn mothballing_is_what_takes_a_broke_factory_out_of_arrears_and_a_control_proves
     );
     assert_eq!(headcount(&control, "manufacturing"), 0);
 
-    // Reopen. No hiring, no `can_hire` gate, nothing re-trained: the
+    // Reopen. No hiring, no payday bar to clear, nothing re-trained: the
     // establishment is back where it was and every head is still there to
     // fill it.
     switch_everything_back_on(&mut world);
@@ -603,9 +603,12 @@ fn mothballing_is_what_takes_a_broke_factory_out_of_arrears_and_a_control_proves
         (0, 0)
     );
     assert!(
-        !control.staff().can_hire("logistics", control.money()),
-        "and it cannot buy its people back: `can_hire` refuses while the balance \
-         cannot cover the next bill, and a factory that ships nothing has no balance"
+        control.staff().hire_warns("logistics", control.money()),
+        "and it cannot AFFORD its people back: `hire_warns` is set while the \
+         balance cannot cover the next bill, and a factory that ships nothing \
+         has no balance. Since 2026-09-26 that is a warning the player \
+         confirms, not a refusal — so the door is open, and it leads straight \
+         back into the arrears this whole test is about"
     );
 
     // WHAT THIS DOES NOT CLAIM. The shutdown got the crew and the arrears
@@ -634,9 +637,11 @@ fn mothballing_is_what_takes_a_broke_factory_out_of_arrears_and_a_control_proves
 /// nobody; one fires its way down to the same bill and mothballs nothing;
 /// one does neither. The first two both survive — that is the point, they
 /// are alternatives — but they are not the same move, and the difference
-/// is the crew: the factory that fired is left unable to buy its people
-/// back, because [`StaffPools::can_hire`] refuses while the balance cannot
-/// cover the next bill.
+/// is the crew: the factory that fired is left unable to AFFORD its people
+/// back, because the balance cannot cover the next bill plus their wages —
+/// `StaffPools::hire_warns`. Since 2026-09-26 that is a warning rather than
+/// a refusal, so re-hiring is possible; it just puts the new heads straight
+/// into the arrears that lost the old ones.
 ///
 /// Before the stand-down rule these two histories were bit-identical, and
 /// that identity was the proof that mothballing did nothing at all.
@@ -684,8 +689,9 @@ fn mothballing_and_firing_are_not_the_same_move() {
         "the escape that keeps the crew, and the escape that spends it"
     );
     assert!(
-        !fired.staff().can_hire("manufacturing", fired.money()),
-        "and the one that spent it cannot buy it back — the trap firing leaves"
+        fired.staff().hire_warns("manufacturing", fired.money()),
+        "and the one that spent it cannot afford it back — the trap firing \
+         leaves, now a warned door rather than a locked one"
     );
 
     // Reopening costs the mothballed factory one command per machine and

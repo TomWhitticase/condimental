@@ -29,10 +29,12 @@
 //! the next payday (notice pay, and it is paid *first*, before the heads
 //! still on the books), and a head hired mid-period is billed at that
 //! payday — so firing everyone the tick before payday and hiring them
-//! back after costs exactly what keeping them would have. Hiring is
-//! refused while the balance cannot cover the next bill *plus* the new
-//! head's wage ([`StaffPools::can_hire`]): you cannot hire someone you
-//! could not pay.
+//! back after costs exactly what keeping them would have. Hiring a head the
+//! next payday could not pay — the balance under the next bill *plus* the
+//! new head's wage — is **warned about, not refused**
+//! ([`StaffPools::hire_warns`], and `World::spend_preview`, which puts the
+//! confirmation in front of the player): you may hire someone you cannot
+//! pay, and then the unpaid-head rules below are what happens to them.
 //!
 //! **A walk-out is never silent and never sudden.** The first head the
 //! money does not reach — and every head after it down the file, the line
@@ -55,10 +57,10 @@
 //! so before mothballing existed a factory that missed one payday could
 //! only watch the next one miss harder, and the only lever it had was
 //! FIRING — which takes the trained crew away as the price of keeping the
-//! factory, and leaves a broke factory unable to hire them back
-//! ([`can_hire`](StaffPools::can_hire) refuses while the balance cannot
-//! cover the next bill). Mothballing is the lever that costs nothing
-//! permanent.
+//! factory, and leaves a broke factory hiring them back only into arrears
+//! it cannot pay ([`hire_warns`](StaffPools::hire_warns) says so before the
+//! click, and until 2026-09-26 it refused outright). Mothballing is the
+//! lever that costs nothing permanent.
 //!
 //! A mothballed machine (`PlayerCommand::SetMothballed`) asks for no crew,
 //! so it drops out of the ESTABLISHMENT ([`StaffPools::set_required`]) —
@@ -89,7 +91,7 @@
 //!   been switched off is not being asked to turn up.
 //!
 //! Switching the machine back on puts its crew straight back on the payroll
-//! (`owed` rises again at once — no re-hiring, no [`can_hire`](StaffPools::can_hire) gate, no
+//! (`owed` rises again at once — no re-hiring, no payday bar to clear, no
 //! lost training) and resumes the batch it was mid-way through.
 //!
 //! Only the crew of MOTHBALLED machinery is stood down, never a merely
@@ -631,7 +633,16 @@ impl StaffPools {
     /// whole units rounded up; zero when the bill is covered. The number
     /// the panel warns with BEFORE a payday.
     pub fn shortfall(&self, money: Money) -> u32 {
-        let bill = Money::saturating_from_num(self.next_bill());
+        Self::shortfall_of(self.next_bill(), money)
+    }
+
+    /// [`Self::shortfall`]'s arithmetic against an **arbitrary** bill, so a
+    /// caller asking "what if?" gets the same rounding as the panel showing
+    /// "what is". `World::spend_preview` uses it to ask about the bill a
+    /// hire would leave behind; a second copy of the rounding there would
+    /// quote a gap a pound off the one the payday charges.
+    pub fn shortfall_of(bill: u32, money: Money) -> u32 {
+        let bill = Money::saturating_from_num(bill);
         if money >= bill {
             0
         } else {
@@ -639,15 +650,22 @@ impl StaffPools {
         }
     }
 
-    /// Whether `hire(category)` would be accepted with `money` in hand:
-    /// the category is known and the balance covers the next bill plus
-    /// the new head's wage. You cannot hire someone you could not pay.
-    pub fn can_hire(&self, category: &str, money: Money) -> bool {
+    /// Whether hiring into `category` with `money` in hand would leave the
+    /// next payday unable to pay — the balance short of the next bill *plus*
+    /// the new head's wage. The bar a hire is **warned** about (this is the
+    /// rule `World::spend_preview` reports for
+    /// [`PlayerCommand::Hire`](super::PlayerCommand::Hire), and the panel
+    /// then asks the player); [`hire`](Self::hire) itself no longer refuses
+    /// on it, so nothing here gates a command.
+    ///
+    /// `false` for an unknown category, which `hire` refuses outright: there
+    /// is nothing to warn about a command that will not happen.
+    pub fn hire_warns(&self, category: &str, money: Money) -> bool {
         let Some(c) = self.catalog.get(category) else {
             return false;
         };
         let needed = Money::saturating_from_num(self.next_bill().saturating_add(c.wage));
-        money >= needed
+        money < needed
     }
 
     /// Sets the ESTABLISHMENT — how many heads of each category the placed
@@ -801,17 +819,21 @@ impl StaffPools {
 
     /// `PlayerCommand::Hire`: one more head, free to hire, billed at the
     /// next payday whenever in the period it arrives (`owed` rises with
-    /// `headcount`). Refused — `false`, nothing changed — for an unknown
-    /// category or when [`can_hire`](Self::can_hire) says the balance
-    /// could not pay it. A new head is at work from the next tick.
-    pub fn hire(&mut self, category: &str, money: Money) -> bool {
-        if !self.can_hire(category, money) {
+    /// `headcount`). Refused — `false`, nothing changed — only for an
+    /// unknown category. A new head is at work from the next tick.
+    ///
+    /// **It does not refuse a hire the next payday could not pay.** It did
+    /// until 2026-09-26, when the payday bar became a *warning* the player
+    /// confirms instead of a refusal the player cannot see the reason for
+    /// (`World::spend_preview`, GAMEPLAY.md §7, the 2026-09-26 decision
+    /// record). [`hire_warns`](Self::hire_warns) is that bar, and it is now
+    /// advice on the wire rather than a gate here; the consequence of
+    /// ignoring it is the ordinary unpaid-head path — idled at the payday,
+    /// gone if it happens twice.
+    pub fn hire(&mut self, category: &str) -> bool {
+        let Some(i) = self.catalog.index_of(category) else {
             return false;
-        }
-        let i = self
-            .catalog
-            .index_of(category)
-            .expect("can_hire is false for an unknown category");
+        };
         self.pools[i].headcount = self.pools[i].headcount.saturating_add(1);
         self.pools[i].owed = self.pools[i].owed.saturating_add(1);
         self.sync_payroll();
@@ -965,7 +987,7 @@ impl StaffPools {
                     owed: p.owed,
                     unpaid: p.unpaid,
                     left_last_payday: p.left_last_payday,
-                    can_hire: self.can_hire(&c.id, money),
+                    hire_warns: self.hire_warns(&c.id, money),
                     demand: p.demand,
                     assigned: p.assigned,
                     required: p.required,
@@ -1085,7 +1107,7 @@ impl StaffPools {
 ///  "categories": [
 ///    {"id": "manufacturing", "name": "Manufacturing", "headcount": 4,
 ///     "wage": 2, "owed": 4, "unpaid": 0, "left_last_payday": 0,
-///     "can_hire": true, "required": 4, "demand": 4, "assigned": 4,
+///     "hire_warns": false, "required": 4, "demand": 4, "assigned": 4,
 ///      "short": 0, "stood_down": 0, "on_payroll": 4,
 ///      "sources": [{"kind": "crusher", "count": 1}]}, ...]}
 /// ```
@@ -1110,8 +1132,11 @@ impl StaffPools {
 /// of them LEFT (unpaid there and at the payday before). Per category:
 /// `owed` (heads the next payday bills), `unpaid` (heads in arrears —
 /// hired, not working, gone if unpaid again), `left_last_payday` (who
-/// left, by category), and `can_hire` (whether a `hire` would be accepted
-/// with this balance: it covers `next_bill` plus this category's wage).
+/// left, by category), and `hire_warns` (whether hiring here would leave
+/// the next payday unable to pay — the balance under `next_bill` plus this
+/// category's wage). `hire_warns` was `can_hire`, its inverse, until
+/// 2026-09-26, when the bar stopped refusing the hire and became the
+/// confirmation `World::spend_preview` raises.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct StaffSnapshot {
     pub pay_period_ticks: u64,
@@ -1141,7 +1166,11 @@ pub struct StaffCategorySnapshot {
     pub owed: u32,
     pub unpaid: u32,
     pub left_last_payday: u32,
-    pub can_hire: bool,
+    /// Whether hiring one more head here would leave the next payday short
+    /// ([`StaffPools::hire_warns`]). **Advice, not a gate**: the HIRE button
+    /// stays enabled and the confirmation panel asks instead — a hire is
+    /// refused only for an unknown category.
+    pub hire_warns: bool,
     pub demand: u32,
     pub assigned: u32,
     pub required: u32,
@@ -1368,10 +1397,9 @@ mod tests {
     #[test]
     fn hire_and_fire_move_one_head_and_refuse_the_impossible() {
         let mut pools = StaffPools::new(catalog());
-        let rich = Money::from_num(1000);
-        assert!(pools.hire("cooks", rich));
+        assert!(pools.hire("cooks"));
         assert_eq!(pools.headcount("cooks"), 3);
-        assert!(!pools.hire("plumbers", rich));
+        assert!(!pools.hire("plumbers"), "an unknown category is refused");
         assert!(pools.fire("drivers"));
         assert_eq!(pools.headcount("drivers"), 0);
         assert!(!pools.fire("drivers"), "fire at 0 is a no-op");
@@ -1379,28 +1407,31 @@ mod tests {
         assert_eq!(pools.headcount("drivers"), 0);
     }
 
-    /// You cannot hire someone you could not pay: a hire needs the balance
-    /// to cover the next bill PLUS the new head's wage.
+    /// Hiring someone the next payday could not pay is WARNED about, not
+    /// refused (2026-09-26): the bar is the next bill PLUS the new head's
+    /// wage, and crossing it raises the confirmation rather than a silent
+    /// no-op. The hire itself goes through.
     #[test]
-    fn a_hire_is_refused_when_the_balance_could_not_pay_the_next_bill_with_it() {
+    fn a_hire_the_next_bill_could_not_pay_warns_and_still_happens() {
         let mut pools = StaffPools::new(catalog());
         // Bill 11; a cook is 3 more: 14 is the line.
         assert_eq!(pools.next_bill(), 11);
-        assert!(!pools.can_hire("cooks", Money::from_num(13)));
-        assert!(!pools.hire("cooks", Money::from_num(13)));
-        assert_eq!(
-            pools.headcount("cooks"),
-            2,
-            "a refused hire changes nothing"
+        assert!(pools.hire_warns("cooks", Money::from_num(13)));
+        assert!(pools.hire("cooks"), "warned, not refused");
+        assert_eq!(pools.headcount("cooks"), 3, "the warned hire happened");
+        assert_eq!(pools.next_bill(), 14, "and the bill rose with it");
+        assert!(
+            !pools.hire_warns("cooks", Money::from_num(17)),
+            "14 + a cook's 3 is covered"
         );
-        assert!(pools.can_hire("cooks", Money::from_num(14)));
-        assert!(pools.hire("cooks", Money::from_num(14)));
-        assert_eq!(pools.next_bill(), 14);
         // A volunteer costs nothing extra, but the bill itself must still
         // be covered.
-        assert!(!pools.can_hire("volunteers", Money::from_num(13)));
-        assert!(pools.can_hire("volunteers", Money::from_num(14)));
-        assert!(!pools.can_hire("plumbers", Money::from_num(1_000)));
+        assert!(pools.hire_warns("volunteers", Money::from_num(13)));
+        assert!(!pools.hire_warns("volunteers", Money::from_num(14)));
+        assert!(
+            !pools.hire_warns("plumbers", Money::from_num(0)),
+            "an unknown category has nothing to warn about: `hire` refuses it"
+        );
         assert_eq!(pools.shortfall(Money::from_num(14)), 0);
         assert_eq!(pools.shortfall(Money::from_num(13)), 1);
         assert_eq!(
@@ -1435,7 +1466,7 @@ mod tests {
         );
 
         // Hired one tick before the next payday: owed in full.
-        assert!(pools.hire("drivers", economy.money));
+        assert!(pools.hire("drivers"));
         assert_eq!(pools.next_bill(), 5);
         let report = pools.tick(200, &mut economy).unwrap();
         assert_eq!(report.paid, 5);
@@ -1629,7 +1660,7 @@ mod tests {
             (cooks.owed, cooks.unpaid, cooks.left_last_payday),
             (2, 0, 0)
         );
-        assert!(cooks.can_hire, "42 covers 11 + 3");
+        assert!(!cooks.hire_warns, "42 covers 11 + 3");
         // Give the pools an establishment — what placed machinery would
         // need — and `short` becomes the hiring advice: three cooks' worth
         // of machines standing, two cooks hired, so hire one. It does not
@@ -1650,7 +1681,7 @@ mod tests {
 
         let poor = pools.snapshot(Money::from_num(10));
         assert_eq!(poor.shortfall, 1);
-        assert!(!poor.categories[0].can_hire);
+        assert!(poor.categories[0].hire_warns, "10 covers neither 11 nor 14");
         let json = serde_json::to_value(&snap).unwrap();
         let keys: Vec<&str> = json["categories"][0]
             .as_object()
@@ -1666,7 +1697,7 @@ mod tests {
             "owed",
             "unpaid",
             "left_last_payday",
-            "can_hire",
+            "hire_warns",
             "demand",
             "assigned",
             "short",

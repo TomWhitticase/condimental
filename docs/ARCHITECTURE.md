@@ -266,6 +266,11 @@ impl SimBridge {
     pub fn save_ron(&self) -> GString;
     pub fn load_ron(&mut self, ron: GString) -> GString;
     pub fn new_game(&mut self);
+    // The payday warning (2026-09-26). Read-only: it takes the exact command
+    // JSON Godot is about to issue and answers what that spend would do to
+    // the next payday, `warn` included. It mutates nothing and does not move
+    // `revision()`, so a panel may ask on any frame.
+    pub fn spend_preview(&self, cmd: Option<&PlayerCommand>) -> SpendPreview;
     // Planned, not built:
     pub fn preview_command(&self, cmd: &PlayerCommand) -> PreviewResult; // validation pass, never mutate-then-rollback
     pub fn undo(&mut self) -> bool;
@@ -289,7 +294,9 @@ entries carry `crew`, the dock snapshot `understaffed` and — since issue
 blinks on a line that ebbs and the `query_tile` copy goes stale between
 rebuilds; the quality pass,
 2026-09-13, added `next_bill`, `shortfall`, `unpaid_last_payday` and per
-category `owed`/`unpaid`/`left_last_payday`/`can_hire`, so a panel can warn
+category `owed`/`unpaid`/`left_last_payday`/`hire_warns` (`can_hire` until
+2026-09-26, when the hire the payday could not cover stopped being refused
+and became the warning the field now names), so a panel can warn
 before a payday and announce after it), `production_snapshot_json`
 (the production-stats epic, 2026-09-13: per item and fluid, what recipes
 MADE and USED over the sim's rolling windows and for all time, plus what
@@ -330,6 +337,16 @@ could have moved.
 
 **Undo/redo (planned):** a bounded Rust-side stack of
 `(command, inverse_command)` pairs, not a Godot-side snapshot diff.
+
+**Two previews, and they answer different questions (2026-09-26).**
+`preview_command` above asks *may this command happen* — a validation pass
+Godot draws the ghost from. `spend_preview_json` asks *what would this spend
+do to the next payday*, for a command that is already perfectly valid, and its
+`warn` is the decision the payday confirmation obeys (`docs/UI_UX.md` §2b
+point 40). It is deliberately its own call rather than a field on a
+`PreviewResult` that does not exist on `main` yet: when `preview_command`
+lands, `SpendPreview` becomes its `payday` field and the two calls become one.
+Both are read-only by construction — never mutate-then-rollback.
 
 **Save format (amended 2026-09-09):** a save is a **full state snapshot**
 with a `schema_version`, in RON, rejected (not migrated) on a version

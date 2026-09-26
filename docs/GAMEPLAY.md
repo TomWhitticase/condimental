@@ -343,9 +343,13 @@ implementation history (epics, tickets, balancing passes) behind each one.
   hired, idle until the next payday, gone only if unpaid there too, and a
   covered payday clears the arrears (the contract board's strikes, applied
   to people). A head is billed for any period it was employed in any part
-  of (notice pay, so firing before payday saves nothing), and a hire is
-  refused unless the balance covers the next bill plus the new wage, so
-  nobody works a period for free and no head is hired who cannot be paid.
+  of (notice pay, so firing before payday saves nothing), so nobody works a
+  period for free. A hire the balance could not cover — the next bill plus the
+  new wage — was **refused** until 2026-09-26; it is **warned** now: the sim
+  answers `hire_warns`, the player is asked to confirm, and the hire happens
+  if they say yes. It changed because every other spend gained the same
+  warning at the same time (`docs/UI_UX.md` §2b point 40), and of the two a
+  refusal is the one a player who knows what they are doing cannot override.
   **MVP-provisional, open to revision:** shortfall allocation is
   first-come in stable order (no player priority yet); no recruiting fee;
   firing is free and immediate but still pays out the period; an unpaid
@@ -428,6 +432,6 @@ implementation history (epics, tickets, balancing passes) behind each one.
   threshold per group. A delivery count is also a poor instrument for the
   *transient* cost of building a new branch; see §6 and issues #92/#93.
 - When staff demand exceeds headcount in a category, which machines lose out — player-set priority, first-come-first-served, or proportional throttling across all of them? **MVP-provisional (2026-09-12, §9's staff-pools bullet):** first-come in the simulation's stable machine order, so the same machine is always the one short; player-set priority is the expected replacement and needs no wire change.
-- Is there a one-time recruiting/training cost on top of the recurring per-head wage, and can headcount be reduced (firing) freely or with a penalty/delay? **MVP-provisional (2026-09-12), amended by the quality pass (2026-09-13):** no recruiting fee, but a hire needs the balance to cover the next bill plus the new wage; firing is free and immediate, but the fired head is still paid for the period it worked any part of (notice pay); a head that cannot be paid on payday is idled, not lost, and leaves only if the next payday cannot pay it either. Still placeholders for the balancing pass, not decisions.
+- Is there a one-time recruiting/training cost on top of the recurring per-head wage, and can headcount be reduced (firing) freely or with a penalty/delay? **MVP-provisional (2026-09-12), amended by the quality pass (2026-09-13) and again on 2026-09-26:** no recruiting fee; a hire the balance cannot cover the next bill plus the new wage for is WARNED and confirmable rather than refused (it was refused from 2026-09-13 — see §7 and `docs/UI_UX.md` §2b point 40); firing is free and immediate, but the fired head is still paid for the period it worked any part of (notice pay); a head that cannot be paid on payday is idled, not lost, and leaves only if the next payday cannot pay it either. Still placeholders for the balancing pass, not decisions.
 - Are perishability (spoilage) and corrosion (durability) modeled as full ECS components with their own tick-based decay, or as simpler flags/costs? Needs a decision before tier 4/5 implementation starts.
 - Exact tier list beyond the six in §2 (this doc's tiers are illustrative of the *shape* of progression, not necessarily the final content list), and the actual catalog of derived sauces/variants — both are a game-design task, not an architecture or gameplay-systems one.
