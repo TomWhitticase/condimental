@@ -330,6 +330,12 @@ pub const ASSETS: &[Asset] = &[
         name: "warning_marker",
         build: warning_marker,
     },
+    // Its red sibling: a person over a machine that would be working but
+    // was refused its crew (`stall.kind == "staff"`).
+    Asset {
+        name: "understaffed_marker",
+        build: understaffed_marker,
+    },
     Asset {
         name: "pipe_fluid",
         build: pipe_fluid,
@@ -3195,6 +3201,29 @@ pub fn warning_marker(p: &Palette) -> VoxModel {
     // nearly closed at play zoom and read as one lit bar.
     m.cuboid((12, 19), (12, 19), (0, 5), amber);
     m.cuboid((12, 19), (12, 19), (12, 31), amber);
+    m
+}
+
+/// The floating red person over a machine standing idle for want of a crew —
+/// the [`warning_marker`]'s sibling, raised through the same `main.gd` door
+/// with its own asset. The universal "user" pictogram in the round: a head
+/// over a stepped, shouldered body, both turned about the tile's vertical
+/// midline, so it reads as a person from every side with no yaw (§2b point
+/// 20, `an_understaffed_marker_is_unchanged_by_a_quarter_turn`).
+///
+/// `status_red`, emissive, for the reason the "!" is amber: it has to carry
+/// over a busy floor under the glow pass, and red is the andon's "stopped".
+/// The neck gap is four voxels, the "!"'s lesson at a 0.75 draw scale.
+pub fn understaffed_marker(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::tile();
+    let red = p.idx("status_red");
+    let mid = (15.5, 15.5);
+    // The body, stepping in at the shoulders.
+    m.cylinder_z_f(mid, 8.0, (0, 8), red);
+    m.cylinder_z_f(mid, 7.0, (9, 10), red);
+    m.cylinder_z_f(mid, 5.5, (11, 12), red);
+    // The head, z 17..=28 over a gap of 13..=16.
+    m.sphere_f((15.5, 15.5, 22.5), 6.0, red);
     m
 }
 
@@ -7025,6 +7054,37 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The person stands over a machine at a fixed yaw, like the "!".
+    #[test]
+    fn an_understaffed_marker_is_unchanged_by_a_quarter_turn() {
+        let person = understaffed_marker(&palette());
+        assert_eq!(
+            person.voxels,
+            person.rotated_cw(1).voxels,
+            "the understaffed marker must read the same from every side"
+        );
+    }
+
+    /// A head over a body with daylight between them, all of it the lit
+    /// "stopped" red.
+    #[test]
+    fn an_understaffed_marker_is_a_lit_head_over_a_body() {
+        let p = palette();
+        let person = understaffed_marker(&p);
+        let red = p.idx("status_red");
+        let lit_at = |z: i32| person.filled(15, 15, z);
+        assert!(lit_at(0) && lit_at(12), "the body stands on the floor");
+        assert!(
+            (13..=16).all(|z| !lit_at(z)),
+            "a neck gap parts head from body"
+        );
+        assert!(lit_at(17) && lit_at(28), "the head rises above it");
+        assert!(
+            person.voxels.values().all(|&c| c == red),
+            "every voxel is status_red"
+        );
     }
 
     /// The warning marker stands at a fixed yaw over whatever it marks, so

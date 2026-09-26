@@ -32,7 +32,10 @@
 #     turns its bar amber even on the frames it has no live stall, a
 #     MOTHBALLED machine reads "switched off" with a fourth glyph and an
 #     unlit bar rather than as a fault, and both really arrive over the
-#     wire for every machine on the line.
+#     wire for every machine on the line,
+#   * a machine the sim refused its crew floats the red understaffed
+#     person over its roof, and no other machine does — not a staffed one,
+#     not one waiting on input, not one switched off.
 extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
@@ -84,6 +87,16 @@ func _shown_status(key: String) -> String:
 	if not main._machine_load.has(key):
 		return ""
 	return String(main._machine_load[key].get("status", ""))
+
+
+## The keys of every raised understaffed marker, sorted.
+func _machine_markers() -> Array:
+	var keys: Array = []
+	for key in main._world_warnings.keys():
+		if String(key).begins_with("machine:"):
+			keys.append(key)
+	keys.sort()
+	return keys
 
 
 ## "x,y" back to a tile.
@@ -407,6 +420,25 @@ func _run_checks() -> void:
 	if uncrewed_keys != [vat_key]:
 		_fail("the sim says exactly the vat goes without its crew; the panel says %s" % str(uncrewed_keys))
 
+	# The red person over it, and over nothing else on the line: every
+	# other machine there is crewed, whatever else it is waiting for.
+	var marked := _machine_markers()
+	if marked != ["machine:" + vat_key]:
+		_fail("only the vat refused its crew should carry the understaffed marker, got %s" % str(marked))
+	else:
+		var person: Node3D = main._world_warnings["machine:" + vat_key]
+		if not String(person.name).begins_with(main.UNDERSTAFFED_MARKER_ASSET):
+			_fail("the vat's marker is '%s', not the red person" % person.name)
+		if person.get_parent() != main._world_root:
+			_fail("the understaffed marker is not in the world")
+		var roof: float = main.FLOOR_Y + main._mesh_for("machine_cooking_vat").get_aabb().end.y
+		if person.position.y <= roof:
+			_fail("the vat's marker stands at %.2f, inside a roof at %.2f" % [person.position.y, roof])
+	for stall in [null, {"kind": "input", "item": "tomato"}, {"kind": "output", "item": "ketchup"},
+			{"kind": "mothballed", "item": ""}]:
+		if main._stall_is_staff(stall):
+			_fail("a %s stall is not a crew refusal" % str(stall))
+
 	# And the same for the switch, thrown by a real command rather than
 	# written into a dictionary here.
 	main.sim.issue_command_json(JSON.stringify({
@@ -422,6 +454,9 @@ func _run_checks() -> void:
 			still_uncrewed.append(key)
 	if not still_uncrewed.is_empty():
 		_fail("with the vat switched off nothing goes without a crew, but %s does" % str(still_uncrewed))
+	# Off is idle for a reason of the player's own: no person over it.
+	if not _machine_markers().is_empty():
+		_fail("a switched-off machine still floats the understaffed marker: %s" % str(_machine_markers()))
 
 	if _failed:
 		quit(1)
