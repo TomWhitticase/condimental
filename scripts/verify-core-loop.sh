@@ -157,6 +157,14 @@ run_godot_script() {
     echo "FAIL: $script exited $status" >&2
     exit "$status"
   fi
+  # A layout fixture that could not build what it promised (`test_layouts.gd`'s
+  # `fail_fixture`) prints `<NAME>_FIXTURE_FAIL:` and carries on, and a caller
+  # that never reads `Layouts.fixture_failure()` would still print its own
+  # success marker over a broken fixture. The marker is the failure.
+  if printf '%s\n' "$out" | grep -q "_FIXTURE_FAIL:"; then
+    echo "FAIL: $script printed a _FIXTURE_FAIL: marker — its fixture did not build" >&2
+    exit 1
+  fi
   if ! printf '%s\n' "$out" | grep -q "$marker"; then
     echo "FAIL: $script exited 0 but never printed '$marker' — it did not actually run" >&2
     exit 1

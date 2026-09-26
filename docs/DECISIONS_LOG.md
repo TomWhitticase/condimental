@@ -27,6 +27,20 @@ See [WORKFLOW.md](WORKFLOW.md).
   below the fold, and the cut lands on a card-row or heading edge. Binds
   `docs/UI_UX.md` §5c, `godot_project/main.gd` `_position_shop_menu`.
 
+- 2026-09-26 **A new game starts with no contract.** No offer in
+  `data/contracts.ron` is `starter: true`, so `World::new` activates nothing
+  and the player signs their first order from the contracts board (**C**)
+  the same way they buy their first tile. This reverses the 2026-09-10 rule
+  that at least one offer must be a starter, at the owner's request: the
+  world starts empty, so a contract running before the first tile is placed
+  only burns strikes. The loader no longer requires a starter
+  (`ContractLoadError::NoStarter` is gone); `starter` stays an optional
+  field, so the schema and saves are unchanged. The guard against "a factory
+  with nobody to sell to" is now the empty clipboard, which names **C**.
+  Fixtures that need an order sign one through `SignContract`
+  (`sim::reference_chain`, `test_layouts.gd`'s `build_reference_line`).
+  Full record in `docs/DECISIONS.md`.
+
 - 2026-09-26 **CONDIMENTAL is GPL-3.0-only; the name and brand are
   reserved.** The code is licensed `GPL-3.0-only` (`LICENSE`, and `license =`
   in every workspace `Cargo.toml`) **with a GPLv3 §7 additional permission**
@@ -1300,8 +1314,9 @@ See [WORKFLOW.md](WORKFLOW.md).
 - 2026-09-10 **Contract board: contracts are signed, struck and lost.**
   `contracts.ron` is schema 2: every contract has a `price` to sign, a
   `strikes` count, and an optional `starter` (a new game runs only
-  starters). Missing `strikes` windows in a row loses the contract —
-  losing IS the penalty, no fine on top; a paid window resets the count.
+  starters — none since 2026-09-26). Missing `strikes` windows in a row
+  loses the contract — losing IS the penalty, no fine on top; a paid
+  window resets the count.
   **C** opens the contracts board to sign offers; the clipboard docket
   gains a status line, strike pips and a state border.
 - 2026-09-11 **Contract board sized in lines' worth of demand.** The board

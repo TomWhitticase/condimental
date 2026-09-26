@@ -2002,8 +2002,8 @@ func _mothball_the_vat() -> void:
 ## contracts draw from is the belt at the end of the line, not a command
 ## issued from here.
 func _run_contract_cycles() -> void:
-	# A new game runs the starter only (the contract-board epic); the review
-	# frame wants the whole board competing, so sign every offer first — the
+	# A new game runs no contract (since 2026-09-26); the review frame
+	# wants the whole board competing, so sign every offer first — the
 	# full line costs 1087 of the 3000 start, which covers the signatures.
 	for offer in JSON.parse_string(_main.sim.economy_snapshot_json()).get("board", []):
 		if not bool(offer.get("active", false)):
@@ -2580,7 +2580,10 @@ func _frame_health() -> String:
 		return "the economy/production snapshot did not parse"
 	var active := 0
 	var lost := 0
-	for offer in economy.get("contracts", []):
+	# `board`, not `contracts`: only a board entry carries `active` and
+	# `times_lost`, so reading them off `contracts` counted 0 and 0 for every
+	# frame and the lost-contract refusal below could never fire.
+	for offer in economy.get("board", []):
 		if bool(offer.get("active", false)):
 			active += 1
 		lost += int(offer.get("times_lost", 0))
