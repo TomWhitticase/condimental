@@ -486,7 +486,20 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   far)`), because the rate is over that. An empty window is a sentence,
   not an empty box. The footer says what counts: a craft starting is
   "used", a batch landing is "made", a paid order uses what it ships —
-  buying and filling are not production and never appear here.
+  buying and filling are not production and never appear here. **Over
+  the list, the pay cycle** (2026-09-26): one row per product an active
+  contract orders, REQUIRED per payday period (the contracts' mixes scaled
+  to it, a fraction to one place), THIS CYCLE and LAST CYCLE, under a
+  caption naming the cycle and its payday countdown. A finished cycle whose
+  output falls below what the contracts running NOW require (not the orders
+  live during that cycle: signing a contract can flip it once, which answers
+  "would last cycle cover what I have signed?") takes the staff panel's short
+  border and
+  prints `▲ short` in the warning colour; before the first payday last
+  cycle is `—`, and with no contract running the rows are a sentence
+  pointing at the board (C). The cycle rows and the list scroll separately
+  but share one height budget, the cycle rows first, so the panel ends
+  above the hotbar at 1280x720 however many products are ordered.
 - **The staff panel (H) is the same dark-plate menu, one row per
   category** (the staff pools MVP, ticket 3, 2026-09-12; extended by the
   quality pass's staffing-legibility ticket, 2026-09-14). Icon, name,
@@ -703,6 +716,15 @@ one-line larder strip that used to sit above the sockets.
    Buying stays in the build menu (**E**) on left-click or SHIFT+number, and
    SHIFT+number works **only while the menu is open**, where price and
    balance are on screen.
+4. **A mode tab on the plate's top-left end** says what a click does right
+   now — a ring and SELECT, a square and PLACE, or a cross and REMOVE — in
+   every mode, the resting one included (the placement prompt only speaks
+   while a ghost is on a tile). Glyph, word and rule colour (hazard yellow /
+   the prompt's green / its red) all come from `BUILD_MODES` in `main.gd`, the
+   one table the modes are named in. The glyphs are drawn, not typed: the
+   font's ○ ■ ✕ came out at three different sizes, and a drawn shape fills
+   the word's cap height in every mode. The tab stands flush on the plate's
+   top rule; it shares the name flyout's row, so the column is no taller.
 
 Borrowed patterns: a selector bigger than its slot and a fading name flyout
 (Minecraft); a framed hover spec sheet with kind, count, price and both verbs

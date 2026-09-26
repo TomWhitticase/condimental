@@ -72,7 +72,8 @@
 //! thing you buy, and a thing you can lose.**
 //!
 //! - `data/contracts.ron` is a **board of offers**. A new game activates
-//!   only the offers flagged `starter`; everything else is signed by the
+//!   only the offers flagged `starter` (the shipped board flags none, so a
+//!   new game runs no contract); everything else is signed by the
 //!   player through [`Economy::try_sign`] (the `SignContract` command) for
 //!   the offer's `price`, out of the same money counter everything else
 //!   debits. **One signature per offer**: signing an active contract is
@@ -100,6 +101,8 @@
 //! holds a registry after construction.
 
 use std::collections::{BTreeMap, BTreeSet};
+
+use fixed::types::I48F16;
 
 use super::contracts::{Contract, ContractRegistry};
 use super::inventory::Inventory;
@@ -679,6 +682,29 @@ impl Economy {
             .collect()
     }
 
+    /// What the active contracts ask for over `period_ticks`, per item: each
+    /// line's quantity scaled by how many of its contract's windows fit in
+    /// the period (`qty × period / cadence`, so a 1 500-tick contract counts
+    /// two-thirds of its mix toward a 1 000-tick payday), summed across
+    /// contracts. Fixed-point — `I48F16`, `Money`'s type used as a plain
+    /// quantity — since a cadence need not divide the period. Items in
+    /// first-mention order down the active list, which is priority order;
+    /// empty with no active contract.
+    pub fn demand_per_period(&self, period_ticks: u64) -> Vec<(ItemId, I48F16)> {
+        let mut demand: Vec<(ItemId, I48F16)> = Vec::new();
+        for active in &self.contracts {
+            let cadence = I48F16::from_num(active.contract.cadence_ticks.max(1));
+            for (item, qty) in &active.contract.mix {
+                let share = I48F16::from_num(*qty) * I48F16::from_num(period_ticks) / cadence;
+                match demand.iter_mut().find(|(id, _)| id == item) {
+                    Some((_, sum)) => *sum = sum.saturating_add(share),
+                    None => demand.push((item.clone(), share)),
+                }
+            }
+        }
+        demand
+    }
+
     /// Advances every active contract's own cadence clock and settles any
     /// that fall due on `current_tick`. For each such contract:
     ///
@@ -875,6 +901,32 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn demand_per_period_scales_each_mix_by_its_cadence_and_sums_by_item() {
+        let mut econ = fixture();
+        // fast: 2 per 100 → 10 per 500; slow: 3 per 250 → 6; impossible: 1
+        // per 100 → 5. First-mention order down the active list.
+        let demand = econ.demand_per_period(500);
+        assert_eq!(
+            demand,
+            vec![
+                ("boxed_ketchup".to_string(), I48F16::from_num(16)),
+                ("chilli_mayo".to_string(), I48F16::from_num(5)),
+            ]
+        );
+        // A cadence that does not divide the period is a fraction, not a
+        // rounding: offer is 1 per 150, so 2/3 of a box per 100 ticks.
+        econ.contracts.clear();
+        assert!(
+            econ.demand_per_period(500).is_empty(),
+            "no contract, no demand"
+        );
+        econ.money = Money::from_num(100);
+        econ.try_sign("offer", 0).expect("funded above");
+        let demand = econ.demand_per_period(100);
+        assert_eq!(demand[0].1, I48F16::from_num(100) / I48F16::from_num(150));
     }
 
     #[test]
@@ -1314,10 +1366,9 @@ mod tests {
     #[test]
     fn the_bundled_contracts_build_a_working_economy() {
         let econ = Economy::bundled();
-        assert_eq!(
-            econ.contracts.len(),
-            1,
-            "a new game starts with exactly one contract — the starter — and buys the rest"
+        assert!(
+            econ.contracts.is_empty(),
+            "a new game starts with no contract and signs every one it runs"
         );
         assert!(
             econ.board().len() > econ.contracts.len(),

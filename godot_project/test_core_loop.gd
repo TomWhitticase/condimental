@@ -247,9 +247,20 @@ func _initialize() -> void:
 	if econ == null or not econ.has("money") or not econ.has("delivery_stock") or not econ.has("contracts") or not econ.has("board"):
 		_fail("economy_snapshot_json did not return the expected shape: %s" % str(econ))
 		return
+	# A new game runs no contract, so sign the board's first offer over the
+	# wire to have an active entry whose shape can be checked.
+	if not econ["contracts"].is_empty():
+		_fail("a new game should run no contract until one is signed: %s" % str(econ["contracts"]))
+		return
+	var board: Array = econ["board"]
+	if board.is_empty():
+		_fail("economy_snapshot_json reported an empty board: %s" % str(econ))
+		return
+	sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": String(board[0]["id"])}))
+	econ = JSON.parse_string(sim.economy_snapshot_json())
 	var contracts: Array = econ["contracts"]
-	if contracts.is_empty():
-		_fail("economy_snapshot_json reported no contracts at all: %s" % str(econ))
+	if contracts.size() != 1:
+		_fail("signing the first offer should make one contract active: %s" % str(econ))
 		return
 	for contract in contracts:
 		for field in ["id", "name", "mix", "progress", "satisfied", "cadence_ticks", "window_start_tick", "next_delivery_tick", "payout", "price", "deliveries_made", "deliveries_missed", "consecutive_misses", "strikes"]:

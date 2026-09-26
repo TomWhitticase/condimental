@@ -475,6 +475,10 @@ static func build_splitter_line(sim) -> void:
 ## footprints — and `sim_core/tests/machine_footprints.rs` pins the same
 ## literals, so a content change that moves the line fails there first, with
 ## a far better message than a Godot script could give.
+##
+## A new game runs no contract, so the line ends by signing the board's first
+## offer (`corner_shop`) the way `sim::reference_chain` does — see
+## `sign_first_offer`.
 static func build_reference_line(sim) -> void:
 	# Stage 1, the crusher: one feed lane, fed by a tomato hopper.
 	place(sim, "hopper", Vector2i(-1, 0), "east", "tomato")
@@ -520,6 +524,48 @@ static func build_reference_line(sim) -> void:
 	for x in [22, 23, 24, 25]:
 		place(sim, "belt", Vector2i(x, 0), "east")
 	place(sim, "dock", Vector2i(26, 0), "east")
+	sign_first_offer(sim)
+
+
+## Signs the board's first offer, through the same `sign_contract` command
+## the SIGN button issues, so a fixture line has an order to ship against.
+## Only on a board with nothing running that has never lost that offer: a
+## caller that re-issues the line (`build_bbq_branch`) must not quietly
+## re-sign a contract its run struck out — issue #55 is why that matters.
+##
+## Those two skips are the only silent returns. A snapshot that will not
+## parse, or a signature that did not take (the bank short of the price, the
+## gate shut, the command renamed), latches `REFERENCE_FIXTURE_FAIL:` —
+## otherwise the line would build, ship to nobody, and every test on top of
+## it would measure a factory with no order, which is issue #55's shape.
+## `scripts/verify-core-loop.sh` fails any script that prints a
+## `_FIXTURE_FAIL:` marker, so a caller that never reads `fixture_failure()`
+## still goes red.
+static func sign_first_offer(sim) -> void:
+	var economy = JSON.parse_string(sim.economy_snapshot_json())
+	if not (economy is Dictionary):
+		fail_fixture("REFERENCE_FIXTURE_FAIL", "economy_snapshot_json did not parse as a Dictionary")
+		return
+	var board: Array = economy.get("board", [])
+	if board.is_empty() or not economy.get("contracts", []).is_empty():
+		return
+	var first: Dictionary = board[0]
+	if int(first.get("times_lost", 0)) > 0:
+		return
+	var id := String(first["id"])
+	sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": id}))
+	var after = JSON.parse_string(sim.economy_snapshot_json())
+	var active := false
+	if after is Dictionary:
+		for contract in after.get("contracts", []):
+			if String(contract.get("id", "")) == id:
+				active = true
+	if not active:
+		fail_fixture(
+			"REFERENCE_FIXTURE_FAIL",
+			"signing '%s' (price %s, balance %s) did not make it active"
+			% [id, first.get("price", "?"), economy.get("money", "?")]
+		)
 
 
 ## How many placements `build_reference_line` makes. Stated once here so a
@@ -607,7 +653,7 @@ const BBQ_SETTLE_TICKS := 15000
 ## How long the ketchup line is allowed to run on its own before the fixture
 ## gives up waiting for `data/unlocks.ron`'s BBQ gate to open. The shipped
 ## gate (ten deliveries) opens at about 12 000 ticks on one line serving the
-## starter order alone; this ceiling is generous enough that a balance pass
+## corner_shop order alone; this ceiling is generous enough that a balance pass
 ## on that file moves the shot's run length rather than breaking it, and
 ## tight enough that a gate which can never open fails the fixture instead of
 ## hanging it. Reaching this ceiling is a HARD FAILURE — the wait below
@@ -754,14 +800,14 @@ const MIXED_BELT := Vector2i(23, 0)
 ## So: the ketchup line runs on its own until the gate opens, and only then
 ## is the branch placed, stocked, crewed and its contracts signed. That is
 ## the sequence a player lives through, and it is the reason this fixture no
-## longer needs to sign the starter order back up — see below.
+## longer needs to re-sign the corner_shop order after the settle — see below.
 ##
 ## **NO RE-SIGN, AND WHY THAT IS NOW HONEST** (issue #55). This fixture used
 ## to sign three contracts again after the settle, because building the
 ## branch starved the ketchup bottler for thousands of ticks and the Corner
 ## Shop order struck out. Measured (`docs/DECISIONS.md`, the BBQ gate
 ## ruling), that transient costs a one-line factory about 8 500 ticks of
-## ketchup — but a factory that has reached the gate serving the starter
+## ketchup — but a factory that has reached the gate serving the corner_shop
 ## order alone has banked about 22 boxes by then, and the order draws two per
 ## 1 000 ticks from that bank without missing a window. The gate is what buys
 ## the slack; the re-sign was papering over a fixture that built in the wrong
@@ -787,8 +833,8 @@ static func build_bbq_running_line(sim) -> void:
 	}))
 	hire_until_staffed(sim)
 
-	# 2. Run it until the game offers BBQ. The starter order is the only one
-	#    active, exactly as a new game starts, so the deliveries that open
+	# 2. Run it until the game offers BBQ. The order `build_reference_line`
+	#    signed is the only one active, so the deliveries that open
 	#    the gate also bank the stock that pays for the transient below.
 	var waited := 0
 	while waited < BBQ_GATE_TICK_CEILING:
@@ -1392,7 +1438,7 @@ static func build_payday_warning_line(sim) -> void:
 ## presentation states the dock-capacity work added and nothing could
 ## photograph on demand.
 ##
-## Reaching it takes ~22 900 ticks against the starter contract's appetite —
+## Reaching it takes ~22 900 ticks against the corner_shop order's appetite —
 ## it asks for 2 boxes every 1 000 and the line makes rather more than that
 ## (`sim_core/tests/dock.rs`'s
 ## `a_full_dock_backs_the_line_up_instead_of_losing_product` measures the

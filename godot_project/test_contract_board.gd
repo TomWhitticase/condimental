@@ -10,9 +10,9 @@
 # proves is the structural half, through the same entry points a real
 # session reaches:
 #
-#   * a new game's clipboard carries ONE docket (the board's starter) and the
-#     board menu carries one row per offer, in file order, the starter's row
-#     reading SIGNED and every other row's SIGN button priced and enabled;
+#   * a new game's clipboard carries NO docket — it says nothing is running
+#     and names the key — and the board menu carries one row per offer, in
+#     file order, every row's SIGN button priced and enabled;
 #   * C opens and closes the board through `_unhandled_input`, E swaps it for
 #     the build menu, ESC closes it, and opening it changes nothing in the
 #     simulation;
@@ -169,31 +169,27 @@ func _run_checks(main) -> void:
 				_fail("row '%s' terms '%s' do not state '%s'" % [board[i]["id"], terms, fragment])
 				return
 
-	# --- A new game: one starter running, everything else for sale --------
-	var starters: Array = []
+	# --- A new game: nothing running, the whole board for sale ------------
 	var offers: Array = []
 	for offer in board:
 		if bool(offer["starter"]):
-			starters.append(String(offer["id"]))
-		else:
-			offers.append(String(offer["id"]))
-	if starters.size() != 1:
-		_fail("the shipped board must start a new game with exactly one contract, found %d starter(s)" % starters.size())
-		return
+			_fail("the shipped board must sign nothing for a new player, '%s' is a starter" % offer["id"])
+			return
+		offers.append(String(offer["id"]))
 	if offers.is_empty():
 		_fail("the shipped board must offer at least one contract to buy")
 		return
-	if _card_ids(main) != starters:
-		_fail("a new game's clipboard should carry the starter only, got %s" % str(_card_ids(main)))
+	if not _card_ids(main).is_empty() or not _active_ids(main).is_empty():
+		_fail("a new game's clipboard should carry no docket, got %s" % str(_card_ids(main)))
+		return
+	if not main._contract_empty_label.visible or not main._contract_empty_label.text.contains("press C"):
+		_fail("a new game's empty clipboard should say so and name the key, got visible=%s '%s'" % [
+			str(main._contract_empty_label.visible), main._contract_empty_label.text])
 		return
 	if not main._contract_hint_label.text.contains("C"):
 		_fail("the clipboard should tell the player which key opens the board")
 		return
 	main._update_contract_board()
-	var starter_row := _row_for(main, starters[0])
-	if not starter_row["sign_button"].disabled or String(starter_row["sign_button"].text) != "SIGNED":
-		_fail("the starter's row must read SIGNED and be disabled, got '%s'" % starter_row["sign_button"].text)
-		return
 	for id in offers:
 		var row := _row_for(main, id)
 		var offer_price := 0
@@ -498,13 +494,13 @@ func _run_checks(main) -> void:
 	if empty_whole < 2:
 		_fail("at 1280x720 with nothing running the board shows %d whole offer(s) — it must show at least 2 to compare" % empty_whole)
 		return
-	main._sign_contract_offer(main._board_row_ids.find(starters[0]))
-	if main._board_active_empty.visible or _left_column_ids(main) != [String(starters[0])]:
+	main._sign_contract_offer(main._board_row_ids.find(offers[0]))
+	if main._board_active_empty.visible or _left_column_ids(main) != [String(offers[0])]:
 		_fail("signing from an empty board should replace the empty card with that docket, left %s" % str(_left_column_ids(main)))
 		return
 	if main._contract_empty_label.visible or main._contract_cards.size() != 1:
-		_fail("signing the starter again should bring one docket back and hide the empty line")
+		_fail("signing an offer again should bring one docket back and hide the empty line")
 		return
 
-	print("CONTRACT_BOARD_OK: one starter docket on a new game, %d offers on the board in file order, C/E/ESC modal rules, SIGN debits once and refuses twice, ready/ok/risk/last-chance read four ways, a lost contract leaves the clipboard, is announced, and is re-signed at its price; an empty clipboard names the key; the board's left column holds the running dockets, gains a signature at once and has an empty card held to its pinned width; at 1280x720 the board shows %d whole offers on a new game and %d with nothing running" % [board.size(), fresh_whole, empty_whole])
+	print("CONTRACT_BOARD_OK: no docket on a new game, %d offers on the board in file order, C/E/ESC modal rules, SIGN debits once and refuses twice, ready/ok/risk/last-chance read four ways, a lost contract leaves the clipboard, is announced, and is re-signed at its price; an empty clipboard names the key; the board's left column holds the running dockets, gains a signature at once and has an empty card held to its pinned width; at 1280x720 the board shows %d whole offers on a new game and %d with nothing running" % [board.size(), fresh_whole, empty_whole])
 	quit(0)

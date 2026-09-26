@@ -243,7 +243,7 @@ fn the_chain_ships_and_earns_with_no_player_command_but_refilling() {
         .0
         .clone();
 
-    // Two boxes is the shipped starter contract's whole mix, so reaching it
+    // Two boxes is the shipped corner_shop offer's whole mix, so reaching it
     // means the loop `GAMEPLAY.md` §1 describes has closed by itself.
     let shipped = run_until_shipped(&mut world, 2);
     assert!(
@@ -341,7 +341,7 @@ fn finished_product_actually_travels_the_dock_belt() {
 // ---------------------------------------------------------------------
 
 /// What arrives stays on the dock, and the stock every contract sees is that
-/// dock's; when the starter contract pays, it takes its mix off THIS dock and
+/// dock's; when the signed corner_shop order pays, it takes its mix off THIS dock and
 /// the dock records the tick it was paid from. `used` is the per-dock count
 /// presentation draws its grid of places from.
 #[test]
@@ -350,7 +350,7 @@ fn what_arrives_waits_on_the_dock_until_a_contract_takes_it() {
     let mix: u32 = world
         .economy()
         .contract("corner_shop")
-        .expect("the starter is active")
+        .expect("the fixture's signed order is active")
         .contract
         .mix
         .iter()
@@ -404,7 +404,7 @@ fn what_arrives_waits_on_the_dock_until_a_contract_takes_it() {
     }
     assert!(
         paid_at.is_some(),
-        "the starter contract must pay within the budget"
+        "the signed corner_shop order must pay within the budget"
     );
 }
 
@@ -418,7 +418,7 @@ fn a_mothballed_dock_holds_its_stock_back_from_every_contract() {
     let mut world = world();
     let tile = the_dock(&world).tile;
 
-    // Enough on the dock to pay the starter's whole mix.
+    // Enough on the dock to pay corner_shop's whole mix.
     for _ in 0..500_000u32 {
         if the_dock(&world).used >= 2 {
             break;
@@ -435,7 +435,7 @@ fn a_mothballed_dock_holds_its_stock_back_from_every_contract() {
     let due = world
         .economy()
         .contract("corner_shop")
-        .expect("the starter is still active")
+        .expect("the fixture's signed order is still active")
         .next_delivery_tick;
     while world.current_tick() < due {
         world.tick();
@@ -565,7 +565,7 @@ fn a_docks_places_clear_the_biggest_order_on_the_board() {
 #[test]
 fn a_full_dock_backs_the_line_up_instead_of_losing_product() {
     // Twice `world()`'s larder's worth of *money*: the line has to out-produce
-    // the starter contract's appetite by a whole dock, and one larder may run
+    // the signed corner_shop order's appetite by a whole dock, and one larder may run
     // dry before then (a dead line proves nothing here). It cannot be bought
     // twice over in one go — a holding is capped at what the warehouse holds
     // since W1 — so the second larder arrives through `restock`.

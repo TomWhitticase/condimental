@@ -178,10 +178,6 @@ pub enum ContractLoadError {
     ZeroStrikes {
         id: String,
     },
-    /// A board with no `starter` contract. A new game would begin with no
-    /// active contract at all — a factory with nobody to sell to until the
-    /// player finds the board, which is a bad first minute, not content.
-    NoStarter,
     /// A contract asks for an item no recipe in `recipes.ron` produces —
     /// so nothing could ever satisfy it. Reported the same way
     /// [`super::machines::MachineLoadError::UnknownKindInRecipe`] reports a
@@ -251,11 +247,6 @@ impl std::fmt::Display for ContractLoadError {
                 f,
                 "contracts.ron contract '{id}' has strikes 0 — it could never be lost; use 1 \
                  for 'one miss loses it'"
-            ),
-            ContractLoadError::NoStarter => write!(
-                f,
-                "contracts.ron marks no contract `starter: true` — a new game would begin \
-                 with nothing to deliver against; flag at least one"
             ),
             ContractLoadError::UnproducibleItem {
                 contract,
@@ -340,9 +331,6 @@ impl ContractRegistry {
                 strikes: def.strikes,
                 starter: def.starter,
             });
-        }
-        if !contracts.iter().any(|c| c.starter) {
-            return Err(ContractLoadError::NoStarter);
         }
         Ok(Self { contracts })
     }
@@ -735,12 +723,14 @@ mod tests {
         }
     }
 
+    /// No starter is a valid board — it is the shipped one. A new game signs
+    /// nothing on the player's behalf; the first contract is theirs to pick.
     #[test]
-    fn rejects_a_board_with_no_starter() {
+    fn a_board_with_no_starter_loads_and_starts_nothing() {
         let text = EXAMPLE.replacen("starter: true,", "", 1);
-        let err = ContractRegistry::from_ron_str(&text).unwrap_err();
-        assert!(matches!(err, ContractLoadError::NoStarter));
-        assert!(err.to_string().contains("starter"));
+        let registry = ContractRegistry::from_ron_str(&text).unwrap();
+        assert_eq!(registry.starters().count(), 0);
+        assert_eq!(registry.len(), 2);
     }
 
     #[test]

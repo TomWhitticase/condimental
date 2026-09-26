@@ -281,11 +281,11 @@ func _initialize() -> void:
 	# `_detect_payouts` is a pure function of (snapshot, tick), so these are
 	# driven with hand-made snapshots rather than by contriving a factory that
 	# happens to cross two boundaries in one frame.
-	# Since the contract board landed, a new game starts with only the
-	# `starter` contract ACTIVE and every other one waiting as an offer, so the
-	# two shapes this case needs come from the active list first and the board
-	# behind it. Only the id and the payout are read either way — the snapshots
-	# below are hand-made, which is the whole point of the comment above.
+	# Since the contract board landed, only some contracts are ACTIVE and the
+	# rest wait as offers (a new game signs none), so the two shapes this
+	# case needs come from the active list first and the board behind it.
+	# Only the id and the payout are read either way — the snapshots below
+	# are hand-made, which is the whole point of the comment above.
 	var board: Array = (econ.get("contracts", []) as Array).duplicate()
 	for offer in econ.get("board", []):
 		if not bool((offer as Dictionary).get("active", false)):

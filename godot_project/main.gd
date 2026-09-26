@@ -1287,6 +1287,27 @@ var _storage_state: Dictionary = {} # base_cap / slot_stack / total_bays / used_
 var _build_kind := ""
 var _build_direction := "east"
 var _remove_mode := false
+## The three answers to "what does a click do right now", and the ONE place
+## each is named. `_build_mode()` picks the key from the two variables above;
+## the mode tab beside the hotbar (`_update_mode_indicator`) draws the glyph
+## and prints the word from here and colours its rule from here, so a new mode
+## is one entry and one branch, never a second list in the HUD to keep in step.
+## Glyph AND word AND rule colour — UI_UX.md §7, never colour alone. The rules
+## are the placement prompt's own green and red (`_placement_prompt_style`),
+## and SELECT takes the plates' hazard yellow: it is the resting state.
+## The glyph is a shape `_draw_mode_glyph` draws, not a font character: the
+## font's ○ ■ ✕ rendered at three different sizes (■ was a 6px dot beside a
+## 14px ✕), and a drawn one is cap height for all three by construction.
+const BUILD_MODES := {
+	"select": {"glyph": "ring", "word": "SELECT", "rule": Color(0.85, 0.63, 0.11, 0.95)},
+	"place": {"glyph": "square", "word": "PLACE", "rule": Color(0.35, 0.85, 0.45, 0.95)},
+	"remove": {"glyph": "cross", "word": "REMOVE", "rule": Color(0.92, 0.35, 0.30, 0.95)},
+}
+var _mode_indicator: PanelContainer
+var _mode_indicator_glyph: Control
+var _mode_indicator_label: Label
+var _mode_indicator_shown := "" # the BUILD_MODES key the tab last showed
+var _mode_indicator_styles: Dictionary = {} # BUILD_MODES key -> StyleBoxFlat, built once
 var _ghost_root: Node3D
 var _ghost_asset := ""
 var _ghost_tile := Vector2i.ZERO
@@ -1879,9 +1900,9 @@ var _market_open := false
 
 # --- The contracts board (the contract-board epic, 2026-09-10) -------------
 # `data/contracts.ron` is a board of OFFERS since its schema 2: a new game
-# runs only its starter, and every other contract is SIGNED here for its
-# price. A contract that misses its strikes in a row is LOST and comes back
-# here to be signed again, at the same price. Built from
+# runs no contract, and every contract is SIGNED here for its price. A
+# contract that misses its strikes in a row is LOST and comes back here
+# to be signed again, at the same price. Built from
 # `economy_snapshot_json`'s `board` array the way the build menu is built
 # from `shop_snapshot_json`'s entries: one row per offer, in file (=
 # priority) order, nothing hardcoded — a fifth contract in the file is a
@@ -2012,6 +2033,16 @@ var _production_window := 1
 ## carries nothing any other readout needs), on the load's cadence.
 var _production_snapshot: Dictionary = {}
 var _production_polled_tick := -1
+## The pay-cycle block over the list (ticket 7, 2026-09-26): per product an
+## active contract orders, REQUIRED per pay cycle, MADE this cycle and last,
+## straight off the wire's `cycle`. `_production_cycle_rows` is one entry
+## per line, see `_build_production_cycle_row`.
+var _production_cycle_box: VBoxContainer
+var _production_cycle_scroll: ScrollContainer
+var _production_cycle_rows_box: VBoxContainer
+var _production_cycle_rows: Array = []
+var _production_cycle_caption: Label
+var _production_cycle_empty_label: Label
 
 # --- THE COOKBOOK (B) -----------------------------------------------------
 # The recipe book: the sauce tree, and a page per sauce, machine and raw.
@@ -2028,6 +2059,9 @@ var _cookbook_polled_tick := -1
 const PRODUCTION_ALL_TIME := -1
 const PRODUCTION_METER_WIDTH := 150.0 * UI_SCALE
 const PRODUCTION_ICON_SIZE := Vector2(36, 36) * UI_SCALE
+## The pay-cycle block's three figure columns, in the wire's terms.
+const PRODUCTION_CYCLE_COLUMNS := ["REQUIRED", "THIS CYCLE", "LAST CYCLE"]
+const PRODUCTION_CYCLE_COLUMN_WIDTH := 130.0 * UI_SCALE
 const STAFF_METER_WIDTH := 150.0 * UI_SCALE
 const STAFF_METER_HEIGHT := 20.0 * UI_SCALE
 const STAFF_ICON_SIZE := Vector2(40, 40) * UI_SCALE
@@ -6160,7 +6194,7 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_empty_label = Label.new()
 	_contract_empty_label.name = "NoContracts"
 	_contract_empty_label.label_settings = _contract_ink_settings
-	_contract_empty_label.text = "no contracts — nothing to deliver against\npress C to sign one from the board"
+	_contract_empty_label.text = "no contracts — press C to sign one"
 	_contract_empty_label.visible = false
 	body.add_child(_contract_empty_label)
 
@@ -10003,6 +10037,7 @@ func _build_production_panel(hud: CanvasLayer, base_settings: LabelSettings) -> 
 	# harness (see `_build_ingredient_market`).
 	_production_rows.clear()
 	_production_window_buttons.clear()
+	_production_cycle_rows.clear()
 
 	_production_panel = PanelContainer.new()
 	_production_panel.name = "ProductionPanel"
@@ -10043,6 +10078,8 @@ func _build_production_panel(hud: CanvasLayer, base_settings: LabelSettings) -> 
 	for index in range(windows.size()):
 		_build_production_window_button(selector, base_settings, index, "last %s" % String(windows[index].get("id", "?")))
 	_build_production_window_button(selector, base_settings, PRODUCTION_ALL_TIME, "all time")
+
+	_build_production_cycle_block(body)
 
 	# The column captions, once, over the list — MADE and USED are the two
 	# halves of every row and naming them per row would be noise.
@@ -10094,6 +10131,199 @@ func _build_production_panel(hud: CanvasLayer, base_settings: LabelSettings) -> 
 	_position_production_panel()
 
 
+## The pay-cycle block: a caption naming the cycle and its countdown, the
+## three column captions, one row per demanded product, and a sentence in
+## their place when no contract is running. Above the rolling list because
+## it answers the question the orders ask — "does my factory keep up?" —
+## and the list below answers "what is it doing?".
+func _build_production_cycle_block(body: VBoxContainer) -> void:
+	_production_cycle_box = VBoxContainer.new()
+	_production_cycle_box.name = "ProductionCycle"
+	_production_cycle_box.add_theme_constant_override("separation", _ui_i(4))
+	body.add_child(_production_cycle_box)
+
+	_production_cycle_caption = Label.new()
+	_production_cycle_caption.name = "CycleCaption"
+	_production_cycle_caption.label_settings = _staff_meta_settings()
+	_production_cycle_box.add_child(_production_cycle_caption)
+
+	var captions := HBoxContainer.new()
+	captions.name = "CycleColumns"
+	captions.add_theme_constant_override("separation", _ui_i(14))
+	_production_cycle_box.add_child(captions)
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(PRODUCTION_ICON_SIZE.x + _ui_px(14.0) + _ui_px(150.0), 0.0)
+	captions.add_child(spacer)
+	for caption in PRODUCTION_CYCLE_COLUMNS:
+		var label := Label.new()
+		label.label_settings = _staff_meta_settings()
+		label.text = caption
+		label.custom_minimum_size = Vector2(PRODUCTION_CYCLE_COLUMN_WIDTH, 0.0)
+		captions.add_child(label)
+
+	# The rows scroll on their own, so a third ordered product costs the
+	# panel no height: `_fit_production_scrolls` shares one budget between
+	# this and the list below.
+	_production_cycle_scroll = ScrollContainer.new()
+	_production_cycle_scroll.name = "CycleScroll"
+	_production_cycle_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_production_cycle_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_production_cycle_box.add_child(_production_cycle_scroll)
+
+	_production_cycle_rows_box = VBoxContainer.new()
+	_production_cycle_rows_box.name = "CycleRows"
+	_production_cycle_rows_box.add_theme_constant_override("separation", _ui_i(4))
+	_production_cycle_rows_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_production_cycle_scroll.add_child(_production_cycle_rows_box)
+
+	_production_cycle_empty_label = Label.new()
+	_production_cycle_empty_label.name = "CycleEmpty"
+	_production_cycle_empty_label.label_settings = _staff_meta_settings()
+	_production_cycle_empty_label.text = "no orders running — sign one on the contracts board (C) to see what it needs per pay cycle"
+	_production_cycle_box.add_child(_production_cycle_empty_label)
+
+
+## A per-cycle requirement in words: whole when it is whole (`2`), else to
+## one place (`6.7`) — a 1 500-tick order over a 1 000-tick payday asks for
+## two-thirds of its mix, and rounding that to a whole box would lie. The
+## wire's figure is a fixed-point sum, so a whole 11 can arrive as 10.99998:
+## it is rounded to the place first and judged whole after.
+func _production_required_text(required: float) -> String:
+	var text := "%.1f" % required
+	return text.trim_suffix(".0")
+
+
+## The pay-cycle rows, FORMATTED from the snapshot's `cycle` in the wire's
+## order (contract priority) — nothing sorted, summed or judged here: the
+## sim says what is required and whether last cycle fell short. Before the
+## first payday there is no last cycle, so it prints `—`, never a zero that
+## would read as a factory that made nothing. Pure given the snapshot.
+func _production_cycle_rows_for(snapshot: Dictionary) -> Array:
+	var cycle = snapshot.get("cycle", {})
+	if not (cycle is Dictionary):
+		return []
+	var closed := int(cycle.get("cycles_closed", 0)) > 0
+	var rows: Array = []
+	for line in cycle.get("lines", []):
+		if not (line is Dictionary):
+			continue
+		var id := String(line.get("id", ""))
+		var short := bool(line.get("short", false))
+		var last := int(line.get("produced_last_cycle", 0))
+		var last_text := str(last) if closed else "—"
+		if short:
+			last_text += "  ▲ short"
+		rows.append({
+			"id": id,
+			"name": _item_display_name(id),
+			"required": _production_required_text(float(line.get("required", 0.0))),
+			"this_cycle": str(int(line.get("produced_this_cycle", 0))),
+			"last_cycle": last_text,
+			"short": short,
+		})
+	return rows
+
+
+## The caption over the block: what "cycle" means and when this one ends —
+## `ORDERS PER PAY CYCLE (34s)  ·  payday in 12s`.
+func _production_cycle_caption_text(snapshot: Dictionary) -> String:
+	var cycle = snapshot.get("cycle", {})
+	if not (cycle is Dictionary):
+		return ""
+	var text := "ORDERS PER PAY CYCLE (%s)" % _format_remaining(int(cycle.get("period_ticks", 0)))
+	var next_tick := int(cycle.get("next_tick", 0))
+	if next_tick > 0:
+		text += "    ·    payday in %s" % _format_remaining(next_tick - sim.current_tick())
+	return text
+
+
+## One demanded product: icon and name, then REQUIRED / THIS CYCLE / LAST
+## CYCLE as plain figures in fixed columns. A short row takes the staff
+## panel's short border and prints its last-cycle figure in the warning
+## colour with the words beside it (UI_UX.md §7: colour never alone).
+func _build_production_cycle_row(row_state: Dictionary) -> Dictionary:
+	var id := String(row_state.get("id", "?"))
+	var panel := PanelContainer.new()
+	panel.name = "Cycle_%s" % id
+	panel.add_theme_stylebox_override("panel", _staff_row_style(false))
+	_production_cycle_rows_box.add_child(panel)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", _ui_i(14))
+	panel.add_child(row)
+
+	var icon := TextureRect.new()
+	icon.name = "Icon"
+	icon.custom_minimum_size = PRODUCTION_ICON_SIZE
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	icon.texture = _icon_for(id)
+	row.add_child(icon)
+
+	var name_label := Label.new()
+	name_label.name = "Name"
+	name_label.label_settings = _contract_name_settings_dark()
+	name_label.text = String(row_state.get("name", id))
+	name_label.custom_minimum_size = Vector2(_ui_px(150.0), 0.0)
+	name_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(name_label)
+
+	var figures := {}
+	for key in ["required", "this_cycle", "last_cycle"]:
+		var label := Label.new()
+		label.name = key.to_pascal_case()
+		label.label_settings = _contract_name_settings_dark()
+		label.custom_minimum_size = Vector2(PRODUCTION_CYCLE_COLUMN_WIDTH, 0.0)
+		label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(label)
+		figures[key] = label
+	# The last-cycle figure's own settings, since its colour is the row's
+	# verdict (`_staff_state_settings`' reason).
+	var warn := _contract_name_settings_dark()
+	warn.font_color = METER_FILL_WARN
+	return {
+		"id": id, "panel": panel, "required": figures["required"],
+		"this_cycle": figures["this_cycle"], "last_cycle": figures["last_cycle"],
+		"plain": figures["required"].label_settings, "warn": warn, "short": false,
+	}
+
+
+func _update_production_cycle_block() -> void:
+	if _production_cycle_box == null:
+		return
+	var rows := _production_cycle_rows_for(_production_snapshot)
+	var same: bool = rows.size() == _production_cycle_rows.size()
+	if same:
+		for i in range(rows.size()):
+			same = same and String(rows[i]["id"]) == String(_production_cycle_rows[i]["id"])
+	if not same:
+		for row in _production_cycle_rows:
+			var panel: Node = row["panel"]
+			if is_instance_valid(panel):
+				if panel.get_parent() != null:
+					panel.get_parent().remove_child(panel)
+				panel.queue_free()
+		_production_cycle_rows.clear()
+		for row_state in rows:
+			_production_cycle_rows.append(_build_production_cycle_row(row_state))
+	for i in range(rows.size()):
+		var state: Dictionary = rows[i]
+		var row: Dictionary = _production_cycle_rows[i]
+		row["required"].text = String(state["required"])
+		row["this_cycle"].text = String(state["this_cycle"])
+		row["last_cycle"].text = String(state["last_cycle"])
+		var short := bool(state["short"])
+		if row["short"] != short:
+			row["short"] = short
+			row["panel"].add_theme_stylebox_override("panel", _staff_row_style(short))
+			row["last_cycle"].label_settings = row["warn"] if short else row["plain"]
+	_production_cycle_caption.text = _production_cycle_caption_text(_production_snapshot)
+	_production_cycle_empty_label.visible = rows.is_empty()
+	_production_cycle_box.get_node("CycleColumns").visible = not rows.is_empty()
+	_production_cycle_scroll.visible = not rows.is_empty()
+
+
 ## One window button. The selected one wears the hotbar's selected-socket
 ## style, the rest its stocked style — "the thing I have chosen" looks the
 ## same wherever the game asks (the configuration panel's picker made the
@@ -10141,10 +10371,39 @@ func _position_production_panel() -> void:
 	# row showing past the cut is the thing that says "there is more, scroll".
 	# Asking for whole rows here bought a tidier edge and paid a readable row
 	# for it: at 1600x900 the panel ended 161px short of the column it had.
-	_fit_grid_scroll(_production_scroll, _production_rows_box, bounds.y - reserved - _ui_px(16.0))
+	_fit_production_scrolls(bounds.y - reserved - _ui_px(16.0))
 	var panel_size := _production_panel.get_combined_minimum_size()
 	_production_panel.position.x = maxf(0.0, (bounds.x - panel_size.x) * 0.5)
 	_production_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
+
+
+## The pay-cycle rows and the rolling list share ONE height budget: what
+## `available` leaves after the panel's own chrome (measured, as
+## `_fit_grid_scroll` measures it). Each scroll alone, the cycle block grew
+## the panel by a row per ordered product past the list's floor — at
+## 1280x720 two products put it on the hotbar and three put it off the
+## screen. The cycle rows go first, since they answer the question the
+## orders ask, but never past what leaves the list `_fit_grid_scroll`'s
+## floor or half the room, whichever is more; the list takes the rest. Each
+## keeps at least one row's stub so neither vanishes, and those stubs are
+## the only thing that can overrun `available`, on a window smaller than
+## 1280x720.
+func _fit_production_scrolls(available: float) -> void:
+	if _production_cycle_scroll == null or _production_scroll == null:
+		return
+	var cycle_natural: float = _production_cycle_rows_box.get_combined_minimum_size().y if _production_cycle_scroll.visible else 0.0
+	var list_natural: float = _production_rows_box.get_combined_minimum_size().y if _production_scroll.visible else 0.0
+	_production_cycle_scroll.custom_minimum_size.y = cycle_natural
+	_production_scroll.custom_minimum_size.y = list_natural
+	var chrome: float = _production_panel.get_combined_minimum_size().y - cycle_natural - list_natural
+	var room: float = maxf(0.0, available - chrome)
+	var cycle: float = minf(cycle_natural, maxf(room * 0.5, room - _ui_px(110.0)))
+	if _production_cycle_rows_box.get_child_count() > 0:
+		var first_row: float = (_production_cycle_rows_box.get_child(0) as Control).get_combined_minimum_size().y
+		cycle = maxf(cycle, minf(cycle_natural, first_row))
+	var list: float = minf(list_natural, maxf(room - cycle, _ui_px(40.0)))
+	_production_cycle_scroll.custom_minimum_size.y = cycle
+	_production_scroll.custom_minimum_size.y = list
 
 
 func _production_poll_due() -> bool:
@@ -10354,6 +10613,7 @@ func _rebuild_production_rows(rows: Array) -> void:
 func _update_production_panel() -> void:
 	if _production_panel == null:
 		return
+	_update_production_cycle_block()
 	var rows := _production_rows_for(_production_snapshot, _production_window)
 	if not _production_rows_match(rows):
 		_rebuild_production_rows(rows)
@@ -13209,7 +13469,9 @@ func _build_hotbar(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	# behind it unbuildable. Only the slot buttons themselves take the mouse.
 	_hotbar_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hotbar_root.alignment = BoxContainer.ALIGNMENT_CENTER
-	_hotbar_root.add_theme_constant_override("separation", _ui_i(6))
+	# No gap between the rows: the mode tab stands ON the plate's top rule.
+	# The flyout keeps its old clearance as its own bottom margin below.
+	_hotbar_root.add_theme_constant_override("separation", 0)
 	hud.add_child(_hotbar_root)
 
 	# The larder strip used to sit at the TOP of this column. It is the STOCK
@@ -13229,7 +13491,25 @@ func _build_hotbar(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_hotbar_flyout.label_settings = flyout_settings
 	_hotbar_flyout.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_hotbar_flyout.modulate = Color(1, 1, 1, 0)
-	_hotbar_root.add_child(_hotbar_flyout)
+
+	# The flyout shares its row with the mode tab: a MarginContainer stacks
+	# its children, so the flyout stays centred over the sockets and the tab
+	# sits on the plate's left end without making the column any taller (the
+	# strip is nearly the window's width at 1280, so there is no room BESIDE
+	# it, and every panel above caps itself against this column's height).
+	# The flyout is bare text, so it floats the column's old 6px clear of the
+	# plate; the tab is a plate with its own rule, so it sits flush on the
+	# hotbar's (test_hud_plates pins the zero gap).
+	var top_row := MarginContainer.new()
+	top_row.name = "HotbarTopRow"
+	top_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hotbar_root.add_child(top_row)
+	var flyout_row := MarginContainer.new()
+	flyout_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	flyout_row.add_theme_constant_override("margin_bottom", _ui_i(6))
+	top_row.add_child(flyout_row)
+	flyout_row.add_child(_hotbar_flyout)
+	_build_mode_indicator(top_row, base_settings)
 
 	# Nearly opaque, like the build menu's own plate rather than the help
 	# strip's lighter one: at 0.80 the floor's diamond tiling showed through
@@ -13474,6 +13754,9 @@ func _hotbar_selected_index() -> int:
 ## an eleven-entry object per frame is the same cost the contract clipboard
 ## already pays, and it is what keeps the hotbar honest with no push channel.
 func _update_hotbar() -> void:
+	# Every route into or out of a mode ends here (enter, toggle, exit), so
+	# this is the one call that keeps the tab honest.
+	_update_mode_indicator()
 	if _hotbar_slots.is_empty():
 		return
 	var snapshot = JSON.parse_string(sim.shop_snapshot_json())
@@ -13566,6 +13849,110 @@ func _position_hotbar() -> void:
 	_hotbar_root.set_anchors_and_offsets_preset(
 		Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE, HOTBAR_BOTTOM_MARGIN
 	)
+
+
+## The mode tab: a small plate on the hotbar's top-left edge saying which
+## `BUILD_MODES` entry a click is in. The placement prompt says the same thing
+## beside the cursor, but only while a ghost is on a tile — this is the one
+## readout that is there in every mode, including the resting one.
+func _build_mode_indicator(row: Control, base_settings: LabelSettings) -> void:
+	for mode in BUILD_MODES:
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(0.06, 0.06, 0.07, 0.93)
+		style.border_color = BUILD_MODES[mode]["rule"]
+		style.border_width_top = _ui_i(3)
+		style.content_margin_left = _ui_px(8.0)
+		style.content_margin_right = _ui_px(8.0)
+		style.content_margin_top = _ui_px(3.0)
+		style.content_margin_bottom = _ui_px(2.0)
+		_mode_indicator_styles[mode] = style
+
+	_mode_indicator = PanelContainer.new()
+	_mode_indicator.name = "ModeIndicator"
+	_mode_indicator.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_mode_indicator.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_mode_indicator.size_flags_vertical = Control.SIZE_SHRINK_END
+	row.add_child(_mode_indicator)
+
+	var settings := LabelSettings.new()
+	settings.font_size = _ui_font(-1)
+	settings.font_color = Color(0.92, 0.93, 0.95)
+	settings.outline_size = base_settings.outline_size
+	settings.outline_color = base_settings.outline_color
+
+	var line := HBoxContainer.new()
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	line.add_theme_constant_override("separation", _ui_i(6))
+	_mode_indicator.add_child(line)
+
+	# A cap-height square to draw in, whatever the mode: about 0.72 of the
+	# font size is a sans face's cap height.
+	var side := roundf(settings.font_size * 0.72)
+	_mode_indicator_glyph = Control.new()
+	_mode_indicator_glyph.name = "ModeGlyph"
+	_mode_indicator_glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_mode_indicator_glyph.custom_minimum_size = Vector2(side, side)
+	_mode_indicator_glyph.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_mode_indicator_glyph.draw.connect(_draw_mode_glyph.bind(_mode_indicator_glyph))
+	line.add_child(_mode_indicator_glyph)
+
+	_mode_indicator_label = Label.new()
+	_mode_indicator_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_mode_indicator_label.label_settings = settings
+	line.add_child(_mode_indicator_label)
+	_mode_indicator_shown = "" # a rebuilt tab starts blank, whatever the last one showed
+	_update_mode_indicator()
+
+
+## Called every refresh from `_update_hotbar`, so it does nothing unless the
+## mode actually changed: re-setting the stylebox override re-lays the tab out.
+func _update_mode_indicator() -> void:
+	if _mode_indicator == null:
+		return
+	var mode := _build_mode()
+	if mode == _mode_indicator_shown:
+		return
+	_mode_indicator_shown = mode
+	_mode_indicator_label.text = BUILD_MODES[mode]["word"]
+	_mode_indicator.add_theme_stylebox_override("panel", _mode_indicator_styles[mode])
+	_mode_indicator_glyph.queue_redraw()
+
+
+## The mode's glyph in its rule colour, over the label's black outline so it
+## reads on the same terms as the word beside it. Every shape fills the same
+## cap-height square with the same stroke, so no one mode reads as a dot.
+## `g` is bound at connect time, not read from `_mode_indicator_glyph`: a
+## node may only draw onto itself, and a rebuilt HUD leaves the old one live.
+func _draw_mode_glyph(g: Control) -> void:
+	if _mode_indicator_shown == "":
+		return
+	var entry: Dictionary = BUILD_MODES[_mode_indicator_shown]
+	var ink: Color = entry["rule"]
+	var halo: Color = _mode_indicator_label.label_settings.outline_color
+	var edge := maxf(1.0, _mode_indicator_label.label_settings.outline_size * 0.5)
+	var side := minf(g.size.x, g.size.y)
+	var box := Rect2((g.size - Vector2(side, side)) * 0.5, Vector2(side, side))
+	var stroke := maxf(2.0, roundf(side * 0.24))
+	match String(entry["glyph"]):
+		"ring":
+			var radius := (side - stroke) * 0.5
+			g.draw_arc(box.get_center(), radius, 0.0, TAU, 32, halo, stroke + edge * 2.0, true)
+			g.draw_arc(box.get_center(), radius, 0.0, TAU, 32, ink, stroke, true)
+		"square":
+			# Inset a stroke's width: a solid block the full cap square
+			# outweighs the ring and the cross beside it.
+			var fill := box.grow(-stroke * 0.5)
+			g.draw_rect(fill.grow(edge), halo)
+			g.draw_rect(fill, ink)
+		"cross":
+			var inset := stroke * 0.5
+			var a := box.position + Vector2(inset, inset)
+			var b := box.end - Vector2(inset, inset)
+			var c := Vector2(b.x, a.y)
+			var d := Vector2(a.x, b.y)
+			for pass_ in [[halo, stroke + edge * 2.0], [ink, stroke]]:
+				g.draw_line(a, b, pass_[0], pass_[1], true)
+				g.draw_line(c, d, pass_[0], pass_[1], true)
 
 
 ## Terraria's framed hover panel, in this scene's plate styling: the kind's
@@ -13860,7 +14247,17 @@ func _anything_open() -> bool:
 
 
 func _in_build_mode() -> bool:
-	return _build_kind != "" or _remove_mode
+	return _build_mode() != "select"
+
+
+## Which `BUILD_MODES` entry the player is in. Remove is checked first only
+## for safety: the two variables are exclusive by construction.
+func _build_mode() -> String:
+	if _remove_mode:
+		return "remove"
+	if _build_kind != "":
+		return "place"
+	return "select"
 
 
 ## Cycles the ghost's facing one quarter turn CLOCKWISE — the same single
@@ -17874,8 +18271,11 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 		# Issue #13 made the same trade against the SHORT-STAFFED strip and
 		# for the same reason: the clipboard has room for one line of advice,
 		# and a docket cut through a line outranks it.
+		# With nothing signed the empty line already names the key, and a new
+		# game opens that way: "sign MORE orders" would be wrong, and its line
+		# is what keeps the stock plate off the CREW plate at 1280x720.
 		if _contract_hint_label != null:
-			_contract_hint_label.visible = true
+			_contract_hint_label.visible = not _contract_empty_label.visible
 		var cut: float = _fit_grid_scroll(
 			_contract_cards_scroll,
 			_contract_cards_box,
