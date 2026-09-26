@@ -245,6 +245,21 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-26 — Open-source licence and alpha-release groundwork
+
+CONDIMENTAL has a licence: **GPL-3.0-only** plus a §7 linking exception for
+Steamworks and other platform SDKs (`LICENSE-EXCEPTION.md`), with the name
+and brand reserved in `TRADEMARKS.md` — free to build from source, and a paid Steam build for
+convenience. `THIRD_PARTY_NOTICES.md` lists what a distributed build must
+carry, and `cargo deny check licenses` (new job in `audit.yml`, allow-list in
+`deny.toml`) keeps every linked crate GPL-compatible. Ahead of the repository
+going public, the `@claude` workflow now answers only owners, members and
+collaborators; `SECURITY.md`, `CODE_OF_CONDUCT.md` and a player bug-report
+form were added; `project.godot` has a version (`0.1.0`) and a player-facing
+description. Not done here, and still needed before a Steam build: desktop
+export presets, a tagged release workflow, macOS signing, and the Steamworks
+side. Decision record: `docs/DECISIONS_LOG.md`, 2026-09-26.
+
 ### 2026-09-26 — Mustard can be seen, and the guard that could not see it
 
 Mustard now draws. `main.gd` gained the five tables the content needed:
