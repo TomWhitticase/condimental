@@ -25,6 +25,70 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-26: **CONDIMENTAL is GPL-3.0-only; the name and brand are
+  reserved.** (Owner's call, from a release-readiness audit.)
+
+  **What was asked.** The owner is preparing an alpha release on Steam and
+  wants the game to be open source at the same time: "free for anyone to
+  clone the repo and play themselves and keep the src opensource, but publish
+  it also on steam for very cheap cost". Until now the repository had no
+  licence at all — the README's footer read "no licence granted yet" — which
+  in law means nobody may build, fork or share it, however public the code.
+
+  **The options put to the owner.** GPL-3.0 (recommended), MIT, or holding
+  off. Any genuine open-source licence lets a third party build the game and
+  sell it too, so the licence cannot be what protects the paid release. The
+  difference between the two is what a redistributor may do with the code:
+  MIT allows a closed-source commercial derivative; the GPL requires anyone
+  who distributes a build to ship its source under the same terms, so a
+  rip-off can never be closed. What actually stops a confusing copy on a store
+  is the **name**, which a copyright licence does not grant — hence
+  `TRADEMARKS.md` beside `LICENSE`, the model other open-source games with a
+  paid store build use. The owner chose GPL-3.0. `-only` rather than
+  `-or-later` keeps the terms exactly the ones chosen.
+
+  **The Steamworks linking exception.** Review of this change (PR #197)
+  caught that plain GPL-3.0 forbids conveying a build linked against a
+  proprietary platform SDK — Valve's Steamworks SDK for achievements, the
+  overlay or cloud APIs, including as bundled by GodotSteam — and that with
+  contributions accepted inbound = outbound, only the owner *today*, while
+  still the sole copyright holder, can add the permission that allows it.
+  Once outside code is merged, relicensing or adding an exception needs every
+  contributor's consent, so "the owner can relicence later" is only true
+  until the first external PR. Three routes were put to the owner: a GPLv3 §7
+  additional permission for platform SDKs, a CLA/copyright assignment, or
+  recording that the Steam build will never link Steamworks. The owner chose
+  the **§7 linking exception** (`LICENSE-EXCEPTION.md`, modelled on the FSF's
+  own template for linking exceptions): it keeps Steam features possible,
+  asks nothing extra of contributors, and every line of CONDIMENTAL's own
+  code stays GPL-3.0 and published. `LICENSE` stays the unmodified GPLv3 text,
+  and the `Cargo.toml` `license` fields stay `GPL-3.0-only`: there is no SPDX
+  identifier for a bespoke exception, and cargo-deny judges the crates'
+  licence, which is unchanged.
+
+  **Compatibility, checked rather than assumed.** Every crate linked into
+  `sim_core` (`cargo tree -p sim_core -e normal`) is MIT, Apache-2.0, Zlib,
+  BSD-2-Clause, Unlicense, Unicode-3.0 or MPL-2.0 (the `godot`/gdext crates).
+  Apache-2.0 is compatible with GPLv3 (not GPLv2, which is one reason for 3);
+  MPL-2.0 is by its §3.3 secondary-licence clause. Godot and the vendored
+  `.vox` importer are MIT. So the choice needed no dependency change.
+
+  **Keeping it true.** A licence check that relies on someone remembering
+  rots, so `deny.toml` lists the allowed licences and `cargo deny check
+  licenses` runs in `.github/workflows/audit.yml` beside `cargo audit`,
+  triggered by the same `Cargo.toml`/`Cargo.lock` changes.
+  `THIRD_PARTY_NOTICES.md` lists every notice a distributed build must carry,
+  including Godot's `COPYRIGHT.txt` — shipping those is the release pipeline's
+  job, which does not exist yet.
+
+  **Also in the same change**, because they are what a public repository
+  needs before the licence means anything to a stranger: `claude.yml`'s
+  `@claude` trigger is gated on the author being an owner, member or
+  collaborator (public, it would otherwise let any account spend the API key
+  on a job with `contents: write`); `SECURITY.md`, `CODE_OF_CONDUCT.md`, a
+  player-facing bug-report form; `config/version` and a player-facing
+  `config/description` in `project.godot`.
+
 - 2026-09-26: **A spend that would leave the next payday unpayable is
   confirmed, not refused, and the simulation is what decides.** (Owner's
   request; four scope calls theirs, two of them against my recommendation.)
