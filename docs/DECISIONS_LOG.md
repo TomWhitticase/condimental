@@ -31,7 +31,9 @@ See [WORKFLOW.md](WORKFLOW.md).
   runs.** When the task forbids merging, or the change also waits on the
   owner (a PR the owner asked to review, a design-doc deviation, a `gdext`
   bump, a save-format change), only the *merge* is held. A PR sits open
-  unreviewed only if no subagent can be launched. This amends the 2026-09-25
+  unreviewed only if no subagent can be launched. A `CHANGES REQUESTED`
+  verdict is work still in hand: fix it and re-review, or hand the PR over
+  naming the verdict. This amends the 2026-09-25
   rule below, which read "with no verdict, the author stops".
   Binds `CLAUDE.md`, `docs/WORKFLOW.md` and the `open-pr`, `wrap-it-up` and
   `review` skills. Full record in `docs/DECISIONS.md`.

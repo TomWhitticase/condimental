@@ -131,10 +131,12 @@ reviewer even when:
 - the task told you not to merge (an Orca worker's coordinator merges); or
 - a rule below says the owner decides too.
 
-In those cases, get the verdict, then leave the PR open with the URL, the
-verdict, and what the merge is still waiting on. The one case with no review
-at all is that no subagent can be launched. Then say so, give the URL, and
-stop.
+In those cases, get the verdict. If it is `APPROVED`, leave the PR open with
+the URL, the verdict, and what the merge is still waiting on. If it is
+`CHANGES REQUESTED`, the work is still in hand: fix it and get a fresh
+re-review, or hand the PR over explicitly, naming the latest verdict. The one
+case with no review at all is that no subagent can be launched. Then say so,
+give the URL, and stop.
 
 ```
 gh pr checks <N> --watch
@@ -151,9 +153,9 @@ as in a ticketed epic.
 **Do not merge** a PR with no `VERDICT: APPROVED`, one whose checks are red
 or still running, one the owner
 asked to review, or one that deviates from a design doc, bumps `gdext`, or
-changes the save format. Leave it open with the URL and say what it waits
-on. With no verdict at all, the step above is not done yet: launch the
-reviewer.
+changes the save format. Leave an approved one open with the URL and say
+what it waits on. With no verdict at all, the step above is not done yet:
+launch the reviewer.
 
 ## Afterwards
 

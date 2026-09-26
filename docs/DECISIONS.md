@@ -502,8 +502,9 @@ matches what code comments and data files cite.
   reviewer is available, the author stops with the PR open, and
   `wrap-it-up` treated that as the one legitimate way to end a session with
   a PR still open. **Amended 2026-09-26** (entry above): the author now
-  launches a subagent as the reviewer rather than stopping, and a PR stays
-  open only once its merge is held after the review.
+  launches a subagent as the reviewer rather than stopping. A PR stays open
+  only if it is approved with its merge held, handed over with its latest
+  verdict named, or unreviewable because no subagent could be launched.
 
   **What was rejected.** Keeping the routine-change exemption was rejected.
   Whether a change counts as "routine" is judged by its author, which is

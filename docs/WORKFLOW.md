@@ -243,8 +243,8 @@ does not exist.
 Then **get it reviewed, and land it** — an open PR is unfinished work until it
 merges. It is left open only when it is approved and its merge is held (by
 checks not yet green, by the task, or by the owner, below), when it is handed
-over explicitly with its verdict named, or when no reviewer subagent could be
-launched at all:
+over explicitly with its latest verdict named, or when no reviewer subagent
+could be launched at all:
 
 ```
 gh pr checks <N> --watch      # commitlint must pass; a red PR is not done
@@ -385,7 +385,9 @@ issue is the right home only for work that is not being done yet.
 A session ends when its worktree could be deleted without losing anything —
 not when the last edit is made. Every branch has reached `main` through a
 merged pull request, nothing is uncommitted, unpushed or left in the shared
-stash, and no pull request this session opened is still open.
+stash, and every pull request this session opened is merged, or is open for
+one of the reasons below: approved with its merge held, handed over, or
+unreviewable because no subagent could be launched.
 
 The `wrap-it-up` skill is the procedure, including the sweep that proves it
 and the banner that reports it. Two rules it exists to enforce:
