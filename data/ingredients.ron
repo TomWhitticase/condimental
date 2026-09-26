@@ -87,12 +87,16 @@
         IngredientEntry(
             id: "tomato",
             price: 1,
+            blurb: "The chain's bulk produce, and the cheapest thing on the shelf per unit — which is just as well, because the crusher eats them several to the pail.",
+            icon: "item_tomato",
         ),
         // Refined, so the dearest of the three per unit — but the mixer only
         // takes one per batch.
         IngredientEntry(
             id: "sugar",
             price: 3,
+            blurb: "Refined, so it costs more per unit than tomatoes do, but the mixer takes very little of it per batch.",
+            icon: "item_sugar",
         ),
         // The one raw ingredient that is a fluid rather than an item: it is
         // bought by the unit exactly like the two solids and loaded into a
@@ -100,6 +104,8 @@
         IngredientEntry(
             id: "vinegar",
             price: 2,
+            blurb: "The first raw that is a fluid rather than a solid: bought by the unit like everything else, but loaded into a fluid tank instead of a hopper, and delivered to the mixer down a pipe.",
+            icon: "item_vinegar",
         ),
 
         // --- The BBQ branch's three raws ---
@@ -113,12 +119,16 @@
         IngredientEntry(
             id: "spice_mix",
             price: 5,
+            blurb: "Bought already ground and blended, which is why it prices like a refined good rather than like produce. The dearest raw in the game, and the one that makes BBQ taste of anything.",
+            icon: "item_spice_mix",
         ),
         // The sweetener BBQ uses where ketchup uses sugar — unrefined, so a
         // shade cheaper per unit than sugar, and likewise one per batch.
         IngredientEntry(
             id: "molasses",
             price: 4,
+            blurb: "What BBQ uses where ketchup uses sugar. Unrefined, so a shade cheaper per unit than sugar — and it arrives on a belt like any other solid.",
+            icon: "item_molasses",
         ),
         // The second raw fluid, and the reason a BBQ branch needs a
         // `fluid_tank` of its own: the BBQ cook draws it straight into the
@@ -127,6 +137,8 @@
         IngredientEntry(
             id: "liquid_smoke",
             price: 3,
+            blurb: "The second raw fluid, and the reason a BBQ branch needs a fluid tank of its own: the cook draws it straight into the vat alongside the piped mix.",
+            icon: "item_liquid_smoke",
         ),
     ],
 )

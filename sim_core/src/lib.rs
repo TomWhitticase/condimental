@@ -846,6 +846,75 @@ impl SimBridge {
         GString::from(json.as_str())
     }
 
+    /// The content ids that name their own voxel asset, as one flat JSON
+    /// object of `id -> asset name`:
+    ///
+    /// ```json
+    /// {"tomato": "item_tomato", "mixer": "machine_mixer"}
+    /// ```
+    ///
+    /// **Read this once, at load**, for [`Self::display_names_json`]'s
+    /// reason — it is `data/*.ron` read back and cannot move while a game
+    /// runs.
+    ///
+    /// It exists so that swapping or adding an asset is a content edit.
+    /// `main.gd` has carried this mapping by hand since the shop epic, as
+    /// `ITEM_MODELS` / `MACHINE_MODELS` — tables in a file that has no way
+    /// to know when the content changed under it, and that ship green when
+    /// they go stale (UI_UX.md §2b point 12). `_icon_for` now asks this
+    /// first and those tables second, so the fallback chain is wire ->
+    /// table -> `ITEM_MODEL_FALLBACK` and nothing new has to be added to
+    /// the tables again.
+    ///
+    /// An absent id is the normal case and means "no opinion" — not "no
+    /// icon". See [`sim::World::icon_names`].
+    #[func]
+    fn icon_names_json(&self) -> GString {
+        let icons = self.world.icon_names();
+        let json = serde_json::to_string(&icons).expect("icon names must serialize");
+        GString::from(json.as_str())
+    }
+
+    /// THE COOKBOOK: the whole of `data/*.ron` as the in-game encyclopedia
+    /// reads it — a sauce tree, and a page per sauce, machine and
+    /// ingredient. Shape and reasoning: [`sim::cookbook`].
+    ///
+    /// ```json
+    /// {
+    ///   "deliveries": 4,
+    ///   "sauces": [{
+    ///     "id": "boxed_ketchup", "tier": 0, "locked": false,
+    ///     "tagline": "The first sauce. Everything else in the book is built on it.",
+    ///     "steps": [{"recipe": "tomato_paste", "machine": "crusher",
+    ///                "time_ticks": 80, "carries": "tomato_paste",
+    ///                "carries_fluid": false, "new_machine": true}],
+    ///     "inputs": [{"id": "tomato", "quantity": 4.0, "fluid": false,
+    ///                 "from_sauce": null, "locked": false}],
+    ///     "cost_per_unit": 11.0, "pay_low": 20.0, "pay_high": 42.0
+    ///   }],
+    ///   "edges": [{"from": "boxed_ketchup", "to": "boxed_bbq", "via": "ketchup"}],
+    ///   "machines": [], "ingredients": []
+    /// }
+    /// ```
+    ///
+    /// **Not folded into `economy_snapshot_json`.** That one is polled
+    /// every frame and this is a static graph: the only part of it that
+    /// moves is the padlocks, which move with `lifetime_deliveries`. Read
+    /// it on open, and again on the panel's own poll cadence while it is
+    /// open.
+    ///
+    /// **Ids go out as ids.** Title them with the map
+    /// [`Self::display_names_json`] returns, the way every other id on the
+    /// wire is titled; a second title-caser in Rust would be a second thing
+    /// to keep in step (`godot_project/CLAUDE.md`'s one rule). Likewise a
+    /// step carries `time_ticks` and the panel divides by `TICK_HZ`.
+    #[func]
+    fn cookbook_json(&self) -> GString {
+        let cookbook = self.world.cookbook();
+        let json = serde_json::to_string(&cookbook).expect("cookbook must serialize");
+        GString::from(json.as_str())
+    }
+
     /// The whole world as a RON save file, as text
     /// (`sim::save::SaveData` — see that module's doc for the format and
     /// for why it is a full snapshot rather than ARCHITECTURE.md §4's

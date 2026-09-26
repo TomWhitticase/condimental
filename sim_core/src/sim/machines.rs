@@ -272,6 +272,19 @@ pub struct MachineKind {
     /// rejected — for a change no player can see the inside of.
     #[serde(default)]
     pub display_name: Option<String>,
+
+    /// One sentence saying what this machine does, for its Cookbook page —
+    /// [`super::recipe::Recipe::blurb`]'s twin, and its doc explains why
+    /// the prose lives beside the content rather than in a GDScript table.
+    #[serde(default)]
+    pub blurb: Option<String>,
+
+    /// Which voxel asset's icon stands for this kind, when it is not simply
+    /// named after the id — [`super::recipe::Recipe::icon`]'s twin. This is
+    /// the field that makes `main.gd`'s `MACHINE_MODELS` table something
+    /// content can answer for itself.
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 /// The file's shape once its version has been checked (see
@@ -306,6 +319,13 @@ pub enum MachineLoadError {
     /// nothing, which would show up only as a gap in a rendered frame.
     BlankDisplayName {
         id: String,
+    },
+    /// A `blurb` or `icon` that is present but blank —
+    /// [`super::recipe::RecipeLoadError::BlankText`]'s twin, for its
+    /// reason.
+    BlankText {
+        id: String,
+        field: &'static str,
     },
     /// A recipe names a machine kind that `machines.ron` doesn't define.
     /// Reported as an error rather than a silent default, so a typo'd kind
@@ -343,6 +363,11 @@ impl std::fmt::Display for MachineLoadError {
                 f,
                 "machines.ron machine kind '{id}' has a blank display_name — omit the \
                  field to title-case the id instead"
+            ),
+            MachineLoadError::BlankText { id, field } => write!(
+                f,
+                "machines.ron machine kind '{id}' has a blank {field} — omit the field \
+                 entirely rather than giving it an empty value"
             ),
             MachineLoadError::UnknownKindInRecipe {
                 recipe,
@@ -424,6 +449,13 @@ impl MachineRegistry {
             {
                 return Err(MachineLoadError::BlankDisplayName { id: kind.id });
             }
+            if let Some(field) = [("blurb", &kind.blurb), ("icon", &kind.icon)]
+                .into_iter()
+                .find(|(_, value)| value.as_deref().is_some_and(|t| t.trim().is_empty()))
+                .map(|(field, _)| field)
+            {
+                return Err(MachineLoadError::BlankText { id: kind.id, field });
+            }
             by_id.insert(kind.id.clone(), kind);
         }
         Ok(Self { by_id })
@@ -439,6 +471,20 @@ impl MachineRegistry {
 
     pub fn get(&self, id: &str) -> Option<&MachineKind> {
         self.by_id.get(id)
+    }
+
+    /// Every kind this build knows, sorted by id.
+    ///
+    /// Sorted rather than in file order because the backing map is a
+    /// `HashMap` and has no file order to give — the same reason
+    /// [`Self::display_names`] sorts. Any caller that wants a *meaningful*
+    /// order has to derive one (`sim::cookbook` orders machines by how far
+    /// down a chain they first appear), which is better than this pretending
+    /// to have kept one.
+    pub fn kinds(&self) -> Vec<&MachineKind> {
+        let mut kinds: Vec<&MachineKind> = self.by_id.values().collect();
+        kinds.sort_unstable_by(|a, b| a.id.cmp(&b.id));
+        kinds
     }
 
     /// A kind's footprint, or `None` if the kind is unknown. Prefer calling
@@ -466,6 +512,19 @@ impl MachineRegistry {
             .collect();
         names.sort_unstable();
         names
+    }
+
+    /// Every kind that names its own voxel asset, as `(id, asset)` pairs —
+    /// see [`MachineKind::icon`]. Sorted, for [`Self::display_names`]'s
+    /// reason.
+    pub fn icons(&self) -> Vec<(&str, &str)> {
+        let mut icons: Vec<(&str, &str)> = self
+            .by_id
+            .values()
+            .filter_map(|kind| kind.icon.as_deref().map(|asset| (kind.id.as_str(), asset)))
+            .collect();
+        icons.sort_unstable();
+        icons
     }
 
     /// Known kind ids, sorted — a stable order for error messages and tests
@@ -812,6 +871,40 @@ mod tests {
             other => panic!("expected BlankDisplayName, got {other:?}"),
         }
         assert!(err.to_string().contains("blank display_name"));
+    }
+
+    /// The Cookbook's two prose fields, refused the same way and for the
+    /// same reason — see [`MachineKind::blurb`].
+    #[test]
+    fn a_blank_cookbook_field_is_rejected_the_way_a_blank_name_is() {
+        for field in ["blurb", "icon"] {
+            let text = EXAMPLE.replacen(
+                r#"staff: []),"#,
+                &format!(r#"staff: [], {field}: "  "),"#),
+                1,
+            );
+            let err = MachineRegistry::from_ron_str(&format!("#![enable(implicit_some)]\n{text}"))
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    MachineLoadError::BlankText { ref id, field: got }
+                        if id == "crusher" && got == field
+                ),
+                "a blank {field} should be refused by name, got {err:?}"
+            );
+        }
+    }
+
+    /// Every kind gets a Cookbook page, including the five nothing cooks
+    /// on, so every kind needs the prose that page prints.
+    #[test]
+    fn every_shipped_kind_carries_the_prose_the_cookbook_prints() {
+        let registry = MachineRegistry::bundled();
+        for kind in registry.kinds() {
+            assert!(kind.blurb.is_some(), "{} has no blurb", kind.id);
+            assert!(kind.icon.is_some(), "{} has no icon", kind.id);
+        }
     }
 
     #[test]

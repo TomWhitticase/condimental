@@ -2439,6 +2439,41 @@ impl World {
             .collect()
     }
 
+    /// THE COOKBOOK: `data/*.ron` read back as a sauce tree and a page per
+    /// sauce, machine and ingredient. See [`super::cookbook`] for what is
+    /// derived and why none of it is authored.
+    ///
+    /// **Nothing about this world is in the answer except the delivery
+    /// count.** The book is the same for every save at the same point in
+    /// progression, which is what lets the panel read it on open and then
+    /// only when the padlocks could have moved, rather than per frame.
+    pub fn cookbook(&self) -> super::cookbook::CookbookSnapshot {
+        super::cookbook::build(&super::cookbook::CookbookInput {
+            recipes: &self.recipes,
+            machines: &self.machines,
+            ingredients: &self.ingredients.catalog,
+            contracts: self.economy.board(),
+            shop: &self.shop.catalog,
+            staff: self.staff.catalog(),
+            unlocks: self.economy.unlocks(),
+            deliveries: self.economy.lifetime_deliveries,
+        })
+    }
+
+    /// Every id in `data/*.ron` that names its own voxel asset, as
+    /// `id -> asset`. [`Self::display_names`]'s twin, read once at load for
+    /// its reason, and absence means the same thing: the presentation layer
+    /// falls back to its own table (`main.gd`'s `ITEM_MODELS`).
+    pub fn icon_names(&self) -> BTreeMap<String, String> {
+        self.ingredients
+            .catalog
+            .icons()
+            .chain(self.recipes.icons())
+            .chain(self.machines.icons())
+            .map(|(id, asset)| (id.to_string(), asset.to_string()))
+            .collect()
+    }
+
     /// Lifetime successful contract deliveries — the counter every
     /// progression gate is keyed off. Read-only; it is written by
     /// [`Economy::tick`] and by a load, never by a caller.

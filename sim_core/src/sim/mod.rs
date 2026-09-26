@@ -5,6 +5,7 @@
 
 pub mod belt;
 pub mod contracts;
+pub mod cookbook;
 pub mod dock;
 pub mod economy;
 pub mod fluid;
@@ -26,6 +27,7 @@ pub mod unlocks;
 pub mod world;
 
 pub use contracts::{Contract, ContractRegistry};
+pub use cookbook::{CookbookInput, CookbookSnapshot};
 pub use dock::{DOCK_CAPACITY, DOCK_KIND, Dock};
 pub use economy::{
     ActiveContract, ContractEvent, ContractOfferSnapshot, ContractSnapshot,

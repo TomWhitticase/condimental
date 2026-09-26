@@ -18,6 +18,26 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-25 **THE COOKBOOK is derived from the content files, and nothing in
+  it may be written in GDScript.** The in-game encyclopedia (B, and a page on
+  the pause menu) draws `SimBridge::cookbook_json` and only that: the sauce
+  tree, the tiers, the family edges, cost per case, the contract pay range and
+  the gates are all computed in `sim_core/src/sim/cookbook.rs` from the
+  registries, with no `World`. `godot_project/cookbook_panel.gd` contains no
+  sauce name, machine name, ingredient, tier, price or arrow, and no fallback
+  prose — a sauce with no `blurb` gets no blurb paragraph rather than a
+  sentence GDScript made up. `test_cookbook.gd` enforces this by checking
+  every id, display name and contract name in the book against the panel's own
+  string literals, so a hardcoded word fails the suite. The one number the
+  panel computes is seconds, because `TICK_HZ` is GDScript's. Prose that is
+  not derivable lives in new optional `tagline`/`blurb`/`icon` fields in
+  `data/{recipes,machines,ingredients}.ron`; a Cookbook that needs a fact
+  those files cannot state is a missing data field, not a Rust change. A
+  locked family stays in the tree as an unnamed silhouette carrying its gate,
+  and its page is the gate only. Binds `sim_core/src/sim/cookbook.rs`,
+  `sim_core/src/lib.rs`, `godot_project/cookbook_panel.gd`,
+  `godot_project/test_cookbook.gd` and `docs/UI_UX.md` §5h. Full record in
+  `docs/DECISIONS.md`.
 - 2026-09-25 **Every PR is reviewed BEFORE it merges, with no exceptions.**
   A PR merges only when its checks are green AND it has a `VERDICT: APPROVED`
   comment from a session that did not write it (the `review` skill). Routine

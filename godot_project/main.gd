@@ -100,6 +100,9 @@ const FactoryEnvironment = preload("res://factory_environment.gd")
 ## arguments rather than reading them back out of this file, which is what
 ## lets this preload exist at all — see `settings_panel.gd`'s `build`.
 const SettingsPanelScript = preload("res://settings_panel.gd")
+## THE COOKBOOK's screen, hosted twice from here (the B modal and the pause
+## menu) exactly as the settings rows are — see `cookbook_panel.gd`.
+const CookbookPanelScript = preload("res://cookbook_panel.gd")
 
 # --- Scale ---------------------------------------------------------------
 # UI_UX.md §2 fixes one world tile at 32x32x32 voxels. The .vox importer's
@@ -1855,6 +1858,19 @@ var _production_window := 1
 ## carries nothing any other readout needs), on the load's cadence.
 var _production_snapshot: Dictionary = {}
 var _production_polled_tick := -1
+
+# --- THE COOKBOOK (B) -----------------------------------------------------
+# The recipe book: the sauce tree, and a page per sauce, machine and raw.
+# Every word and number on it is `cookbook_json()` — see `cookbook_panel.gd`,
+# which owns the whole screen. This file hosts it, twice: on its own plate
+# under B, and in place of the pause menu's button column.
+var _cookbook_plate: PanelContainer
+var _cookbook: RefCounted
+var _cookbook_open := false
+## The last `cookbook_json()` read, parsed; `{}` until the first poll. Shared
+## by both hosts — one read feeds both, because it is the same book.
+var _cookbook_book: Dictionary = {}
+var _cookbook_polled_tick := -1
 const PRODUCTION_ALL_TIME := -1
 const PRODUCTION_METER_WIDTH := 150.0 * UI_SCALE
 const PRODUCTION_ICON_SIZE := Vector2(36, 36) * UI_SCALE
@@ -2092,6 +2108,13 @@ var _pause_buttons_box: VBoxContainer
 var _pause_settings_box: VBoxContainer
 var _pause_settings_panel: RefCounted
 var _pause_settings_open := false
+## THE COOKBOOK, in place of the buttons for the settings rows' reason. The
+## second host of `cookbook_panel.gd`, and the answer for a player who wants
+## to read the book with the factory actually stopped — B does not pause,
+## like the other five modals, and this route is why it does not have to.
+var _pause_cookbook_box: VBoxContainer
+var _pause_cookbook: RefCounted
+var _pause_cookbook_open := false
 ## Set while "Quit to Menu" is waiting for its confirm click. Quitting to the
 ## menu throws away everything since the last save, and that is the one thing
 ## in this panel with no undo — so it asks, where Save & Quit (which cannot
@@ -2219,6 +2242,8 @@ func _ready() -> void:
 	# — and read after `_apply_pending_session` only so there is a bridge to
 	# ask; a load does not change the answer.
 	_load_display_names()
+	# And the assets content names for itself, read once for the same reason.
+	_load_icon_names()
 	_load_voxel_materials()
 	_build_environment()
 	# The world the player has built — NOTHING, in a new game. This is a real
@@ -4811,8 +4836,16 @@ const CROSSHAIR_THICKNESS := 2.0 * UI_SCALE # px, each bar's width
 ## its width. The configure hint is its own line now, so the panels line
 ## stays five short entries and neither line reaches the clipboard's left
 ## edge at this window size.
-const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    H: staff    P: production\nclick a building: configure\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
-const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts    H: staff    P: production\nclick a building: configure\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
+##
+## SIX lines, because B did exactly what `docs/DECISIONS.md` said the next
+## key to earn a place would do: "the next panel that earns a key will
+## overrun it again". So the panels take TWO lines rather than one longer
+## one. The alternative — folding them into `E/M/C/H/B/P: panels` — buys the
+## width by making every one of those keys undiscoverable, which is the one
+## thing this legend exists to prevent. A key is printed here or it does not
+## exist, so the line count is what yields.
+const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts\nH: staff    P: production    B: cookbook\nclick a building: configure\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
+const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts\nH: staff    P: production    B: cookbook\nclick a building: configure\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
 
 
 ## The tile box the isometric camera frames at startup: whatever is placed,
@@ -5455,6 +5488,10 @@ func _build_ui() -> void:
 	_build_contract_board(hud, settings)
 	_build_staff_panel(hud, settings)
 	_build_production_panel(hud, settings)
+	# THE COOKBOOK (B) — the one panel that reads no live state at all: it is
+	# `data/*.ron` rendered for a human. Its own file for `settings_panel.gd`'s
+	# reason, and hosted a second time on the pause menu.
+	_build_cookbook_panel(hud)
 
 	# UI_UX.md §5's LAST unbuilt named widget: "a Minecraft-style hotbar/
 	# quick-access strip along one screen edge." Always visible, unlike the
@@ -6825,6 +6862,20 @@ func _load_display_names() -> void:
 	_display_names = parsed if parsed is Dictionary else {}
 
 
+## The ids that name their own VOXEL ASSET, from `icon_names_json` —
+## `{"crusher": "machine_crusher", ...}`. `_display_names`' twin, and the
+## reason an asset swap is a `data/*.ron` edit rather than a Godot one: it
+## goes in front of `ITEM_MODELS` in `_icon_for`, which makes the documented
+## fallback chain wire, then table, then `ITEM_MODEL_FALLBACK`.
+var _icon_names: Dictionary = {}
+
+
+## Reads it. Not polled, for `_load_display_names`' reason.
+func _load_icon_names() -> void:
+	var parsed = JSON.parse_string(sim.icon_names_json())
+	_icon_names = parsed if parsed is Dictionary else {}
+
+
 ## "cooking_vat" -> "Cooking Vat". Kind ids are content, so the menu titles
 ## itself from them rather than carrying a hand-written label per kind that
 ## a new `data/shop.ron` entry would silently miss.
@@ -7010,10 +7061,11 @@ func _camera_keys_live() -> bool:
 	return not _fp_mouse_free()
 
 
-## Any of the five modal panels (E, M, C, H, P) is up. Build mode is not a
+## Any of the six modal panels (E, M, C, H, P, B) is up. Build mode is not a
 ## modal — see `_anything_open` for the version that counts it.
 func _modal_open() -> bool:
-	return _shop_open or _market_open or _board_open or _staff_open or _production_open
+	return (_shop_open or _market_open or _board_open or _staff_open or _production_open
+			or _cookbook_open)
 
 
 ## In first-person the mouse is captured for looking around unless a panel
@@ -9852,6 +9904,119 @@ func _toggle_production_panel() -> void:
 	_set_production_open(not _production_open)
 
 
+# --------------------------------------------------------------------------
+# THE COOKBOOK (B)
+# --------------------------------------------------------------------------
+# The screen itself is `cookbook_panel.gd` — everything below is hosting: a
+# plate to put it on, a key to open it with, and the poll that keeps a gate
+# line counting. Nothing here knows a sauce name, and nothing here computes
+# a number; that is the whole point of the feature.
+
+## Builds the plate and the column on it. The same dark plate as PRODUCTION
+## and the staff panel (UI_UX.md §5: machine-side factory UI; the
+## clipboard's paper is for orders), centred in the space above the hotbar
+## for the same reason — the footer must stay on screen.
+##
+## No `base_settings` argument, unlike its five neighbours: the column brings
+## its own inks, exactly as the settings rows do, because it is hosted a
+## second time on a plate this function never touches.
+func _build_cookbook_panel(hud: CanvasLayer) -> void:
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.06, 0.06, 0.07, 0.94)
+	panel_style.border_color = Color(0.85, 0.63, 0.11, 0.95)
+	panel_style.border_width_top = _ui_i(4)
+	panel_style.border_width_left = _ui_i(2)
+	panel_style.border_width_right = _ui_i(2)
+	panel_style.border_width_bottom = _ui_i(2)
+	panel_style.set_content_margin_all(_ui_px(16.0))
+
+	_cookbook_plate = PanelContainer.new()
+	_cookbook_plate.name = "CookbookPlate"
+	_cookbook_plate.add_theme_stylebox_override("panel", panel_style)
+	_cookbook_plate.visible = false
+	hud.add_child(_cookbook_plate)
+
+	# Read before the column is built, so the first frame it is shown is the
+	# real book rather than an empty one — `_build_production_panel` polls in
+	# the same place and for the same reason.
+	_poll_cookbook()
+
+	_cookbook = CookbookPanelScript.new()
+	_cookbook_plate.add_child(_cookbook.build(
+		UI_SCALE, UI_FONT_BASE, TICK_HZ, _cookbook_icon, _kind_display_name, _on_cookbook_close
+	))
+	_cookbook.set_book(_cookbook_book)
+	_position_cookbook_panel()
+
+
+## Centred above the hotbar, by `_position_production_panel`'s arithmetic and
+## for its reason. The column is re-fitted first: it is the thing that knows
+## how to give width and height back (§5c), and the plate's size is whatever
+## it decides.
+func _position_cookbook_panel() -> void:
+	if _cookbook_plate == null:
+		return
+	_cookbook_plate.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
+	var vp := get_viewport()
+	if vp == null:
+		return
+	var reserved := _hotbar_reserved_height()
+	var bounds := vp.get_visible_rect().size
+	if _cookbook != null:
+		_cookbook.fit(Vector2(bounds.x - _ui_px(64.0), bounds.y - reserved - _ui_px(48.0)))
+	var panel_size := _cookbook_plate.get_combined_minimum_size()
+	_cookbook_plate.position.x = maxf(0.0, (bounds.x - panel_size.x) * 0.5)
+	_cookbook_plate.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
+
+
+func _cookbook_poll_due() -> bool:
+	return _cookbook_polled_tick < 0 or sim.current_tick() - _cookbook_polled_tick >= LOAD_POLL_TICKS
+
+
+## Re-reads `cookbook_json()` and hands it to both hosts. One read, because
+## it is one book — and `set_book` is a no-op when the snapshot has not
+## changed, which is nearly every poll: the only thing in it that moves is
+## the delivery count behind a gate. Without that the page under the
+## player's cursor would be rebuilt twice a second and lose its scroll.
+func _poll_cookbook() -> void:
+	_cookbook_polled_tick = sim.current_tick()
+	var parsed = JSON.parse_string(sim.cookbook_json())
+	_cookbook_book = parsed if parsed is Dictionary else {}
+	if _cookbook != null:
+		_cookbook.set_book(_cookbook_book)
+	if _pause_cookbook != null:
+		_pause_cookbook.set_book(_cookbook_book)
+
+
+func _set_cookbook_open(open: bool) -> void:
+	if _cookbook_plate == null or open == _cookbook_open:
+		return
+	if open:
+		_close_config_panel() # see `_set_shop_menu_open`
+	_cookbook_open = open
+	_cookbook_plate.visible = open
+	if open:
+		_poll_cookbook()
+		# Always on the tree, whichever page was showing when it last closed
+		# — the pause menu's rule (`_set_pause_open`), for its reason: the key
+		# that opens a screen should reach the same screen every time.
+		_cookbook.show_tree()
+		_position_cookbook_panel()
+	if _view_mode == ViewMode.FIRST_PERSON:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	_update_crosshair_visibility()
+
+
+func _toggle_cookbook() -> void:
+	_set_cookbook_open(not _cookbook_open)
+
+
+## What the column's footer button does at the top of its trail. Inside a
+## page the column handles the press itself and walks up instead.
+func _on_cookbook_close() -> void:
+	_set_cookbook_open(false)
+
+
 ## Reads the crew every placed machine and dock needs, from
 ## `query_tile_json`, once per rebuild — `_seed_machine_states`'s twin.
 ## A crew is content (the kind's `machines.ron` requirement) and never
@@ -11728,8 +11893,7 @@ func _close_config_panel() -> void:
 	# has to remember — a panel hidden by any other route would leave the
 	# legend gone for the rest of the session.
 	_set_legend_yielded(false)
-	if _view_mode == ViewMode.FIRST_PERSON and not _shop_open and not _market_open \
-			and not _board_open and not _staff_open and not _production_open:
+	if _view_mode == ViewMode.FIRST_PERSON and not _modal_open():
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_update_crosshair_visibility()
 
@@ -11820,8 +11984,7 @@ func _config_can_mothball(origin: Vector2i) -> bool:
 func _update_config_panel() -> void:
 	if not _config_open or _config_panel == null:
 		return
-	if _shop_open or _market_open or _board_open or _staff_open or _production_open \
-			or _in_build_mode():
+	if _modal_open() or _in_build_mode():
 		_close_config_panel()
 		return
 	var placement := _placement_at_tile(_config_tile)
@@ -13062,6 +13225,7 @@ func _enter_build_mode(kind: String) -> void:
 	_set_contract_board_open(false)
 	_set_staff_open(false)
 	_set_production_open(false)
+	_set_cookbook_open(false)
 	# A hopper carries a choice as well as a facing, so the legal choices are
 	# repolled on entry (the list is the simulation's, and content can change
 	# it). The ghost takes the first of them; changing it is the placed
@@ -13099,6 +13263,7 @@ func _toggle_remove_mode() -> void:
 	_set_contract_board_open(false)
 	_set_staff_open(false)
 	_set_production_open(false)
+	_set_cookbook_open(false)
 	_rebuild_ghost_body()
 	_update_ghost()
 	# Remove mode replaces placement mode, so the strip has nothing selected
@@ -13156,6 +13321,7 @@ func _close_all_overlays() -> void:
 	_set_contract_board_open(false)
 	_set_staff_open(false)
 	_set_production_open(false)
+	_set_cookbook_open(false)
 	_exit_build_mode()
 
 
@@ -13166,7 +13332,7 @@ func _close_all_overlays() -> void:
 ## second.
 func _anything_open() -> bool:
 	return (_shop_open or _market_open or _board_open or _staff_open or _production_open
-			or _in_build_mode())
+			or _cookbook_open or _in_build_mode())
 
 
 func _in_build_mode() -> bool:
@@ -13991,6 +14157,15 @@ func _build_pause_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	settings_button.pressed.connect(_on_pause_settings_pressed)
 	_pause_buttons_box.add_child(settings_button)
 
+	# THE COOKBOOK's second door. B opens it in the running game; this opens
+	# it with the factory stopped, which is the whole reason B is allowed not
+	# to pause: a long read costs the player ingredients, and here it does
+	# not. A button rather than a keybind on this screen, because the pause
+	# menu answers ESC and nothing else (`_unhandled_input`).
+	var cookbook_button := _pause_button("CookbookButton", "THE COOKBOOK")
+	cookbook_button.pressed.connect(_on_pause_cookbook_pressed)
+	_pause_buttons_box.add_child(cookbook_button)
+
 	var save_row := HBoxContainer.new()
 	save_row.add_theme_constant_override("separation", _ui_i(8))
 	_pause_buttons_box.add_child(save_row)
@@ -14060,6 +14235,18 @@ func _build_pause_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_pause_settings_box.visible = false
 	body.add_child(_pause_settings_box)
 
+	# And the book, on the same terms and in the same place. Built here for
+	# the settings rows' reason: a test reaches the pages before anything is
+	# clicked.
+	_pause_cookbook = CookbookPanelScript.new()
+	_pause_cookbook_box = _pause_cookbook.build(
+		UI_SCALE, UI_FONT_BASE, TICK_HZ, _cookbook_icon, _kind_display_name,
+		_on_pause_cookbook_back_pressed
+	)
+	_pause_cookbook.set_book(_cookbook_book)
+	_pause_cookbook_box.visible = false
+	body.add_child(_pause_cookbook_box)
+
 	# What the last action did — a save's file name, or why one was refused.
 	# Its own line inside this panel rather than the hotbar flyout, because
 	# the flyout sits at the bottom of the screen behind this plate.
@@ -14115,12 +14302,55 @@ func _pause_settings_rows_budget() -> float:
 	return maxf(_ui_px(150.0), vp.get_visible_rect().size.y - _ui_px(280.0))
 
 
+## `_set_pause_settings`' twin for the book. Re-read and re-measured on the
+## way in for the same two reasons: the delivery count moved while the game
+## was running, and `build()` sized this column before it was in a tree.
+func _set_pause_cookbook(open: bool) -> void:
+	_pause_cookbook_open = open
+	if open:
+		_set_pause_confirm(false)
+		_set_pause_settings(false)
+	if _pause_buttons_box != null:
+		_pause_buttons_box.visible = not _pause_page_open()
+	if _pause_cookbook_box != null:
+		_pause_cookbook_box.visible = open
+	if open and _pause_cookbook != null:
+		_poll_cookbook()
+		_pause_cookbook.show_tree()
+		_pause_cookbook.fit(_pause_page_budget())
+	_position_pause_menu()
+
+
+## How much room a pause-menu PAGE has before it gives width or height back
+## — `_pause_settings_rows_budget`'s two-axis twin, a flat subtraction for
+## its reason (the nodes it would measure are the ones being built).
+func _pause_page_budget() -> Vector2:
+	var vp := get_viewport() if is_inside_tree() else null
+	if vp == null:
+		# No window to measure (the headless tests build the scene outside a
+		# tree) — no cap, so a test sees the whole page.
+		return Vector2.ZERO
+	var bounds := vp.get_visible_rect().size
+	return Vector2(
+		maxf(_ui_px(280.0), bounds.x - _ui_px(120.0)),
+		maxf(_ui_px(180.0), bounds.y - _ui_px(220.0))
+	)
+
+
 func _on_pause_settings_pressed() -> void:
 	_set_pause_settings(true)
 
 
 func _on_pause_settings_back_pressed() -> void:
 	_set_pause_settings(false)
+
+
+func _on_pause_cookbook_pressed() -> void:
+	_set_pause_cookbook(true)
+
+
+func _on_pause_cookbook_back_pressed() -> void:
+	_set_pause_cookbook(false)
 
 
 # --------------------------------------------------------------------------
@@ -14496,15 +14726,24 @@ func _debug_speed_caption() -> String:
 	return "x%.2f" % _debug_time_scale
 
 
+## Whether this plate is showing a PAGE in place of its button column: the
+## quit confirmation, the settings rows, or THE COOKBOOK. Three of them now,
+## so the column's visibility is one question asked in one place rather than
+## a conjunction every new page has to remember to extend.
+func _pause_page_open() -> bool:
+	return _pause_confirm_quit or _pause_settings_open or _pause_cookbook_open
+
+
 ## Swaps the pause menu's buttons for the settings rows, and back. The confirm
-## step's shape (`_set_pause_confirm`), and the two are mutually exclusive by
-## construction: each hides the other on the way in.
+## step's shape (`_set_pause_confirm`), and the three pages are mutually
+## exclusive by construction: each hides the others on the way in.
 func _set_pause_settings(open: bool) -> void:
 	_pause_settings_open = open
 	if open:
 		_set_pause_confirm(false)
+		_set_pause_cookbook(false)
 	if _pause_buttons_box != null:
-		_pause_buttons_box.visible = not open and not _pause_confirm_quit
+		_pause_buttons_box.visible = not _pause_page_open()
 	if _pause_settings_box != null:
 		_pause_settings_box.visible = open
 	if open and _pause_settings_panel != null:
@@ -14541,6 +14780,7 @@ func _set_pause_open(open: bool) -> void:
 		# closed: ESC is how this panel is reached, and it should reach the
 		# same thing every time.
 		_set_pause_settings(false)
+		_set_pause_cookbook(false)
 		_set_pause_confirm(false)
 		_pause_status.text = ""
 		_pause_slot_field.text = _save_slot
@@ -14562,8 +14802,9 @@ func _set_pause_confirm(confirming: bool) -> void:
 	_pause_confirm_quit = confirming
 	if confirming:
 		_set_pause_settings(false)
+		_set_pause_cookbook(false)
 	if _pause_buttons_box != null:
-		_pause_buttons_box.visible = not confirming and not _pause_settings_open
+		_pause_buttons_box.visible = not _pause_page_open()
 	if _pause_confirm_box != null:
 		_pause_confirm_box.visible = confirming
 	_position_pause_menu()
@@ -14730,6 +14971,10 @@ func _process(delta: float) -> void:
 			_update_staff_panel()
 		if _production_open:
 			_update_production_panel()
+		if _cookbook_open:
+			# Only the plate's placement: the book itself is rebuilt by the poll
+			# below, and only when the snapshot it is drawn from has changed.
+			_position_cookbook_panel()
 	else:
 		_update_money_flyout()
 		_update_hotbar_flyout()
@@ -14838,6 +15083,11 @@ func _advance_simulation(delta: float) -> void:
 	# it, and a closed panel re-reads on opening.
 	if _production_open and _production_poll_due():
 		_poll_production()
+	# THE COOKBOOK is content, and content does not move — except for the one
+	# thing that does: a gate counts down with `lifetime_deliveries`, so a
+	# padlock opens while the player is reading the page behind it.
+	if _cookbook_open and _cookbook_poll_due():
+		_poll_cookbook()
 
 
 ## Whether anything a `_process` poll reads could differ from the last
@@ -14856,6 +15106,7 @@ func _wire_changed() -> bool:
 		(1 if _shop_open else 0) | (2 if _market_open else 0) | (4 if _board_open else 0)
 		| (8 if _staff_open else 0) | (16 if _production_open else 0)
 		| (32 if _pause_open else 0) | (64 if _config_open else 0)
+		| (128 if _cookbook_open else 0)
 	)
 	if revision == _polled_revision and viewport == _polled_viewport \
 			and selected == _polled_selected and modals == _polled_modals:
@@ -14946,9 +15197,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		# ticket 2) — the button this handler had deliberately left unbound
 		# "so a future click-to-build has nothing to fight with". It does
 		# nothing outside build mode, so nothing that used to work changed.
-		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed \
-				and not _shop_open and not _market_open and not _board_open and not _staff_open \
-				and not _production_open:
+		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed and not _modal_open():
 			if _in_build_mode():
 				_confirm_build()
 			else:
@@ -15024,6 +15273,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_set_contract_board_open(false)
 			_set_staff_open(false)
 			_set_production_open(false)
+			_set_cookbook_open(false)
 		_toggle_shop_menu()
 		return
 
@@ -15039,6 +15289,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_set_contract_board_open(false)
 			_set_staff_open(false)
 			_set_production_open(false)
+			_set_cookbook_open(false)
 		_toggle_market()
 		return
 
@@ -15056,6 +15307,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_set_market_open(false)
 			_set_staff_open(false)
 			_set_production_open(false)
+			_set_cookbook_open(false)
 		_toggle_contract_board()
 		return
 
@@ -15070,6 +15322,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_set_market_open(false)
 			_set_contract_board_open(false)
 			_set_production_open(false)
+			_set_cookbook_open(false)
 		_toggle_staff_panel()
 		return
 
@@ -15085,7 +15338,26 @@ func _unhandled_input(event: InputEvent) -> void:
 			_set_market_open(false)
 			_set_contract_board_open(false)
 			_set_staff_open(false)
+			_set_cookbook_open(false)
 		_toggle_production_panel()
+		return
+
+	# B opens THE COOKBOOK — the sauce tree and a page per sauce, machine and
+	# raw ingredient, all of it `data/*.ron` read back (`cookbook_panel.gd`).
+	# B for book. The key IS free, and the note on E above says why it is
+	# free: B used to be the build menu, was given up to E deliberately, and
+	# was NOT kept as an alias precisely so it could mean something else
+	# later. This is later. One modal at a time with E, M, C, H and P, for
+	# E's reason, and handled in both view modes like the rest of them.
+	if event.keycode == KEY_B:
+		if not _cookbook_open:
+			_exit_build_mode()
+			_set_shop_menu_open(false)
+			_set_market_open(false)
+			_set_contract_board_open(false)
+			_set_staff_open(false)
+			_set_production_open(false)
+		_toggle_cookbook()
 		return
 
 	# **Q IS GONE** (the click-to-configure ticket). It cycled a hopper's
@@ -15113,6 +15385,12 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.keycode == KEY_ESCAPE:
 		if _config_open:
 			_close_config_panel()
+			return
+		# THE COOKBOOK's pages nest, and the configuration panel's rule applies
+		# one level further in: "close what I am looking at" means the page,
+		# not the book. `back()` says no at the tree, and then this falls
+		# through to the close below like every other modal.
+		if _cookbook_open and _cookbook != null and _cookbook.back():
 			return
 		if _anything_open():
 			_close_all_overlays()
@@ -16059,8 +16337,7 @@ func _rack_removal_refused(bays: int) -> bool:
 func _update_hover_tooltip() -> void:
 	if _hover_tooltip == null:
 		return
-	if _shop_open or _market_open or _board_open or _staff_open or _production_open \
-			or _pause_open or _config_open or _in_build_mode():
+	if _modal_open() or _pause_open or _config_open or _in_build_mode():
 		# The build menu sits over the middle of the screen; a world tooltip
 		# chasing the cursor across it would just be two panels fighting. And
 		# in build mode the placement prompt is already the panel by the
@@ -17020,6 +17297,12 @@ func _set_checkbox_checked(box: Panel, checked: bool) -> void:
 ## regenerated), still returns a real, non-null Texture2D: a plain
 ## placeholder swatch, never null and never a silently-broken texture.
 func _icon_for(item_id: String) -> Texture2D:
+	# What the CONTENT named, before either table. `data/*.ron` naming its own
+	# asset is the only one of the three that a content author can change, so
+	# it wins; the tables below stay as the answer for every id no file has
+	# named yet, and the swatch stays the answer for an id nothing has.
+	if _icon_names.has(item_id):
+		return _icon_for_asset(String(_icon_names[item_id]))
 	if FLUID_MODELS.has(item_id):
 		# A fluid has no belt model to drift from, but it does have a jug —
 		# and the shipping-box fallback below would otherwise draw a contract
@@ -17055,6 +17338,18 @@ func _icon_for_asset(asset: String) -> Texture2D:
 ## The documented fallback `_icon_for` returns when no real icon PNG could
 ## be loaded. Built once and reused — a flat, muted swatch, deliberately
 ## plain enough that it reads as "no icon" rather than as a broken asset.
+## THE COOKBOOK's one icon call, for ANY content id — an item, a machine
+## kind or a raw ingredient. `asset` is what that page's own snapshot said
+## `data/*.ron` named; "" when the file named none, and then this falls back
+## to `_icon_for`'s chain like everything else. `cookbook_panel.gd`
+## deliberately has no table of its own, so this is where the Cookbook's
+## icons and the world's cannot drift apart.
+func _cookbook_icon(id: String, asset: String) -> Texture2D:
+	if asset != "":
+		return _icon_for_asset(asset)
+	return _icon_for(id)
+
+
 func _fallback_icon_texture() -> Texture2D:
 	if _icon_fallback_texture == null:
 		var img := Image.create(8, 8, false, Image.FORMAT_RGBA8)
