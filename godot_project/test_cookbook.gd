@@ -38,6 +38,10 @@ extends SceneTree
 
 const PANEL_SOURCE := "res://cookbook_panel.gd"
 
+## Only for `open_every_gate` — see `_check_every_page`. This file builds no
+## factory: the book is the content files, not the floor.
+const Layouts = preload("res://test_layouts.gd")
+
 var main
 var _ran := false
 var _failed := false
@@ -139,6 +143,9 @@ func _run_checks() -> void:
 	_check_keys()
 	_check_polling()
 	_check_pause_menu()
+	# LAST, and it has to be: it ships enough to open every gate, and
+	# `_check_locked` needs a family that is still behind one.
+	_check_every_page(book)
 	_finish()
 
 
@@ -146,7 +153,7 @@ func _finish() -> void:
 	if _failed:
 		quit(1)
 		return
-	print("COOKBOOK_OK: the tree is cookbook_json — a node per sauce in its tier column, an orthogonal labelled edge per sauce-into-sauce, all on the canvas meta _draw() renders from; a locked family is a silhouette with its gate and a gate-only page; an unlocked page is its wire entry, counts, stages in order, seconds and never ticks; stages, rows and the breadcrumb link the pages; no id, name or contract in the book is written anywhere in cookbook_panel.gd; B opens it and closes E/M/C/H/P and each of them closes it, ESC walks back then closes without the pause menu, both legends name B; polled on the tick only while open, an unchanged book redraws nothing, and the pause menu hosts the same panel; BASICS is data/guide.ron — a chip per topic, every paragraph on its page with every placeholder filled from the wire, no brace on screen even when a title asks for a fact, ticks read as seconds, KEEP READING walking sideways rather than deeper, a breadcrumb capped however far the walk goes, and no sentence of the prose written in GDScript")
+	print("COOKBOOK_OK: the tree is cookbook_json — a node per sauce in its tier column, an orthogonal labelled edge per sauce-into-sauce, all on the canvas meta _draw() renders from; a locked family is a silhouette with its gate and a gate-only page; an unlocked page is its wire entry, counts, stages in order, seconds and never ticks; every page the book holds — sauce, machine and ingredient — builds a title and its sections rather than stopping part-way; stages, rows and the breadcrumb link the pages; no id, name or contract in the book is written anywhere in cookbook_panel.gd; B opens it and closes E/M/C/H/P and each of them closes it, ESC walks back then closes without the pause menu, both legends name B; polled on the tick only while open, an unchanged book redraws nothing, and the pause menu hosts the same panel; BASICS is data/guide.ron — a chip per topic, every paragraph on its page with every placeholder filled from the wire, no brace on screen even when a title asks for a fact, ticks read as seconds, KEEP READING walking sideways rather than deeper, a breadcrumb capped however far the walk goes, and no sentence of the prose written in GDScript")
 	quit(0)
 
 
@@ -316,6 +323,82 @@ func _check_sauce_page() -> void:
 	for name in entry.get("contracts", []):
 		if screen.find(String(name)) < 0:
 			_fail("%s is bought by %s and the page does not say so" % [id, String(name)])
+
+
+## EVERY page the book holds, opened. Not a sample: the one page in three
+## that a content file leaves a field off is exactly the page no
+## first-unlocked-sauce check ever opens.
+##
+## What it asserts is deliberately shallow — a title row and a section — and
+## that is the whole point. A page that fails this is not a page that is
+## missing a line; it is a page that STOPPED BEING BUILT. GDScript aborts
+## the function a script error happens in and keeps the engine running, so
+## an unguarded `String(null)` in `_build_sauce_page`'s first statement left
+## a breadcrumb, two horizontal rules with nothing between them and a BACK
+## button — on `Boxed BBQ`, since the book shipped, with every check in this
+## file green, because `_check_sauce_page` opens the FIRST unlocked sauce
+## and ketchup is the one sauce whose root recipe authors a tagline. It took
+## rendering the third sauce's page to see it.
+##
+## Three kinds because there are three kinds of page, and the nullable
+## fields (`tagline`, `blurb`, `icon`, `machine_icon`) are spread across all
+## of them.
+##
+## **With every gate open first**, and that is not a convenience. A locked
+## sauce draws `_build_locked_page`, which is a different function reading
+## different fields, so a book left at its starting gates walks the
+## SILHOUETTE path for every family but the first and proves nothing about
+## the pages a player eventually reads. Opening the gates here is the
+## difference between this check catching the blank BBQ page and sailing
+## past it — it was written, run, and found green until the gates went in.
+func _check_every_page(_book: Dictionary) -> void:
+	Layouts.open_every_gate(main.sim)
+	if Layouts.fixture_failure() != "":
+		_fail("could not open the unlock gates: %s" % Layouts.fixture_failure())
+		return
+	# The panel keeps the last book it was handed and only takes a new one
+	# every `LOAD_POLL_TICKS`; nothing ticks in here, so the gates we just
+	# opened would still read shut to it. `_poll_cookbook` is the same call
+	# the running game makes — this is the poll arriving, not a back door.
+	main._poll_cookbook()
+	var book := _wire()
+	for pair in [["sauces", "sauce"], ["machines", "machine"], ["ingredients", "ingredient"]]:
+		var kind := String(pair[0])
+		var view_kind := String(pair[1])
+		for entry in book.get(kind, []):
+			var id := String(entry.get("id", ""))
+			if id == "":
+				continue
+			_panel().open(view_kind, id)
+			# By NAME, not by the presence of a `CookbookTitle` node. The
+			# panel frees the previous page with `queue_free`, which does
+			# not take effect until the end of the frame, and this whole
+			# check runs inside one — so a page that failed to build leaves
+			# the LAST page's nodes findable and a check for the node alone
+			# passes on the wrong page's title. (Written that way first; it
+			# sailed through the mutation.)
+			var titled: String = main._kind_display_name(id)
+			var shown := "\n".join(_texts(_panel().body))
+			if shown.find(titled) < 0:
+				_fail(
+					("the %s page for '%s' never puts '%s' on screen — it was abandoned " % [view_kind, id, titled])
+					+ "part-built, which is what a script error inside the panel looks like "
+					+ "from out here (a nullable wire field read with String(null) is the way "
+					+ "this happens, and it aborts the build at whichever line reads it). Open "
+					+ "that page in a real run and read stderr for the line number."
+				)
+				continue
+			if bool(entry.get("locked", false)):
+				continue
+			var sections := 0
+			for child in _panel().body.get_children():
+				if String(child.name).begins_with("Section_") and not child.is_queued_for_deletion():
+					sections += 1
+			if sections == 0:
+				_fail(
+					"the %s page for '%s' is a title and nothing else — an unlocked page has sections"
+					% [view_kind, id]
+				)
 
 
 func _check_locked(book: Dictionary) -> void:

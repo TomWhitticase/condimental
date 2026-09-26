@@ -335,6 +335,72 @@ const FLUID_TINTS := {
 	# and the pair is no longer a value collision by the measure that
 	# defined one (issue #131 carries the crowding).
 	"liquid_smoke": Color(0.439, 0.392, 0.188),
+	# --- Mustard's three, and the first branch that BRIGHTENS -------------
+	#
+	# Mustard is the first sauce whose whole middle is fluid: the crusher
+	# mills the seed wet, so there is no pail stage and these three are the
+	# only place the player ever sees the product between the tote and the
+	# bottle. Getting them wrong is not a missing pail, it is a missing
+	# sauce.
+	#
+	# **All three are `mustard_gold` #DCC63C scaled in VALUE, which is what
+	# `palette.ron` asked for.** That file gives mustard no `liquid_*` entry
+	# of its own — deliberately, since nothing carries mustard in an open
+	# pail — and says in as many words that the tint here "should be derived
+	# from this number (0.863, 0.776, 0.235)". One hue for the branch, three
+	# values along it, so the run reads as one substance at three stages
+	# rather than as three substances.
+	#
+	# **It brightens where ketchup and BBQ darken, and that is the recipe
+	# rather than a whim.** Both older sauces cook down: `ketchup_mix` 0.322
+	# -> `ketchup` 0.239, `bbq_mix` 0.292 -> `bbq` 0.200. Mustard's pigment
+	# does not arrive until the MIXER, where turmeric goes in — the mash is
+	# milled seed and vinegar and nothing else — so the colour develops
+	# along the line instead of reducing. `seed_tan`'s note in `palette.ron`
+	# records the same expectation from the art side.
+	#
+	# **The three multipliers are x0.76, x0.94 and x1.15 of that gold, and
+	# they were MEASURED rather than reasoned.** Evenly spaced tints are not
+	# evenly spaced pixels. Rendering one pipe body at seven points along
+	# this hue, same camera, same 32x16 mask, gives a badly compressive
+	# curve — tint luma 116 -> 178 on the frame, 135 -> 195, 154 -> 208,
+	# 173 -> 219, 193 -> 226, 212 -> 233, 223 -> 237 — so a ladder that is
+	# even in this file bunches at the top of the frame. The first cut here
+	# was three even 25.6/255 steps in tint space and photographed as
+	# +15.3 then **+10.4**, the second of them inside the 10.7-11.8 noise
+	# band issue #113 measured for reading one fluid twice. Even in tint
+	# space is not even, and this table's job is the frame.
+	#
+	# **What actually pins the span is how crowded the frame already is.**
+	# Measured on the fluid gallery, the six older fluids sit at `bbq` 97.6,
+	# `ketchup` 125.2, `bbq_mix` 128.3, `ketchup_mix` 141.0, `liquid_smoke`
+	# 159.6 and `vinegar` 178.2 out of 255. That leaves exactly one free
+	# band, 178 to the ~237 ceiling of this hue, and mustard needs three
+	# values inside it. Dropping the mash below `vinegar` to open the top
+	# was tried and is worse: it lands 6.5/255 from it, and `vinegar` is not
+	# some other sauce's fluid but the one in the pipe on the OTHER side of
+	# the same crusher, since a mustard crusher drinks vinegar and fills
+	# mash. Below `vinegar` the next gap is `liquid_smoke`, the same olive
+	# hue, which is worse still.
+	#
+	# **So: 203.6, 221.8, 235.9 on the frame — +18.2 then +14.1, clearing
+	# `vinegar` by 25.4.** Every step is well outside the noise band, the
+	# margin to the neighbouring fluid is at the ~26/255 "reads reliably"
+	# anchor, and mustard's own tightest pair is wider than two pairs the
+	# game already ships (`ketchup` <-> `bbq_mix` measure 3.1/255 apart, and
+	# `ketchup_mix` <-> `bbq_mix` 12.7). That last number is the honest
+	# frame for this one: the span is narrow because the palette is full,
+	# and a fourth sauce will have to take value off the older two rather
+	# than find more room at the top.
+	"mustard_mash": Color(0.656, 0.590, 0.179),
+	"mustard_mix": Color(0.811, 0.729, 0.221),
+	# `mustard_gold` #DCC63C taken up to x1.15, one notch under where red
+	# clips. `palette.ron` asks for a tint "derived from this number" rather
+	# than for the number, and the derivation is the value scaling above;
+	# the cooked sauce takes the top of the band because it is the one stage
+	# a player watches for, and because the compression curve means the last
+	# step is the one with least room to give.
+	"mustard": Color(0.992, 0.892, 0.270),
 }
 const FLUID_TINT_FALLBACK := Color(0.60, 0.79, 0.86)
 
@@ -374,6 +440,23 @@ const PRODUCT_TINTS := {
 	"boxed_ketchup": Color(0.745, 0.086, 0.055),
 	"bottled_bbq": Color(0.306, 0.141, 0.098),
 	"boxed_bbq": Color(0.306, 0.141, 0.098),
+	# Mustard's three, and the proof of the paragraph above: the third sauce
+	# cost this file three rows and nothing else — no asset, no kind, no
+	# branch. Three and not five because only the vat, the bottler and the
+	# packer carry a `machine_product` mesh; the crusher and the mixer show
+	# no product, which is why `ketchup_mix` and `bbq_mix` have no row here
+	# either and `mustard_mash`/`mustard_mix` need none.
+	#
+	# **All three are the same number, and mustard is the only sauce where
+	# that is right.** Ketchup's vat takes `liquid_ketchup` #C4190E while
+	# its bottler takes `ketchup_red` #BE160E, because the palette gives
+	# that substance two entries — one for the pail, one for the bottle.
+	# Mustard has no `liquid_*` entry at all (nothing carries it in a pail),
+	# so the cook in the vat, the sauce behind the bottler's glass and the
+	# print on the packer's case are one colour by construction.
+	"mustard": Color(0.992, 0.892, 0.270),
+	"bottled_mustard": Color(0.992, 0.892, 0.270),
+	"boxed_mustard": Color(0.992, 0.892, 0.270),
 }
 ## What a recipe with no entry draws as: the voxel's own `fluid_pale`
 ## #E8F1EC, left untinted. A sauce nobody has added a row for reads as a
@@ -753,6 +836,28 @@ const RACK_LOAD_TINTS := {
 	# `vinegar_amber` and `smoke_slate` at 0.68 and 0.74 value — see above.
 	"vinegar": Color(0.461, 0.286, 0.093),
 	"liquid_smoke": Color(0.325, 0.290, 0.139),
+	# Mustard's two raws, and **both of them are the case this table exists
+	# for** — the first ingredients since `vinegar` and `liquid_smoke` that
+	# may not be reused from `HOPPER_FILL_TINTS`. `seed_tan` lands at luma
+	# 131.0 and `turmeric_orange` at 143.1, which is not near the dead band
+	# but squarely in the middle of it (100..175), so a full bay of either
+	# would render at the value of the floor behind it and a loaded rack
+	# could not be told from an empty one.
+	#
+	# Taken DOWN in value, keeping the hue, for the reason the pair above
+	# was: up is not available. Clearing the band from below needs 175, and
+	# `turmeric_orange` is already at R 0.890 — the scale factor that lifts
+	# its luma that far clips red before it gets there, so there is no
+	# brighter turmeric to have. Down, both land in the 73..89 cluster the
+	# four cleared tints already occupy: `turmeric` at 0.57 value is luma
+	# 81.6 (18.4 clear of the band) and `mustard_seed` at 0.65 value is 85.0
+	# (15.0 clear), against `spice_mix`'s 10.8 for the tightest shipped one.
+	#
+	# Identity is not this table's job, per its doc above, and these two do
+	# not claim it: they land 3.4 luma apart and are told apart by the hover
+	# readout, as the other six are.
+	"mustard_seed": Color(0.410, 0.331, 0.133),
+	"turmeric": Color(0.507, 0.291, 0.058),
 }
 const RACK_LOAD_TINT_FALLBACK := Color(0.72, 0.66, 0.56)
 
@@ -904,6 +1009,24 @@ const HOPPER_FILL_TINTS := {
 	# ~50/255 either way, where ~26/255 is the anchor for "reads reliably".
 	# Lifting it would have moved it TOWARD the empty bin, not away.
 	"molasses": Color(0.165, 0.086, 0.055),
+	# Mustard's two raws, `seed_tan` #A18234 and `turmeric_orange` #E3821A,
+	# **verbatim and unlifted** — the rule this table's doc states, and the
+	# reason it can be followed here is the one that doc gives: a hopper's
+	# heap is an upward face under the key light, so what reads in the
+	# market crate reads in the bin. (`RACK_LOAD_TINTS` cannot follow it for
+	# these two, and says why.)
+	#
+	# Measured against the four above on this table's own metric: the pair
+	# is 0.456 apart from each other and the nearest either comes to an
+	# older raw is `spice_mix` <-> `mustard_seed` at 0.678, so neither
+	# disturbs the worst pair (`tomato` <-> `spice_mix`, still 0.347) and
+	# the floor did not have to move. They separate from each other on
+	# CHROMA rather than value — 12.2/255 of luma between a dull olive-gold
+	# and a hot orange — which the floor's own message warns about; the
+	# saving grace is that no fixture stands these two bins side by side and
+	# the four they sit among are all reds and browns.
+	"mustard_seed": Color(0.631, 0.510, 0.204),
+	"turmeric": Color(0.890, 0.510, 0.102),
 }
 const HOPPER_FILL_TINT_FALLBACK := Color(0.72, 0.66, 0.56)
 
@@ -953,6 +1076,22 @@ const ITEM_MODELS := {
 	# and a drum of syrup as two identical pipe nozzles.
 	"spice_mix": "item_spice_mix",
 	"molasses": "item_molasses",
+	# The third sauce's two raw SOLIDS and its two finished goods (the
+	# mustard epic). **Four keys and no more, because mustard's middle is
+	# WET**: the crusher mills the seed with vinegar and discharges a fluid,
+	# so `mustard_mash` and `mustard_mix` never touch a belt and have no
+	# business in this table at all — they are `FLUID_TINTS` entries
+	# instead. Mustard is the first sauce with no pail stage, which is why
+	# it adds two raws and two packages here where ketchup added five ids.
+	#
+	# `bottled_mustard` and `boxed_mustard` get models of their own for the
+	# reason the BBQ pair above states: a belt of mustard has to be
+	# tellable from a belt of ketchup at a glance, and the fallback would
+	# make every crate of all three the same cardboard box.
+	"mustard_seed": "item_mustard_seed",
+	"turmeric": "item_turmeric",
+	"bottled_mustard": "item_bottle_mustard",
+	"boxed_mustard": "item_box_mustard",
 }
 const ITEM_MODEL_FALLBACK := "item_box"
 
