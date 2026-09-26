@@ -68,8 +68,9 @@ it. The wrap-up-specific parts:
   reviewed adversarially by someone who did not write it (`docs/WORKFLOW.md`,
   and the `review` skill), the verdict posted as a comment whose first line is
   `VERDICT: APPROVED`. A session that wrote the branch cannot supply that,
-  however carefully it re-runs its own tests — so **a PR of yours awaiting
-  its merge is the one legitimate way to end with a PR still open**. With no
+  however carefully it re-runs its own tests. So **a PR of yours ends the
+  session open only if it was reviewed and its merge is held, or if no
+  reviewer subagent could be launched at all**. With no
   verdict, launch the review yourself as a fresh subagent (`open-pr` step 5:
   `general-purpose`, never `fork`) rather than ending on "waiting for
   someone", and **wait for its verdict before you close**. The subagent dies
@@ -183,8 +184,8 @@ command. Under the red one, add what is unfinished, where it is (branch,
 file, PR), the next concrete step, and — separately and in as many words —
 **whether the tree can still be deleted safely**. "PR #162 is pushed and
 approved, its merge held for the owner; the worktree can go, the work cannot
-be lost" is a red
-banner with a clean tree, and saying only one half of that misleads.
+be lost" is a red banner with a clean tree, and saying only one half of that
+misleads.
 
 **Never print the green banner with work outstanding.** The banner is a
 promise; a wrong one costs someone their work, or merges something nobody

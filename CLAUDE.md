@@ -39,8 +39,9 @@ empty, and the player buys and places every tile.
   tool, `general-purpose`, never a `fork`) to review it with the `review`
   skill, wait for its verdict, and act on it (`open-pr` step 5). The review
   always runs. Only the *merge* is held when the task forbids merging (an
-  Orca worker's coordinator merges) or the owner must also sign off (a
-  design-doc deviation, a `gdext` bump, a save-format change). Only if no
+  Orca worker's coordinator merges) or the owner must also sign off (a PR
+  the owner asked to review, a design-doc deviation, a `gdext` bump, a
+  save-format change). Only if no
   subagent can be launched does the PR sit open with no review.
 - **Every PR body shows the change in a screenshot** — render with
   `scripts/screenshot-scene.sh`, read it, publish with

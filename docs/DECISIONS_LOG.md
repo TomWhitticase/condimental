@@ -29,10 +29,10 @@ See [WORKFLOW.md](WORKFLOW.md).
   fix the findings, push, and have a *fresh* subagent re-review the rework;
   relaunching until one approves is not a review. **The review always
   runs.** When the task forbids merging, or the change also waits on the
-  owner (a design-doc deviation, a `gdext` bump, a save-format change), only
-  the *merge* is held. A PR sits open unreviewed only if no subagent can be
-  launched. This amends the
-  2026-09-25 rule below, which read "with no verdict, the author stops".
+  owner (a PR the owner asked to review, a design-doc deviation, a `gdext`
+  bump, a save-format change), only the *merge* is held. A PR sits open
+  unreviewed only if no subagent can be launched. This amends the 2026-09-25
+  rule below, which read "with no verdict, the author stops".
   Binds `CLAUDE.md`, `docs/WORKFLOW.md` and the `open-pr`, `wrap-it-up` and
   `review` skills. Full record in `docs/DECISIONS.md`.
 - 2026-09-26 **CONDIMENTAL is GPL-3.0-only; the name and brand are
@@ -972,6 +972,8 @@ See [WORKFLOW.md](WORKFLOW.md).
   which is a judgement call and only warns. Do not merge a PR that is red,
   still running, requested for review, or that deviates from a design doc,
   bumps `gdext` or changes the save format — say it is ready and stop.
+  *(Amended 2026-09-26: a PR with no verdict yet gets a subagent reviewer
+  first, and only its merge stops; see that entry above.)*
   **Deciding something is out of scope is only half the decision; filing it is
   the other half** *(the bar was raised on 2026-09-21 — see the entry at the
   top of this log)*: `gh issue create --label deferred`, with file *and*

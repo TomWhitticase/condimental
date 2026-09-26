@@ -48,15 +48,18 @@ matches what code comments and data files cite.
   After `CHANGES REQUESTED`, the re-review goes to another fresh subagent,
   not the one that asked for the changes.
 
-  **What still stops.** Only the *merge*, and only in two cases:
+  **What still stops.** Only the *merge*. As before, it needs green checks
+  on top of the verdict. It is also held when:
   - the task forbids merging (an Orca worker's coordinator merges);
-  - the change also needs the owner, on top of the review: a design-doc
-    deviation, a `gdext` bump, or a save-format change.
+  - the change also needs the owner, on top of the review: a PR the owner
+    asked to review, a design-doc deviation, a `gdext` bump, or a
+    save-format change.
 
-  The review still runs in both, so the PR stays open *with* its verdict.
-  #193 is both cases: an Orca ticket, and a save-schema bump. It got its
-  subagent review all the same, and only its merge waits. The one case with
-  no review is that no subagent can be launched at all. The author also
+  The review still runs in these cases, so the PR stays open *with* its
+  verdict. #193 is both: an Orca ticket, and a save-schema bump. Its review
+  was commissioned this way from the author's session on 2026-09-26, and
+  only its merge waits. The one case with no review is that no subagent can
+  be launched at all. The author also
   waits for the verdict before ending the session: the subagent is part of
   that session and does not outlive it.
 
