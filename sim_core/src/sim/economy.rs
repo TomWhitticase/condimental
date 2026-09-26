@@ -25,10 +25,18 @@
 //!
 //! # The delivery-allocation rule (decided here — GAMEPLAY.md left it open)
 //!
-//! **There is ONE shared pool of collected-but-undelivered stock. At its
-//! own cadence boundary a contract is satisfied only if the pool holds its
-//! full mix, and on payout it CONSUMES that mix from the pool. Goods are
-//! never credited to two contracts at once.**
+//! **Every contract draws from one combined stock: whatever stands on the
+//! docks that can ship this tick ([`DeliveryStock`]). At its own cadence
+//! boundary a contract is satisfied only if that stock holds its full mix,
+//! and on payout it CONSUMES that mix, taking each line from the docks in
+//! topology order. Goods are never credited to two contracts at once.**
+//!
+//! The stock lives on the docks themselves (`super::dock`'s module doc,
+//! 2026-09-26); until then it lived here, as one pool the docks emptied
+//! into every tick. Settling against the SUM keeps the rule below exactly
+//! as it was — which dock a box waits on changes nothing about whether it
+//! can be sold — and taking from the docks in a fixed order keeps it
+//! deterministic and tells presentation which docks a payment came from.
 //!
 //! The alternative considered — give every contract its own buffer and
 //! credit one delivered unit to every contract that wants that item — is
@@ -52,7 +60,7 @@
 //!    priority UI yet, so file order is the honest placeholder rather than
 //!    an invented answer.
 //! 2. **Undelivered stock is never destroyed.** A missed window leaves the
-//!    pool untouched, so what was delivered still counts toward the next
+//!    docks untouched, so what was delivered still counts toward the next
 //!    window (of that contract or any other). A miss costs that window's
 //!    payout — and, since the contract-board epic, a **strike**.
 //!
@@ -91,7 +99,7 @@
 //! needs the offer's terms at command time and nothing else in `World`
 //! holds a registry after construction.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::contracts::{Contract, ContractRegistry};
 use super::inventory::Inventory;
@@ -149,54 +157,6 @@ use super::unlocks::{UnlockRegistry, UnlockSnapshot};
 /// [`Economy::new`], which starts an empty ledger at zero.
 pub const STARTING_MONEY: u32 = 3000;
 
-/// How many units of any ONE item may stand on the dock at once — the
-/// ceiling on the shared delivery pool, per item id.
-///
-/// **Why the pool has a ceiling at all** (the dock-capacity change,
-/// 2026-09-16). Until now this was `u32::MAX` and its comment called the
-/// pool "an accumulating ledger, not a physical-space-limited buffer". That
-/// was true of the ledger and false of the fiction: what the player sees is
-/// a loading dock with cases standing on it, and a loading dock fills up.
-/// With no ceiling a line built far past the board's demand simply grew a
-/// number forever — overproduction cost ingredients (`contracts.ron`'s own
-/// closing note) but never showed up on the floor, so the one place the
-/// player would actually notice it, the factory itself, stayed silent. A
-/// full pool now refuses the box at the dock's belt end
-/// ([`super::dock::Dock::try_absorb`]), the line backs up behind it exactly
-/// the way a full machine buffer already backs one up, and a jam that says
-/// "you are making more than anyone ordered" is visible from across the
-/// floor. It also gives `delivery_stock` a real denominator, which is what
-/// lets presentation draw it as a bar at all (UI_UX.md §5e: a bar is only
-/// drawn where the simulation defines the ceiling).
-///
-/// **Why it is per item and not one total.** A single total can deadlock
-/// the game: one overproduced product would crowd every other item out of
-/// the pool, and a contract whose mix names an item that can no longer be
-/// delivered could never be satisfied again — and nothing in the game can
-/// dump excess stock (GAMEPLAY.md §11's spot-market question is still
-/// open), so there would be no way out. A per-item ceiling cannot do that:
-/// every item always has its own room, so a mix is always eventually
-/// fillable, and a clog is always specific ("the dock is full of boxed
-/// ketchup") rather than a mystery.
-///
-/// **The number is a relationship, not a literal** (the same rule
-/// [`STARTING_MONEY`] follows): it must comfortably exceed the LARGEST
-/// single mix quantity on the board, because a contract settles only when
-/// the pool holds its whole mix at once — `export_pallet` asks for 20 boxes
-/// in one window, so a ceiling of 20 or under would make it unsatisfiable.
-/// 48 is 2.4x that: the pallet order can be building up while the small
-/// orders keep being skimmed off the same pool. `tests/dock.rs` pins the
-/// relationship against `data/contracts.ron` rather than the literal, so
-/// adding a bigger order fails a test instead of quietly breaking that
-/// contract. Left of that ceiling, a line running against no demand at all
-/// reaches it in about 12 000 ticks (~6.5 minutes) — long enough not to
-/// nag, short enough to be a consequence.
-///
-/// A Rust constant rather than a `data/` field for
-/// [`super::dock::DOCK_CAPACITY`]'s reason, and to be moved when buffer
-/// sizes become content.
-pub const DELIVERY_STOCK_CAPACITY: u32 = 48;
-
 /// One contract plus the bookkeeping that is *this world's* rather than the
 /// content's: when it is next checked, and how it has done so far.
 ///
@@ -248,9 +208,109 @@ impl ActiveContract {
 /// follows the `Missed` that caused it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContractEvent {
-    Paid { id: String },
-    Missed { id: String, consecutive_misses: u32 },
-    Lost { id: String },
+    /// `from` is every dock the mix was taken from, as positions in the
+    /// [`DeliveryStock`] the tick was handed, ascending — so `World` can mark
+    /// those docks as paid and nothing else.
+    Paid {
+        id: String,
+        from: Vec<usize>,
+    },
+    Missed {
+        id: String,
+        consecutive_misses: u32,
+    },
+    Lost {
+        id: String,
+    },
+}
+
+/// What the docks able to ship this tick are holding, one [`Inventory`] per
+/// dock in topology order — the stock every contract settles against
+/// (module doc: "The delivery-allocation rule").
+///
+/// The economy owns no goods any more; `World` lends it this for one
+/// [`Economy::tick`] or one [`Economy::snapshot`] and takes the docks'
+/// stock back afterwards. A contract is satisfied by the SUM, and
+/// [`Self::take`] consumes a line from the first dock that has any, then
+/// the next, so which dock paid is decided by position alone.
+#[derive(Debug, Default, Clone)]
+pub struct DeliveryStock {
+    docks: Vec<Inventory>,
+    /// Every place across the docks, lent or not — `EconomySnapshot`'s
+    /// `delivery_capacity`.
+    places: u32,
+    /// Whether some dock has every place taken — `EconomySnapshot`'s
+    /// `delivery_full`.
+    any_at_capacity: bool,
+}
+
+impl DeliveryStock {
+    /// Adds one dock's stock at the next position.
+    pub fn push(&mut self, stock: Inventory) {
+        self.docks.push(stock);
+    }
+
+    /// Counts a dock's places and fullness toward the snapshot's totals,
+    /// whether or not its stock is lent — a mothballed dock is still a place
+    /// boxes stand.
+    pub fn count_places(&mut self, places: u32, at_capacity: bool) {
+        self.places = self.places.saturating_add(places);
+        self.any_at_capacity |= at_capacity;
+    }
+
+    /// How much of `item` stands across every lent dock.
+    pub fn count(&self, item: &str) -> u32 {
+        self.docks
+            .iter()
+            .fold(0u32, |sum, dock| sum.saturating_add(dock.count(item)))
+    }
+
+    pub fn has_at_least(&self, item: &str, qty: u32) -> bool {
+        self.count(item) >= qty
+    }
+
+    /// Every item across the lent docks with its summed quantity, in the
+    /// order it first appears (dock order, then slot order), non-zero only.
+    pub fn totals(&self) -> Vec<(ItemId, u32)> {
+        let mut out: Vec<(ItemId, u32)> = Vec::new();
+        for (item, qty) in self.docks.iter().flat_map(Inventory::iter) {
+            match out.iter_mut().find(|(id, _)| id == item) {
+                Some((_, n)) => *n = n.saturating_add(*qty),
+                None => out.push((item.clone(), *qty)),
+            }
+        }
+        out
+    }
+
+    pub fn places(&self) -> u32 {
+        self.places
+    }
+
+    pub fn any_at_capacity(&self) -> bool {
+        self.any_at_capacity
+    }
+
+    /// Removes `qty` of `item`, first dock first, and records in `from` every
+    /// dock position it took any from. The caller has checked the sum.
+    fn take(&mut self, item: &str, mut qty: u32, from: &mut Vec<usize>) {
+        for (at, dock) in self.docks.iter_mut().enumerate() {
+            if qty == 0 {
+                break;
+            }
+            let taken = dock.remove(item, qty);
+            if taken > 0 {
+                qty -= taken;
+                if !from.contains(&at) {
+                    from.push(at);
+                }
+            }
+        }
+    }
+
+    /// Gives the docks' stock back, in the order it was pushed.
+    pub fn into_docks(self) -> Vec<Inventory> {
+        self.docks
+    }
 }
 
 /// Why [`Economy::try_sign`] did nothing. The command path drops this on
@@ -286,13 +346,6 @@ pub struct Economy {
     /// which is also the priority order under scarcity (module doc). A
     /// subset of `board`; never holds one id twice.
     pub contracts: Vec<ActiveContract>,
-    /// The ONE shared pool of delivered-but-not-yet-shipped product that
-    /// every contract draws from (module doc's allocation rule) — the
-    /// number the UI calls "on the dock", and since the delivery-dock ticket
-    /// that is literally true: it is filled by [`super::dock::Dock`], the
-    /// building at the chain's tail, which ships whatever arrives on its
-    /// belt into here every tick.
-    pub delivery_buffer: Inventory,
     /// How many times each offer has been lost, by id — absent means never.
     /// A `BTreeMap` so iteration (and the save) is deterministic. Kept so
     /// the board can say "lost twice" beside an offer; nothing in the
@@ -333,22 +386,20 @@ pub struct EconomySnapshot {
     /// presentation-only value that never feeds back in (ARCHITECTURE.md
     /// §3.9).
     pub money: f64,
-    /// The whole shared delivery pool, `(item id, quantity)`, non-zero
-    /// entries only. This is the raw stock on hand — the number a UI should
-    /// show for "what's on the dock," as opposed to a contract's own
-    /// clamped `progress`.
+    /// What every contract can draw on right now — the [`DeliveryStock`]'s
+    /// totals, summed over the docks able to ship, `(item id, quantity)`,
+    /// non-zero only. The number the clipboard shows "on the dock", as
+    /// opposed to a contract's own clamped `progress`. Per dock, the same
+    /// facts are `DockSnapshot::contents`.
     pub delivery_stock: Vec<(ItemId, u32)>,
-    /// The ceiling each of those entries stands against
-    /// ([`DELIVERY_STOCK_CAPACITY`]) — on the wire so presentation can draw
-    /// the level as a bar without knowing the constant, and so a change to
-    /// it never needs a matching edit in GDScript.
+    /// Every place across every dock ([`super::dock::DOCK_CAPACITY`] each) —
+    /// on the wire so presentation can draw the level as a bar without
+    /// knowing the constant.
     pub delivery_capacity: u32,
-    /// Whether any item has reached that ceiling
-    /// ([`Economy::delivery_pool_full`]) — a summary of the pool, read with
-    /// `delivery_stock` beside it to see which product is capped.
+    /// Whether some dock has every place taken — a summary, read beside the
+    /// per-dock `DockSnapshot::at_capacity` that says which.
     ///
-    /// NOT "a dock is backing up": that is per-dock, and `DockSnapshot::full`
-    /// carries it.
+    /// NOT "a dock is backing up": that is `DockSnapshot::full`.
     pub delivery_full: bool,
     /// Every **active** contract, in priority order.
     pub contracts: Vec<ContractSnapshot>,
@@ -387,12 +438,12 @@ pub struct ContractSnapshot {
     pub name: String,
     /// What this contract requires per delivery, `(item id, quantity)`.
     pub mix: Vec<(ItemId, u32)>,
-    /// How much of each mix line the shared pool can currently cover,
+    /// How much of each mix line the docks can currently cover,
     /// **clamped to the required quantity** — so a checklist reads "2/2"
     /// rather than "7/2" when stock exceeds the ask. Same item order as
     /// `mix`, so the two zip positionally.
     pub progress: Vec<(ItemId, u32)>,
-    /// Whether the pool holds the whole mix right now — i.e. whether the
+    /// Whether the docks hold the whole mix right now — i.e. whether the
     /// window would pay if it ended this tick. Derived here rather than in
     /// Godot so the two can never disagree about "all-or-nothing".
     pub satisfied: bool,
@@ -473,10 +524,6 @@ impl Economy {
                 .map(|c| ActiveContract::signed_at(c, 0))
                 .collect(),
             board: contracts.clone(),
-            // Bounded per item since the dock-capacity change — see
-            // DELIVERY_STOCK_CAPACITY for why the dock fills up and why the
-            // ceiling is per item rather than one total.
-            delivery_buffer: Inventory::new(DELIVERY_STOCK_CAPACITY),
             losses: BTreeMap::new(),
             unlocks,
             lifetime_deliveries: 0,
@@ -514,48 +561,6 @@ impl Economy {
     pub fn contract_unlocked(&self, id: &str) -> bool {
         self.unlocks
             .contract_available(id, self.lifetime_deliveries)
-    }
-
-    /// Adds finished product into the shared delivery pool — called from
-    /// [`super::dock::Dock::ship_into`], once per tick, for whatever the
-    /// chain's delivery dock received that tick.
-    ///
-    /// **Returns how many units were actually accepted**, which is fewer
-    /// than `qty` once the pool is at [`DELIVERY_STOCK_CAPACITY`] for that
-    /// item. The caller must keep the remainder rather than assume the whole
-    /// deposit landed: the dock does, so a box is never destroyed by a full
-    /// pool (`tests/core_loop.rs`'s mass-conservation check is the property
-    /// this protects). In practice the remainder is almost always zero,
-    /// because [`super::dock::Dock::try_absorb`] refuses to take a box off
-    /// the belt for a full pool in the first place — this is the second
-    /// gate, for the tick where one dock fills the pool that another dock
-    /// had already taken a box for.
-    pub fn deposit(&mut self, item: &str, qty: u32) -> u32 {
-        self.delivery_buffer.add(item, qty)
-    }
-
-    /// Whether the shared pool could take `qty` more of `item` — the gate
-    /// [`super::dock::Dock::try_absorb`] asks before it takes a box off the
-    /// belt, and therefore the definition of "this dock is full" that the
-    /// wire and the HUD both report.
-    pub fn has_delivery_room(&self, item: &str, qty: u32) -> bool {
-        self.delivery_buffer.has_room_for(item, qty)
-    }
-
-    /// Whether any item in the pool has reached the ceiling, as the
-    /// clipboard says it. Deliberately *any* rather than *all*: one item at
-    /// the ceiling is already enough to stop that product's line dead,
-    /// which is the fact worth showing.
-    ///
-    /// A summary of the POOL, and only safe as one because the clipboard
-    /// draws it beside `delivery_stock`'s per-item levels, which say WHICH
-    /// product is capped. On its own it cannot answer "is this dock
-    /// jammed" — that is per-dock and per-item, and lives on
-    /// [`super::dock::Dock::blocked`], which the lamp reads instead.
-    pub fn delivery_pool_full(&self) -> bool {
-        self.delivery_buffer
-            .iter()
-            .any(|(_, qty)| *qty >= DELIVERY_STOCK_CAPACITY)
     }
 
     /// Spends `amount` if there is enough money, and reports whether it
@@ -655,19 +660,30 @@ impl Economy {
         self.board.position(id).unwrap_or(usize::MAX)
     }
 
-    /// Whether the shared pool holds every line of `contract`'s mix.
-    fn mix_satisfied(&self, contract: &Contract) -> bool {
+    /// Whether `stock` holds every line of `contract`'s mix.
+    fn mix_satisfied(contract: &Contract, stock: &DeliveryStock) -> bool {
         contract
             .mix
             .iter()
-            .all(|(item, qty)| self.delivery_buffer.has_at_least(item, *qty))
+            .all(|(item, qty)| stock.has_at_least(item, *qty))
+    }
+
+    /// Every item some active contract's mix names — what a dock has to
+    /// hold for its logistics crew to have work (`World::tick` step 6). A
+    /// dock holding only goods nobody has ordered asks for nobody, so it
+    /// never holds a head another dock's orders need.
+    pub fn wanted(&self) -> BTreeSet<ItemId> {
+        self.contracts
+            .iter()
+            .flat_map(|active| active.contract.mix.iter().map(|(item, _)| item.clone()))
+            .collect()
     }
 
     /// Advances every active contract's own cadence clock and settles any
     /// that fall due on `current_tick`. For each such contract:
     ///
-    /// - **Satisfied** (the shared pool holds its full mix): consumes the
-    ///   mix from the pool, pays out, advances that contract's
+    /// - **Satisfied** (`stock` holds its full mix): consumes the mix from
+    ///   the docks in `stock`'s order, pays out, advances that contract's
     ///   `next_delivery_tick` by its own cadence, and clears its run of
     ///   misses.
     /// - **Not satisfied:** a missed window — no money changes hands and
@@ -681,7 +697,7 @@ impl Economy {
     /// fall due together and stock covers only one, the earlier-listed one
     /// takes it. Returns what happened, in that same order — empty when
     /// nothing fell due.
-    pub fn tick(&mut self, current_tick: u64) -> Vec<ContractEvent> {
+    pub fn tick(&mut self, current_tick: u64, stock: &mut DeliveryStock) -> Vec<ContractEvent> {
         let mut events = Vec::new();
         let mut lost: Vec<usize> = Vec::new();
         for i in 0..self.contracts.len() {
@@ -691,7 +707,7 @@ impl Economy {
             self.contracts[i].next_delivery_tick += self.contracts[i].contract.cadence_ticks;
             let id = self.contracts[i].contract.id.clone();
 
-            if !self.mix_satisfied(&self.contracts[i].contract) {
+            if !Self::mix_satisfied(&self.contracts[i].contract, stock) {
                 let active = &mut self.contracts[i];
                 active.deliveries_missed += 1;
                 active.consecutive_misses += 1;
@@ -706,9 +722,11 @@ impl Economy {
                 continue;
             }
 
+            let mut from = Vec::new();
             for (item, qty) in &self.contracts[i].contract.mix {
-                self.delivery_buffer.remove(item, *qty);
+                stock.take(item, *qty, &mut from);
             }
+            from.sort_unstable();
             // Saturating, never wrapping (and never panicking in a debug
             // build): see `types::Money`.
             self.money = self.money.saturating_add(self.contracts[i].contract.payout);
@@ -720,7 +738,7 @@ impl Economy {
             // for nothing, which is the whole point of keying gates off it
             // (`data/unlocks.ron`).
             self.lifetime_deliveries = self.lifetime_deliveries.saturating_add(1);
-            events.push(ContractEvent::Paid { id });
+            events.push(ContractEvent::Paid { id, from });
         }
         // Highest index first, so earlier removals never shift a later one.
         for &i in lost.iter().rev() {
@@ -737,12 +755,14 @@ impl Economy {
         self.contracts.iter().find(|c| c.contract.id == id)
     }
 
-    pub fn snapshot(&self) -> EconomySnapshot {
+    /// `stock` is what [`Self::tick`] would settle against if a window
+    /// ended now; `World::economy_snapshot` builds it the same way.
+    pub fn snapshot(&self, stock: &DeliveryStock) -> EconomySnapshot {
         EconomySnapshot {
             money: self.money.to_num::<f64>(),
-            delivery_stock: self.delivery_buffer.iter().cloned().collect(),
-            delivery_capacity: self.delivery_buffer.capacity_per_item,
-            delivery_full: self.delivery_pool_full(),
+            delivery_stock: stock.totals(),
+            delivery_capacity: stock.places(),
+            delivery_full: stock.any_at_capacity(),
             contracts: self
                 .contracts
                 .iter()
@@ -754,14 +774,9 @@ impl Economy {
                         .contract
                         .mix
                         .iter()
-                        .map(|(item, required)| {
-                            (
-                                item.clone(),
-                                self.delivery_buffer.count(item).min(*required),
-                            )
-                        })
+                        .map(|(item, required)| (item.clone(), stock.count(item).min(*required)))
                         .collect(),
-                    satisfied: self.mix_satisfied(&active.contract),
+                    satisfied: Self::mix_satisfied(&active.contract, stock),
                     cadence_ticks: active.contract.cadence_ticks,
                     window_start_tick: active.window_start_tick(),
                     next_delivery_tick: active.next_delivery_tick,
@@ -836,6 +851,15 @@ mod tests {
         Economy::new(&ContractRegistry::from_ron_str(FIXTURE).expect("fixture must load"))
     }
 
+    /// One dock holding `qty` more of `item` — the unit tests settle against
+    /// a single dock unless they are about the order across several.
+    fn deposit(stock: &mut DeliveryStock, item: &str, qty: u32) {
+        if stock.docks.is_empty() {
+            stock.push(Inventory::new(u32::MAX));
+        }
+        stock.docks[0].add(item, qty);
+    }
+
     fn active_ids(econ: &Economy) -> Vec<&str> {
         econ.contracts
             .iter()
@@ -847,7 +871,7 @@ mod tests {
         events
             .iter()
             .filter_map(|e| match e {
-                ContractEvent::Paid { id } => Some(id.as_str()),
+                ContractEvent::Paid { id, .. } => Some(id.as_str()),
                 _ => None,
             })
             .collect()
@@ -876,9 +900,10 @@ mod tests {
     #[test]
     fn a_payout_at_the_ceiling_saturates_rather_than_wrapping() {
         let mut econ = fixture();
+        let mut stock = DeliveryStock::default();
         econ.money = Money::MAX - Money::from_num(1);
-        econ.deposit("boxed_ketchup", 10);
-        let events = econ.tick(100);
+        deposit(&mut stock, "boxed_ketchup", 10);
+        let events = econ.tick(100, &mut stock);
         assert!(
             events
                 .iter()
@@ -891,19 +916,21 @@ mod tests {
     #[test]
     fn does_not_pay_out_before_the_cadence_boundary_arrives() {
         let mut econ = fixture();
-        econ.deposit("boxed_ketchup", 10);
-        assert!(econ.tick(99).is_empty());
+        let mut stock = DeliveryStock::default();
+        deposit(&mut stock, "boxed_ketchup", 10);
+        assert!(econ.tick(99, &mut stock).is_empty());
         assert_eq!(econ.money, Money::from_num(0));
     }
 
     #[test]
     fn a_contract_pays_out_exactly_its_own_payout_and_consumes_exactly_its_own_mix() {
         let mut econ = fixture();
-        econ.deposit("boxed_ketchup", 5);
+        let mut stock = DeliveryStock::default();
+        deposit(&mut stock, "boxed_ketchup", 5);
 
         // t=100: "fast" is due and paid; "impossible" is due and missed;
         // "slow" runs to 250.
-        let events = econ.tick(100);
+        let events = econ.tick(100, &mut stock);
 
         assert_eq!(
             paid(&events),
@@ -912,9 +939,9 @@ mod tests {
         );
         assert_eq!(econ.money, Money::from_num(50));
         assert_eq!(
-            econ.delivery_buffer.count("boxed_ketchup"),
+            stock.count("boxed_ketchup"),
             3,
-            "exactly the paid contract's mix must leave the shared pool"
+            "exactly the paid contract's mix must leave the docks"
         );
         assert_eq!(econ.contract("fast").unwrap().next_delivery_tick, 200);
         assert_eq!(econ.contract("fast").unwrap().window_start_tick(), 100);
@@ -929,10 +956,11 @@ mod tests {
     #[test]
     fn one_contract_hitting_its_boundary_while_another_has_not_pays_only_the_due_one() {
         let mut econ = fixture();
-        econ.deposit("boxed_ketchup", 100); // plenty for anyone
+        let mut stock = DeliveryStock::default();
+        deposit(&mut stock, "boxed_ketchup", 100); // plenty for anyone
 
         for t in [100u64, 200] {
-            econ.tick(t);
+            econ.tick(t, &mut stock);
         }
         assert_eq!(
             econ.money,
@@ -941,7 +969,7 @@ mod tests {
         );
         assert_eq!(econ.contract("slow").unwrap().deliveries_made, 0);
 
-        econ.tick(250);
+        econ.tick(250, &mut stock);
         assert_eq!(
             econ.money,
             Money::from_num(190),
@@ -956,9 +984,10 @@ mod tests {
     #[test]
     fn delivered_stock_is_consumed_not_credited_to_every_matching_contract() {
         let mut econ = fixture();
-        econ.deposit("boxed_ketchup", 2); // enough for "fast" alone
+        let mut stock = DeliveryStock::default();
+        deposit(&mut stock, "boxed_ketchup", 2); // enough for "fast" alone
 
-        econ.tick(500);
+        econ.tick(500, &mut stock);
 
         assert_eq!(
             econ.money,
@@ -966,7 +995,7 @@ mod tests {
             "only 'fast' could be filled from two boxes — 'slow' must not be paid from the \
              same stock"
         );
-        assert_eq!(econ.delivery_buffer.count("boxed_ketchup"), 0);
+        assert_eq!(stock.count("boxed_ketchup"), 0);
         assert_eq!(econ.contract("fast").unwrap().deliveries_made, 1);
         assert_eq!(econ.contract("slow").unwrap().deliveries_made, 0);
         assert!(econ.contract("slow").unwrap().deliveries_missed >= 1);
@@ -978,26 +1007,28 @@ mod tests {
     #[test]
     fn two_contracts_due_together_both_settle_when_stock_covers_both() {
         let mut econ = fixture();
-        econ.deposit("boxed_ketchup", 5); // 2 for "fast" + 3 for "slow"
+        let mut stock = DeliveryStock::default();
+        deposit(&mut stock, "boxed_ketchup", 5); // 2 for "fast" + 3 for "slow"
 
-        econ.tick(500);
+        econ.tick(500, &mut stock);
 
         assert_eq!(
             econ.money,
             Money::from_num(140),
             "both contracts should have settled at the shared boundary"
         );
-        assert_eq!(econ.delivery_buffer.count("boxed_ketchup"), 0);
+        assert_eq!(stock.count("boxed_ketchup"), 0);
         assert_eq!(econ.contract("slow").unwrap().deliveries_made, 1);
     }
 
     #[test]
     fn a_contract_that_is_never_satisfiable_never_pays_while_the_others_still_do() {
         let mut econ = fixture();
-        econ.deposit("boxed_ketchup", 1000);
+        let mut stock = DeliveryStock::default();
+        deposit(&mut stock, "boxed_ketchup", 1000);
 
         for t in 1..=1000u64 {
-            econ.tick(t);
+            econ.tick(t, &mut stock);
         }
 
         let impossible = econ.contract("impossible").unwrap();
@@ -1017,8 +1048,9 @@ mod tests {
     fn a_missed_delivery_can_still_pay_out_once_enough_accumulates_and_a_paid_window_clears_the_strike()
      {
         let mut econ = fixture();
-        econ.deposit("boxed_ketchup", 1); // short by one for "fast"
-        let events = econ.tick(100);
+        let mut stock = DeliveryStock::default();
+        deposit(&mut stock, "boxed_ketchup", 1); // short by one for "fast"
+        let events = econ.tick(100, &mut stock);
         assert!(paid(&events).is_empty());
         assert!(events.contains(&ContractEvent::Missed {
             id: "fast".to_string(),
@@ -1026,7 +1058,7 @@ mod tests {
         }));
         assert_eq!(econ.money, Money::from_num(0));
         assert_eq!(
-            econ.delivery_buffer.count("boxed_ketchup"),
+            stock.count("boxed_ketchup"),
             1,
             "a miss must not destroy what was delivered"
         );
@@ -1037,8 +1069,8 @@ mod tests {
             "one miss is one short of 'fast''s two strikes"
         );
 
-        econ.deposit("boxed_ketchup", 1); // the missing unit arrives later
-        assert_eq!(paid(&econ.tick(200)), vec!["fast"]);
+        deposit(&mut stock, "boxed_ketchup", 1); // the missing unit arrives later
+        assert_eq!(paid(&econ.tick(200, &mut stock)), vec!["fast"]);
         assert_eq!(econ.money, Money::from_num(50));
         assert_eq!(
             econ.contract("fast").unwrap().consecutive_misses,
@@ -1055,14 +1087,15 @@ mod tests {
     #[test]
     fn missing_strikes_windows_in_a_row_loses_the_contract_and_puts_it_back_on_the_board() {
         let mut econ = fixture();
+        let mut stock = DeliveryStock::default();
         // Nothing delivered: "fast" (2 strikes) misses at 100 and is lost at 200.
-        let first = econ.tick(100);
+        let first = econ.tick(100, &mut stock);
         assert!(!first.contains(&ContractEvent::Lost {
             id: "fast".to_string()
         }));
         assert!(econ.is_active("fast"));
 
-        let second = econ.tick(200);
+        let second = econ.tick(200, &mut stock);
         let lost_at = second
             .iter()
             .position(|e| {
@@ -1087,16 +1120,16 @@ mod tests {
         assert_eq!(econ.times_lost("fast"), 1);
         assert_eq!(econ.times_lost("slow"), 0);
 
-        let snap = econ.snapshot();
+        let snap = econ.snapshot(&stock);
         let offer = snap.board.iter().find(|o| o.id == "fast").unwrap();
         assert!(!offer.active);
         assert_eq!(offer.times_lost, 1);
 
         // Later ticks must not keep settling a contract that is gone.
         for t in 201..=1000u64 {
-            for e in econ.tick(t) {
+            for e in econ.tick(t, &mut stock) {
                 assert!(
-                    !matches!(&e, ContractEvent::Missed { id, .. } | ContractEvent::Paid { id } if id == "fast"),
+                    !matches!(&e, ContractEvent::Missed { id, .. } | ContractEvent::Paid { id, .. } if id == "fast"),
                     "a lost contract must not settle again: {e:?}"
                 );
             }
@@ -1106,10 +1139,11 @@ mod tests {
     #[test]
     fn a_contract_with_one_strike_is_lost_on_its_first_miss() {
         let mut econ = fixture();
+        let mut stock = DeliveryStock::default();
         econ.money = Money::from_num(100);
         econ.try_sign("offer", 0).unwrap();
         assert!(econ.is_active("offer"));
-        let events = econ.tick(150);
+        let events = econ.tick(150, &mut stock);
         assert!(events.contains(&ContractEvent::Lost {
             id: "offer".to_string()
         }));
@@ -1188,10 +1222,11 @@ mod tests {
     #[test]
     fn a_lost_contract_is_signed_again_at_full_price_and_remembers_nothing() {
         let mut econ = fixture();
+        let mut stock = DeliveryStock::default();
         econ.money = Money::from_num(100);
         // Lose "fast": two misses in a row.
-        econ.tick(100);
-        econ.tick(200);
+        econ.tick(100, &mut stock);
+        econ.tick(200, &mut stock);
         assert!(!econ.is_active("fast"));
 
         assert_eq!(econ.try_sign("fast", 250), Ok(()));
@@ -1222,10 +1257,11 @@ mod tests {
     #[test]
     fn snapshot_reports_active_contracts_and_the_whole_board() {
         let mut econ = fixture();
+        let mut stock = DeliveryStock::default();
         econ.money = Money::from_num(25);
-        econ.deposit("boxed_ketchup", 7); // more than any single mix wants
+        deposit(&mut stock, "boxed_ketchup", 7); // more than any single mix wants
 
-        let snap = econ.snapshot();
+        let snap = econ.snapshot(&stock);
         assert_eq!(snap.contracts.len(), 3);
         assert_eq!(snap.delivery_stock, vec![("boxed_ketchup".to_string(), 7)]);
 
@@ -1294,5 +1330,49 @@ mod tests {
                 "each contract's first window ends one cadence in"
             );
         }
+    }
+    #[test]
+    fn a_mix_is_taken_from_the_docks_in_order_and_names_every_dock_it_took_from() {
+        let mut econ = fixture();
+        // Three docks: the first is short of the "fast" mix on its own, the
+        // second covers the rest, the third is never reached.
+        let mut stock = DeliveryStock::default();
+        for qty in [1, 4, 4] {
+            let mut dock = Inventory::new(u32::MAX);
+            dock.add("boxed_ketchup", qty);
+            stock.push(dock);
+        }
+
+        let events = econ.tick(100, &mut stock);
+        assert!(
+            events.contains(&ContractEvent::Paid {
+                id: "fast".to_string(),
+                from: vec![0, 1],
+            }),
+            "the mix of 2 takes dock 0's one and one of dock 1's: {events:?}"
+        );
+        let left: Vec<u32> = stock
+            .into_docks()
+            .iter()
+            .map(|dock| dock.count("boxed_ketchup"))
+            .collect();
+        assert_eq!(
+            left,
+            vec![0, 3, 4],
+            "first dock first, and nothing taken twice"
+        );
+    }
+
+    #[test]
+    fn a_missed_window_takes_from_no_dock() {
+        let mut econ = fixture();
+        let mut stock = DeliveryStock::default();
+        let mut dock = Inventory::new(u32::MAX);
+        dock.add("boxed_ketchup", 1);
+        stock.push(dock);
+
+        let events = econ.tick(100, &mut stock);
+        assert!(paid(&events).is_empty());
+        assert_eq!(stock.count("boxed_ketchup"), 1, "a miss consumes nothing");
     }
 }

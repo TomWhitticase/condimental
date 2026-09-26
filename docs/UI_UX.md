@@ -155,9 +155,10 @@ into sequence. They sit where they were discovered.
 16. **An open-floored building puts height at the far side, content at the
     near side** (sight line travels `(+x,-y,+z)`). The delivery dock is
     architecture on the far tile with an open near apron.
-17. **What stands on the dock is drawn from `delivery_stock`**, not the
-    dock's own buffer (which empties every tick) — one case per unit,
-    capped at four.
+17. **What stands on a dock is drawn from that dock's own `contents`**,
+    never the docks summed — one case per unit, capped at four. Until
+    2026-09-26 every dock drew the one shared pool, so every deck showed
+    the same cases.
 18. **A rotated placement reuses the same mesh spun about its footprint
     origin**, except point 11's junction art — carved doorways don't
     survive a 180° spin, so belt/pipe junctions are carried by the plain
@@ -391,7 +392,7 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
 - **Several contracts are one board of dockets, not one clipboard each.**
   One sheet, one clip bar, one printed docket card per contract (the
   checkbox's paper tone plus a steel hairline, no third colour). Shared
-  facts (money, the delivery pool) appear once above the dockets;
+  facts (money, what stands on the docks) appear once above the dockets;
   per-contract facts (checklist, payout, countdown, delivered/missed) on
   each docket. Past a capped height the stack scrolls.
 - **Diegetic paper-and-metal widgets**: orders and objectives are clipboards
@@ -876,8 +877,9 @@ Two consequences worth keeping:
 - **What's on the dock earned its bar the day the simulation gave it a
   ceiling** (the dock-capacity change, 2026-09-16). The clipboard's ON THE
   DOCK line was a bare figure under exactly this rule — nothing said how
-  many boxes was "full" — and now the shared pool has a per-item cap
-  (GAMEPLAY.md §9) the line reads `20/48` with the meter beside it, in the
+  many boxes was "full" — and now every dock has a ceiling (GAMEPLAY.md §9)
+  the line reads each item against the docks' total places, `20/32` on a
+  one-dock factory, with the meter beside it, in the
   level green until it is full and the warning red at the ceiling, with
   `⚠ FULL` spelled out beside it (§7). The rule is unchanged, not bent: the
   bar appeared because the ceiling did, and with no `delivery_capacity` on
@@ -1246,12 +1248,15 @@ rare one would be exhausting at the frequent one's rate, and the frequent
 one's cue would be an anticlimax for a payout.
 
 - **A payout fires four things at once** (§7: never one channel alone): a
-  fountain of coins over every dock, the money counter punching up in scale
+  fountain of coins over the docks whose stock paid (never a dock that gave
+  nothing — each snapshot's `last_paid_tick` says which), the money counter
+  punching up in scale
   and flashing amber, a "+N" rising out of the money line, and a **PAID**
   stamp on the docket that paid. Say it in a shape, a position, a colour and
   a word, and it still reads when the player was looking elsewhere.
 - **A dock arrival gets one small cue**: the arriving case pops in with a
-  short overshoot, and a quiet knock plays. Nothing that competes.
+  short overshoot on the dock that took it — only that dock, off its own
+  `shipped_total` — and a quiet knock plays. Nothing that competes.
 - **The animation clock is the simulation tick, never wall time.** A pause
   freezes the celebration for free (§5d: the factory is stopped while this is
   open), and a screenshot run of a fixed tick count is still reproducible.
@@ -1373,7 +1378,16 @@ Four consequences worth knowing before changing it:
   animation here (§6a), which reads across a floor at any zoom and cannot
   be confused with a steady lamp. The words are still where the detail is:
   the hover says `⚠ FULL`, and the clipboard's ON THE DOCK line reads
-  `48/48` with its bar at the ceiling (§5e).
+  its figure against the docks' places with its bar at the ceiling (§5e).
+- **A dock's hover draws its places as a grid** (2026-09-26). The dock
+  holds its own stock in places (GAMEPLAY §9), so its hover shows one socket
+  per place under the words that count them: an occupied socket holds the
+  case's own icon, a free one is an empty socket in the meter's track
+  colours. Eight to a row, and as many rows as the snapshot's `places`
+  needs. The count comes off the wire, never a GDScript constant. One
+  `Control` draws every cell (`_draw_places_grid`), because the hover is
+  rebuilt every frame. The words above it still name the items and the
+  count, so the grid is the second reading of a fact, not the only one (§7).
 
 ## 8. What this doc does not cover
 

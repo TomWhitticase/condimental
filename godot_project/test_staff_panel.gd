@@ -858,19 +858,20 @@ func _run_checks() -> void:
 	main._set_staff_open(false)
 
 	# --- 8. a dock refused its logistics head --------------------------------------
-	# A short line straight into a dock: a crusher's paste reaches it in a
-	# few hundred ticks. (`build_machines_fixture` stands its dock off the
-	# crusher's outlet, so nothing ever arrives there.)
+	# The shipped line, so the dock holds boxed ketchup the starter order
+	# wants: a dock asks for its logistics crew only while it holds
+	# something a contract orders (`World::tick` step 6), and a dock of
+	# goods nobody ordered asks for nobody and is never "held".
 	main.sim.new_game()
-	Layouts.place(main.sim, "hopper", Vector2i(-1, 0), "east", "tomato")
-	Layouts.place(main.sim, "belt", Vector2i(0, 0), "east")
-	Layouts.place(main.sim, "crusher", Vector2i(1, 0), "east")
-	Layouts.place(main.sim, "belt", Vector2i(2, 0), "east")
-	Layouts.place(main.sim, "belt", Vector2i(3, 0), "east")
-	var dock := Vector2i(4, 0)
-	Layouts.place(main.sim, "dock", dock, "east")
-	Layouts.stock_larder(main.sim, 64)
-	main.sim.issue_command_json(JSON.stringify({"type": "set_hopper_auto_fill", "tile": [-1, 0], "enabled": true}))
+	Layouts.build_reference_line(main.sim)
+	Layouts.fund(main.sim, 30000)
+	Layouts.stock_larder(main.sim, 320)
+	for feed in [Vector2i(-1, 0), Vector2i(4, 1)]:
+		main.sim.issue_command_json(JSON.stringify({"type": "set_hopper_auto_fill", "tile": [feed.x, feed.y], "enabled": true}))
+	main.sim.issue_command_json(JSON.stringify({"type": "set_tank_auto_fill", "tile": [5, 2], "enabled": true}))
+	Layouts.hire_until_staffed(main.sim)
+	var dock_snaps = JSON.parse_string(main.sim.dock_snapshots_json())
+	var dock := Vector2i(int(dock_snaps[0]["tile"][0]), int(dock_snaps[0]["tile"][1]))
 	main._rebuild_world()
 	var staffed_hover: String = main._hover_text_at_tile(dock)
 	if staffed_hover.find("crew: 1 logistics") < 0:
@@ -879,7 +880,11 @@ func _run_checks() -> void:
 		_fail("a staffed dock is not held")
 	main.sim.issue_command_json(JSON.stringify({"type": "fire", "category": "logistics"}))
 	var refused := false
-	for i in range(1500):
+	for i in range(30000):
+		# The order strikes out while the line primes; sign it again so the
+		# dock's stock stays wanted.
+		if i % 500 == 0:
+			main.sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": "corner_shop"}))
 		main.sim.tick()
 		var snapshot_dock = JSON.parse_string(main.sim.query_tile_json(dock.x, dock.y))
 		if snapshot_dock is Dictionary and bool(snapshot_dock.get("understaffed", false)):

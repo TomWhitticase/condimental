@@ -31,8 +31,8 @@ pub use contracts::{Contract, ContractRegistry};
 pub use cookbook::{CookbookInput, CookbookSnapshot};
 pub use dock::{DOCK_CAPACITY, DOCK_KIND, Dock};
 pub use economy::{
-    ActiveContract, ContractEvent, ContractOfferSnapshot, ContractSnapshot,
-    DELIVERY_STOCK_CAPACITY, Economy, EconomySnapshot, STARTING_MONEY, SignRefusal,
+    ActiveContract, ContractEvent, ContractOfferSnapshot, ContractSnapshot, DeliveryStock, Economy,
+    EconomySnapshot, STARTING_MONEY, SignRefusal,
 };
 pub use fluid::{
     FLUID_TANK_CAPACITY, FLUID_TANK_FILL_AMOUNT, FLUID_TANK_KIND, FluidNetwork, FluidTank,

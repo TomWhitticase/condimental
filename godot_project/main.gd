@@ -50,11 +50,9 @@ extends Node3D
 ## which lifted finished cases straight out of the last machine's buffer —
 ## and the tile past the packer did not exist. Now the simulation lays one
 ## more ordinary belt there and stands a `dock` building at its end that
-## ships into the economy's shared delivery pool every tick by itself, so
-## **C** and its control hint are gone and `_build_dock` draws what replaced
-## them. The goods standing on the dock's deck come from
-## `economy_snapshot_json`'s `delivery_stock`, NOT from the dock's own buffer,
-## which is a pass-through and always reads empty — see DOCK_ASSET.
+## holds what arrives until a contract collects it, so **C** and its control
+## hint are gone and `_build_dock` draws what replaced them. The goods
+## standing on a dock's deck are THAT dock's own `contents` — see DOCK_ASSET.
 ##
 ## **Belts, splitters, pipes and the items riding them are INSTANCED** (the
 ## pipes & conveyors overhaul's ticket 4): one `MultiMesh` per (asset,
@@ -813,23 +811,13 @@ const FLUID_TANK_MIN_VISIBLE_FILL := 0.02
 ## The chain's delivery dock (the delivery-dock ticket) and the goods
 ## standing on it.
 ##
-## **There is deliberately no fill gauge here**, unlike the hopper and the
-## tank above, and that is a decision rather than an omission. The dock is a
-## pass-through: `sim_core::sim::dock::Dock::ship_into` empties its buffer
-## into the economy's shared delivery pool in the same tick it arrived, so
-## `dock_snapshot_json`'s `contents` is always empty between ticks and
-## `DockSnapshot` carries no `fill` field at all. A bar driven from it would
-## read zero forever — a gauge that lies about the mechanism, which is
-## exactly what `FluidTank` refused to build when it chose constant head over
-## its own fill fraction.
-##
-## What IS real, and what the goods on the deck are drawn from, is
-## `economy_snapshot_json`'s `delivery_stock` — the one shared "what's on the
-## dock" figure every contract settles against, and the number the clipboard
-## panel already labels ON THE DOCK. `sim::DockSnapshot`'s own doc says to
-## draw the stack from it, and that is what `_update_dock_stock` does: it
-## stands the item's OWN model (through ITEM_MODELS, so a case looks like the
-## case that arrived) on the deck, one per unit, capped at DOCK_STOCK_SLOTS.
+## Each dock holds its own stock (2026-09-26, `sim_core::sim::dock`'s module
+## doc): `dock_snapshots_json`'s `contents` is what stands on THAT dock, in
+## `places` places, and contracts collect from it. `_update_dock_stock` draws
+## the deck from it: the item's OWN model (through ITEM_MODELS, so a case
+## looks like the case that arrived), one per unit, capped at
+## DOCK_STOCK_SLOTS. Every dock draws its own, so a case arriving at one dock
+## puts nothing on another.
 const DOCK_ASSET := "machine_dock"
 ## Top of the dock's deck, mirroring assets/voxels/generators/assets.rs's
 ## DOCK_DECK_Z — which is BELT_SURFACE_VOXELS - 1 there, i.e. the same
@@ -1137,9 +1125,8 @@ var _fluid_tank_states: Dictionary = {} # origin key -> tank snapshot
 var _fluid_tank_nodes: Dictionary = {} # origin key -> {"fill": Node3D, "lamp": MeshInstance3D, "stocked": bool}
 var _dock_states: Dictionary = {} # origin key -> dock snapshot
 var _dock_nodes: Dictionary = {} # origin key -> {"slots": Array[Node3D], "lamp": MeshInstance3D, "stocked": bool}
-var _last_dock_stock: Array = [] # economy_snapshot_json's delivery_stock, shared by every dock
-var _delivery_capacity := 0 # how many of ONE item the pool holds, 0 until first polled
-var _delivery_full := false # is any item at that ceiling — the clipboard reads FULL
+var _delivery_capacity := 0 # every dock's places added up, 0 until first polled
+var _delivery_full := false # is some dock at capacity — the clipboard reads FULL
 
 # --- The warehouse: racks, and the one storage picture they share ----------
 # A rack is the fourth buffer kind (W3 of the warehouse sprint) and is keyed
@@ -1297,12 +1284,12 @@ var _legend_yielded := false
 #
 # It shows EVERY active contract, not one. `economy_snapshot_json` reports an
 # array of contracts (each with its own mix, cadence and payout, all drawing
-# from one shared delivery pool — see sim_core/src/sim/economy.rs), and
+# on the same docks — see sim_core/src/sim/economy.rs), and
 # GAMEPLAY.md §6's whole design pressure is that several concurrent orders
 # compete for one factory's throughput. That pressure only exists for the
 # player if all of them are actually on screen at once, so the clipboard is
 # now a board of dockets: ONE sheet of paper (the panel, its steel clip bar
-# unchanged) carrying the shared money figure and the shared dock stock, then
+# unchanged) carrying the shared money figure and every dock's stock, then
 # one printed docket card per contract below it.
 var _contract_panel: PanelContainer
 var _contract_money_label: Label
@@ -1321,9 +1308,9 @@ var _contract_money_change_until_msec := -MONEY_FLYOUT_FADE_MSEC
 ## The balance the last poll saw. `INF` is the "no poll yet" sentinel — the
 ## first frame must not report the whole starting balance as a payout.
 var _last_money := INF
-## The shared delivery pool, shown once above the dockets. It is the
-## player-visible face of the allocation rule: every contract below draws
-## from THIS pile, so three checklists reading "2/2" do not mean three
+## What stands on every dock, added up and shown once above the dockets. It
+## is the player-visible face of the allocation rule: every contract below
+## draws from THIS pile, so three checklists reading "2/2" do not mean three
 ## payouts — see `_update_contract_dock`.
 var _contract_dock_row: HBoxContainer
 var _contract_dock_entries: Dictionary = {} # item id -> {"row": HBoxContainer, "label": Label, "meter": Panel}
@@ -1390,9 +1377,9 @@ const CONTRACT_METER_DUE := Color(0.60, 0.24, 0.16, 1.0)
 const CONTRACT_DUE_FRACTION := 0.12
 ## The ON THE DOCK line's own bar (the dock-capacity change, 2026-09-16).
 ## Narrower than a docket's countdown because several ride one line, one per
-## item in the pool — and it exists at all only because the pool HAS a
-## ceiling now: UI_UX.md §5e draws a bar exactly where the simulation defines
-## the full mark, and until `DELIVERY_STOCK_CAPACITY` this figure had none.
+## item on the docks — and it exists at all only because the docks HAVE a
+## ceiling: UI_UX.md §5e draws a bar exactly where the simulation defines the
+## full mark. Each item is drawn against every dock's places added up.
 const CONTRACT_DOCK_METER_WIDTH := 38.0 * UI_SCALE
 
 # --- UI scale (the 2026-09-09 tuning pass) ---------------------------------
@@ -2163,6 +2150,19 @@ var _hover_meter: Panel
 var _hover_load_meter: Panel # the machine-load epic: share of the window spent working
 var _hover_input_row: Dictionary = {}
 var _hover_output_row: Dictionary = {}
+## A dock's places, one cell each — occupied cells carry the case's icon,
+## free ones are an empty socket (`_draw_places_grid`). One Control drawing
+## its own cells, not a node per cell, because the hover is rebuilt from the
+## snapshot every frame.
+var _hover_places_grid: Control
+## The grid's layout, not its content: how many places there are comes off the
+## dock's snapshot (`places`), so a dock of a different size draws more or
+## fewer rows and nothing here changes.
+const HOVER_PLACES_COLUMNS := 8
+const HOVER_PLACE_CELL := 22.0 * UI_SCALE
+const HOVER_PLACE_GAP := 3.0 * UI_SCALE
+const HOVER_PLACE_FILLED := Color(0.30, 0.26, 0.18, 0.98)
+const HOVER_PLACE_FILLED_BORDER := Color(0.85, 0.63, 0.11, 0.95)
 ## The tooltip's meter is a fixed width: the panel's own width is decided by
 ## its longest sentence, and a bar that grew and shrank with the text would
 ## read as part of the measurement rather than as a scale.
@@ -4040,9 +4040,8 @@ func _refresh_buffers(econ: Dictionary = {}) -> void:
 			_tint_level_body(nodes["fill"], _fluid_material_for(fluid))
 		_set_lamp_stocked(nodes, fill > FLUID_TANK_MIN_VISIBLE_FILL)
 
-	_dock_states.clear()
-	for snapshot in _read_snapshot_array(sim.dock_snapshots_json()):
-		_dock_states[_tile_key(_pair_to_tile(snapshot.get("tile")))] = snapshot
+	_read_dock_states()
+	_detect_dock_arrivals(sim.current_tick())
 
 	_refresh_racks()
 
@@ -4050,15 +4049,20 @@ func _refresh_buffers(econ: Dictionary = {}) -> void:
 	# poll reads it once for the clipboard, the deck and the board).
 	if econ.is_empty():
 		econ = _read_economy()
-	_last_dock_stock = econ.get("delivery_stock", [])
-	# The pool's ceiling and whether it is at it (the dock-capacity change).
-	# Both are facts about the ONE shared pool, so they are read here, once,
-	# and they feed the CLIPBOARD. The lamp does not use them: whether a
-	# given dock is backing up is per-dock and per-item, and comes off that
-	# dock's own snapshot via `_blocked_dock_keys`.
+	# The board's summaries of every dock, for the CLIPBOARD. The deck and
+	# the lamp do not use them: each dock draws from its own snapshot.
 	_delivery_capacity = int(econ.get("delivery_capacity", 0))
 	_delivery_full = bool(econ.get("delivery_full", false))
-	_update_dock_stock(_last_dock_stock, _blocked_dock_keys(), sim.current_tick())
+	_update_dock_stock(_dock_states, sim.current_tick())
+
+
+## Re-reads every dock's polled snapshot into `_dock_states`, keyed by tile.
+## Split out so a payout can read which docks paid on the frame it is
+## noticed, before `_refresh_buffers` runs.
+func _read_dock_states() -> void:
+	_dock_states.clear()
+	for snapshot in _read_snapshot_array(sim.dock_snapshots_json()):
+		_dock_states[_tile_key(_pair_to_tile(snapshot.get("tile")))] = snapshot
 
 
 ## Re-reads the warehouse and reloads every rack's shelves from it.
@@ -4188,55 +4192,23 @@ func _set_lamp_stocked(nodes: Dictionary, stocked: bool) -> void:
 		lamp.set_surface_override_material(0, _lamp_running if stocked else _lamp_idle)
 
 
-## The tile key of every dock the sim reports as backing up right now, as a
-## set (`{key: true}`) for the lamp to test membership against.
+## Stands one case per unit of stock on each dock's deck, up to
+## DOCK_STOCK_SLOTS, drawn with that item's own model — each dock from its
+## OWN snapshot in `dock_states` (tile key -> `DockSnapshot`), so what stands
+## on one dock is never drawn on another.
 ##
-## Read off `_dock_states`, which the same poll has just refilled from
-## `dock_snapshots_json`, so the lamp and hover can never disagree about
-## which dock is jammed.
-func _blocked_dock_keys() -> Dictionary:
-	var blocked := {}
-	for key in _dock_states.keys():
-		if bool(_dock_states[key].get("full", false)):
-			blocked[key] = true
-	return blocked
-
-
-## Stands one case per unit of stock waiting to be sold on EVERY dock's deck,
-## up to DOCK_STOCK_SLOTS each, drawn with that item's own model.
+## The lamp is per dock too: it pulses on a dock the sim says is refusing its
+## belt right now (`DockSnapshot::full`). A full deck already looks like a
+## full deck — the cases cap out at DOCK_STOCK_SLOTS long before the dock's
+## places do — so the state gets the one channel a stack of crates does not
+## have: the lamp PULSES instead of holding, off `current_tick`.
 ##
-## Every dock shows the same pool, deliberately: `EconomySnapshot`'s
-## `delivery_stock` is one shared number however many docks the player
-## builds (a second dock is another door out of the factory, not a second
-## ledger), and the dock's own `contents` empties every tick, so a per-dock
-## figure would be zero forever — see DOCK_ASSET's doc.
-##
-## The LAMP, by contrast, is per dock: `blocked_keys` holds the tile key of
-## each dock the sim says is refusing its belt right now
-## (`DockSnapshot::full`), and only those pulse. It used to take one shared
-## flag off the economy, which lit every dock the moment any single product
-## capped — so a BBQ dock running clean cried jam because ketchup was full.
-## A full deck already looks like a full deck — the cases cap out at
-## DOCK_STOCK_SLOTS long before the pool does — so the state gets the one
-## channel a stack of crates does not have: the lamp PULSES instead of
-## holding, off `current_tick`.
-##
-## Pure given `stock`, `blocked_keys`, `current_tick` and the built nodes,
-## so a test can drive it directly.
-func _update_dock_stock(stock: Array, blocked_keys := {}, current_tick := 0) -> void:
-	# Flatten the pool's (item, quantity) pairs into one case per unit, in
-	# snapshot order, so a multi-item pool shows a mixed stack rather than
-	# only its first product.
-	var waiting: Array[String] = []
-	for pair in stock:
-		if not (pair is Array) or pair.size() < 2:
-			continue
-		for _i in range(int(pair[1])):
-			if waiting.size() >= DOCK_STOCK_SLOTS:
-				break
-			waiting.append(String(pair[0]))
-
+## Pure given `dock_states`, `current_tick` and the built nodes, so a test
+## can drive it directly.
+func _update_dock_stock(dock_states: Dictionary, current_tick := 0) -> void:
 	for key in _dock_nodes.keys():
+		var snapshot: Dictionary = dock_states.get(key, {})
+		var waiting := _dock_cases(snapshot.get("contents", []))
 		var nodes: Dictionary = _dock_nodes[key]
 		var slots: Array = nodes.get("slots", [])
 		for i in range(slots.size()):
@@ -4258,12 +4230,28 @@ func _update_dock_stock(stock: Array, blocked_keys := {}, current_tick := 0) -> 
 			slot.visible = true
 		_set_lamp_stocked(
 			nodes,
-			_dock_lamp_lit(not waiting.is_empty(), blocked_keys.has(key), current_tick)
+			_dock_lamp_lit(not waiting.is_empty(), bool(snapshot.get("full", false)), current_tick)
 		)
 
 
+## A dock's (item, quantity) pairs flattened into one case per unit, in
+## snapshot order and at most `cap` of them, so a dock holding two sauces
+## shows a mixed stack rather than only its first product. The deck caps at
+## DOCK_STOCK_SLOTS; the hover's places grid passes the dock's own `places`.
+func _dock_cases(contents: Array, cap := DOCK_STOCK_SLOTS) -> Array[String]:
+	var waiting: Array[String] = []
+	for pair in contents:
+		if not (pair is Array) or pair.size() < 2:
+			continue
+		for _i in range(int(pair[1])):
+			if waiting.size() >= cap:
+				return waiting
+			waiting.append(String(pair[0]))
+	return waiting
+
+
 ## Whether a dock's lamp is lit this tick: steady while it merely holds
-## stock, blinking once the pool is full. Split out and pure so
+## stock, blinking once it is refusing its belt. Split out and pure so
 ## `test_presentation.gd` can assert the blink without a rendered frame, and
 ## so the one place the rule lives is readable: a full dock is the only thing
 ## in the scene whose lamp is not a straight reading of "has something".
@@ -4793,7 +4781,7 @@ const CROSSHAIR_THICKNESS := 2.0 * UI_SCALE # px, each bar's width
 # The **C: collect product** hint these two used to carry is gone, with the
 # key that drove it: the delivery-dock ticket deleted
 # `PlayerCommand::CollectOutput` outright, because the chain now ends in a
-# real dock that ships into the delivery pool every tick by itself. A key
+# real dock that contracts collect from by themselves. A key
 # that quietly did nothing would be worse than no key — `issue_command_json`
 # treats an unknown command as a silent no-op, so the legend would have been
 # advertising a control the simulation no longer has.
@@ -5749,7 +5737,7 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_money_change.modulate = Color(1, 1, 1, 0)
 	_contract_money_label.add_child(_contract_money_change)
 
-	# The shared delivery pool, also once. See _update_contract_dock for why
+	# What stands on every dock, also once. See _update_contract_dock for why
 	# this line exists at all.
 	_contract_dock_row = HBoxContainer.new()
 	_contract_dock_row.name = "DockRow"
@@ -12230,17 +12218,14 @@ func _update_config_machine(key: String) -> void:
 ## The dock's version of the same panel (issue #19). It gets the switch for
 ## the same reason a machine does — it draws a crew — but it has no recipe
 ## and no batch, so the level bar reads what it is HOLDING against its
-## per-item capacity, which is the ceiling the sim actually defines for it.
+## places, which is the ceiling the sim actually defines for it.
 func _update_config_dock(key: String) -> void:
 	var snapshot: Dictionary = _dock_states.get(key, {})
 	_config_title.text = _kind_display_name(String(snapshot.get("kind", _config_kind)))
 	_config_title_icon.texture = _icon_for_asset(_shop_asset_for(_config_kind))
-	var held := 0
-	for entry in snapshot.get("contents", []):
-		if entry is Array and entry.size() > 1:
-			held += int(entry[1])
-	var capacity := int(snapshot.get("capacity_per_item", 0))
-	_config_level_label.text = "holding: %d" % held
+	var held := int(snapshot.get("used", 0))
+	var capacity := int(snapshot.get("places", 0))
+	_config_level_label.text = "holding: %d / %d places" % [held, capacity]
 	_set_config_level(0.0 if capacity <= 0 else clampf(float(held) / float(capacity), 0.0, 1.0))
 	var mothballed := bool(snapshot.get("mothballed", false))
 	_config_machine_state.text = _config_machine_state_text(key, mothballed)
@@ -13947,6 +13932,17 @@ func _build_hover_tooltip(hud: CanvasLayer) -> void:
 	_hover_label.label_settings = hover_settings
 	_hover_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_child(_hover_label)
+
+	# A dock's places as a grid of sockets, straight under the words that
+	# count them — the owner's 2026-09-26 ask: see at a glance what each dock
+	# holds and how much room it has left. Sized per hover in
+	# `_apply_hover_panel_state`, off the snapshot's own `places`.
+	_hover_places_grid = Control.new()
+	_hover_places_grid.name = "HoverPlacesGrid"
+	_hover_places_grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hover_places_grid.visible = false
+	_hover_places_grid.draw.connect(_draw_places_grid.bind(_hover_places_grid))
+	column.add_child(_hover_places_grid)
 
 	# A machine's craft progress, a hopper's or tank's level, a pipe's fill —
 	# the same bar the configuration panel puts a hopper's level on, at the
@@ -15748,22 +15744,32 @@ func _hover_text_at_tile(tile: Vector2i, yielded := 0) -> String:
 ## A tile only gets a meter if it has a genuine CEILING to measure against
 ## (the section header on `_build_meter` states the rule): a machine's elapsed
 ## ticks against its recipe's required ticks, a hopper's or tank's contents
-## against its capacity, a pipe segment's level against a full bore. A belt, a
-## splitter and the dock have no such quantity — a dock's own buffer is empty
-## by design and its lifetime total has no ceiling at all — so they get no bar
-## rather than a made-up one.
+## against its capacity, a pipe segment's level against a full bore. A belt and
+## a splitter have no such quantity, so they get no bar rather than a made-up
+## one. A dock's ceiling is PLACES, one case each, so it gets the places grid
+## (`places`: `{"places", "cells"}`) instead of a bar — a bar would say how
+## full it is and not what with.
 ##
 ## Pure given the polled snapshots, exactly like the text half, so a test can
 ## drive it with a tile and no framebuffer.
 func _hover_panel_state(tile: Vector2i) -> Dictionary:
-	var state := {"meter": {}, "load_meter": {}, "inputs": [], "outputs": [], "has_buffers": false}
+	var state := {"meter": {}, "load_meter": {}, "inputs": [], "outputs": [], "has_buffers": false, "places": {}}
 	var placement := _placement_at_tile(tile)
 	if placement.is_empty():
 		return state
 	var kind := String(placement.get("kind", ""))
 	var key := _tile_key(_placement_origin(placement))
 	match kind:
-		BELT_KIND, SPLITTER_KIND, DOCK_KIND:
+		BELT_KIND, SPLITTER_KIND:
+			return state
+		DOCK_KIND:
+			var dock: Dictionary = _dock_states.get(key, {})
+			var places := int(dock.get("places", 0))
+			if places > 0:
+				state["places"] = {
+					"places": places,
+					"cells": _dock_cases(dock.get("contents", []), places),
+				}
 			return state
 		HOPPER_KIND:
 			var hopper: Dictionary = _hopper_states.get(key, {})
@@ -16228,21 +16234,21 @@ func _fluid_tank_hover_text(origin_key: String, direction: String) -> String:
 
 ## The dock's tooltip. The one building on the line with no recipe and no
 ## process, so the machine tooltip's shape has nothing to put in three of its
-## four lines — and the obvious substitute, its own buffer level, is always
-## zero by design (see DOCK_ASSET's doc). So it answers the two questions a
-## dock can actually answer: what THIS dock has shipped over its life, and
-## what is standing on the shared pool waiting for a contract to claim it —
-## the same figure the clipboard prints as ON THE DOCK, deliberately, rather
-## than a second number the player would have to reconcile with it.
+## four lines. It answers what a dock can: how many of its places are taken,
+## what is standing on THIS dock waiting for a contract to collect it, and
+## how much this dock has taken off its belt over its life. The clipboard's
+## ON THE DOCK is every dock added up; this is the one pointed at.
 func _dock_hover_text(origin_key: String, direction: String, with_crew := true) -> String:
 	var snapshot: Dictionary = _dock_states.get(origin_key, {})
 	if snapshot.is_empty():
 		return "%s\nfacing %s" % [_kind_display_name(DOCK_KIND), direction]
-	var text := "%s  ·  facing %s\nships to contracts every tick\n%d shipped by this dock\nwaiting: %s" % [
+	var text := "%s  ·  facing %s\n%d / %d places\nwaiting: %s\n%d received by this dock" % [
 		_kind_display_name(DOCK_KIND),
 		direction,
+		int(snapshot.get("used", 0)),
+		int(snapshot.get("places", 0)),
+		_format_named_counts(snapshot.get("contents", [])),
 		int(snapshot.get("shipped_total", 0)),
-		_format_counts(_last_dock_stock),
 	]
 	# The dock's crew, and — when the sim refused it on the last tick it had
 	# something to ship — the fact that it is HOLDING and why (the staff
@@ -16267,13 +16273,13 @@ func _dock_hover_text(origin_key: String, direction: String, with_crew := true) 
 		var uncrewed := _uncrewed_reason_text(origin_key)
 		if uncrewed != "":
 			text += "\n%s" % uncrewed
-	# `full` is the POOL's state, identical on every dock, and it is the
-	# reason a belt into this building has stopped moving — so it is said
-	# here, where the player has just pointed at the thing that stopped
-	# (UI_UX.md §7: glyph and words, no colour involved at all).
+	# `full` is THIS dock refusing a box, and it is the reason a belt into
+	# this building has stopped moving — so it is said here, where the player
+	# has just pointed at the thing that stopped (UI_UX.md §7: glyph and
+	# words, no colour involved at all).
 	if bool(snapshot.get("full", false)):
-		text += "\n⚠ FULL  ·  %d of one item is all the dock holds\nthe belt backs up until a contract ships some" % \
-			_delivery_capacity
+		text += "\n⚠ FULL  ·  all %d places are taken\nthe belt backs up until a contract collects some" % \
+			int(snapshot.get("places", 0))
 	return text
 
 
@@ -16478,6 +16484,15 @@ func _hover_yield_rungs(size: Vector2, anchor: Vector2, sheds: Array[float]) -> 
 ## testable, this half only touches nodes. `yielded` is how far down the
 ## hover's yield ladder this frame went (`_hover_yield_rungs`).
 func _apply_hover_panel_state(state: Dictionary, yielded := 0) -> void:
+	var places: Dictionary = state.get("places", {})
+	if _hover_places_grid != null:
+		_hover_places_grid.visible = not places.is_empty()
+		if not places.is_empty():
+			var count := int(places.get("places", 0))
+			_hover_places_grid.set_meta("places", count)
+			_hover_places_grid.set_meta("cells", places.get("cells", []))
+			_hover_places_grid.custom_minimum_size = _places_grid_size(count)
+			_hover_places_grid.queue_redraw()
 	var meter: Dictionary = state.get("meter", {})
 	if _hover_meter != null:
 		_hover_meter.visible = not meter.is_empty()
@@ -16500,6 +16515,44 @@ func _apply_hover_panel_state(state: Dictionary, yielded := 0) -> void:
 		return
 	_update_hover_buffers(_hover_input_row, state.get("inputs", []))
 	_update_hover_buffers(_hover_output_row, state.get("outputs", []))
+
+
+## The drawn size of a places grid of `count` cells: HOVER_PLACES_COLUMNS
+## wide (fewer if there are fewer places), as many rows as that takes.
+func _places_grid_size(count: int) -> Vector2:
+	if count <= 0:
+		return Vector2.ZERO
+	var cols := mini(count, HOVER_PLACES_COLUMNS)
+	var rows := ceili(float(count) / float(HOVER_PLACES_COLUMNS))
+	return Vector2(
+		cols * HOVER_PLACE_CELL + (cols - 1) * HOVER_PLACE_GAP,
+		rows * HOVER_PLACE_CELL + (rows - 1) * HOVER_PLACE_GAP
+	)
+
+
+## Draws the hover's places grid off the metadata `_apply_hover_panel_state`
+## left on it: an occupied place is a lit socket holding its case's own icon —
+## the icon the market, the larder and the clipboard name the item by — and a
+## free place is an empty socket in the meter's track colours, so "how much
+## room" and "room for what" are one picture. Filled in snapshot order, left
+## to right, top row first.
+func _draw_places_grid(grid: Control) -> void:
+	var count := int(grid.get_meta("places", 0))
+	var cells: Array = grid.get_meta("cells", [])
+	var border := maxf(1.0, _ui_px(1.5))
+	var inset := _ui_px(2.0)
+	for i in range(count):
+		var cell := Vector2(i % HOVER_PLACES_COLUMNS, floori(float(i) / HOVER_PLACES_COLUMNS))
+		var rect := Rect2(cell * (HOVER_PLACE_CELL + HOVER_PLACE_GAP), Vector2.ONE * HOVER_PLACE_CELL)
+		if i < cells.size():
+			grid.draw_rect(rect, HOVER_PLACE_FILLED)
+			var icon := _icon_for(String(cells[i]))
+			if icon != null:
+				grid.draw_texture_rect(icon, rect.grow(-inset), false)
+			grid.draw_rect(rect, HOVER_PLACE_FILLED_BORDER, false, border)
+		else:
+			grid.draw_rect(rect, METER_TRACK_COLOR)
+			grid.draw_rect(rect, METER_BORDER_COLOR, false, border)
 
 
 ## Where a panel that points at something in the WORLD goes — the hover
@@ -16820,7 +16873,7 @@ func _pushed_clear_of(rect: Rect2, r: Rect2, bounds_x: float, lower_bound: float
 
 
 ## Drives the contract clipboard (UI_UX.md §5) from `economy_snapshot_json`:
-## the one shared money figure, the one shared dock pool, and then EVERY
+## the one shared money figure, what stands on every dock, and then EVERY
 ## active contract's own docket — its checklist boxes, its numeric progress
 ## and its own countdown to its own next delivery check.
 func _update_contract_panel(econ: Dictionary = {}) -> void:
@@ -16852,13 +16905,11 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 	for i in range(min(contracts.size(), _contract_cards.size())):
 		_update_contract_card(_contract_cards[i], contracts[i], current_tick)
 
-	# The two moments money is involved in, detected from the snapshot this
-	# function already had to parse (see the payout-feedback section's header
-	# for why a `deliveries_made` delta is the right signal and a `money`
-	# delta is not). Both are detected HERE rather than inside
-	# `_update_dock_stock`, which stays a pure function of its arguments so a
-	# test can keep driving it directly.
-	_detect_dock_arrivals(econ.get("delivery_stock", []), current_tick)
+	# A payout, detected from the snapshot this function already had to parse
+	# (see the payout-feedback section's header for why a `deliveries_made`
+	# delta is the right signal and a `money` delta is not). A case arriving
+	# is per dock, and is detected where the docks are read
+	# (`_refresh_buffers`).
 	_detect_payouts(contracts, current_tick)
 
 	# Cap the docket stack's height rather than letting it grow off the
@@ -17046,11 +17097,11 @@ func _update_money_flyout() -> void:
 		_contract_money_change.modulate = Color(1, 1, 1, 0)
 
 
-## The shared delivery pool, shown once above the dockets.
+## What stands on every dock, added up and shown once above the dockets.
 ##
-## This line is the player-visible face of sim_core's allocation rule: there
-## is ONE pile of collected stock and a settling contract CONSUMES its mix
-## from it, so a box is never credited to two orders. Without it, three
+## This line is the player-visible face of sim_core's allocation rule:
+## contracts draw on the docks' stock as ONE pile and a settling contract
+## CONSUMES its mix from it, so a box is never credited to two orders. Without it, three
 ## dockets whose checklists all read "2/2" look like three imminent payouts
 ## when the dock may hold only two boxes total — the checklists are each
 ## clamped to their own ask (that clamping is sim_core's, deliberately), and
@@ -17126,9 +17177,9 @@ func _update_contract_dock(stock: Array, capacity: int, full: bool) -> void:
 		if entry.is_empty():
 			entry = _build_contract_dock_entry(item_id)
 			_contract_dock_entries[item_id] = entry
-		# The pool has a per-item ceiling now (the dock-capacity change,
-		# 2026-09-16), so the figure has a denominator and earns UI_UX.md
-		# §5e's bar. An older wire with no capacity on it still reads as the
+		# The docks have places (the per-dock stock change, 2026-09-26), so
+		# the figure has a denominator — every dock's places added up — and
+		# earns UI_UX.md §5e's bar. An older wire with no capacity on it still reads as the
 		# bare figure it always did rather than inventing a full mark.
 		var meter: Panel = entry["meter"]
 		if capacity > 0:
@@ -17380,6 +17431,15 @@ func _fallback_icon_texture() -> Texture2D:
 	return _icon_fallback_texture
 
 
+## `_format_counts` with each item named the way the rest of the UI names
+## it — the dock hover's "waiting:" line is read by a player, not a debugger.
+func _format_named_counts(pairs: Array) -> String:
+	var named: Array = []
+	for pair in pairs:
+		named.append([_item_display_name(String(pair[0])), int(pair[1])])
+	return _format_counts(named)
+
+
 func _format_counts(pairs: Array) -> String:
 	if pairs.is_empty():
 		return "-"
@@ -17447,7 +17507,7 @@ func _format_counts(pairs: Array) -> String:
 ##
 ## | Where | What | Why there |
 ## |---|---|---|
-## | World, every dock | a burst of spinning coins | the goods left from there |
+## | World, the docks that paid | a burst of spinning coins | the goods left from there |
 ## | Clipboard, money line | a scale punch, and a rising "+N" | the number that changed |
 ## | Clipboard, paying docket | its payout reads PAID | which order paid |
 ## | Speakers | the payout chime (`audio.gd`) | — |
@@ -17460,8 +17520,8 @@ func _format_counts(pairs: Array) -> String:
 ##
 ## The "+N" is deliberately NOT anchored to the dock. One payout is one
 ## number, and with two docks a per-dock flyout would read as two payouts of
-## N; the coins can be per-dock (they are goods, and every dock ships the
-## same shared pool — `_update_dock_stock`'s own rule) but the figure cannot.
+## N; the coins can be per-dock (they are goods, and they leave from the
+## docks the payment took them from) but the figure cannot.
 ## Anchoring it to the money label also means it can never be off screen, and
 ## that it works in first-person view where a dock may be behind the player.
 
@@ -17644,11 +17704,16 @@ var _money_punch_tick := -1
 ## Contract id -> the tick it last paid, for the PAID stamp.
 var _payout_stamp_ticks: Dictionary = {}
 
-## The total on the dock last seen, and the pop that a rise in it started.
-## -1 means not seeded (so a loaded save's full dock is silent).
-var _dock_stock_seen := -1
-var _dock_pop_tick := -1
-var _dock_pop_slot := -1
+## The tick the last payout check ran on. A dock whose `last_paid_tick` is
+## past it paid since, which is what picks the docks the coins leave from.
+var _payout_checked_tick := -1
+## Dock tile key -> the `shipped_total` this scene last saw on it. A dock
+## missing from it has not been seen yet — a loaded save's, or one just
+## placed — and is seeded silently rather than popped.
+var _dock_received_seen: Dictionary = {}
+## Dock tile key -> `{"tick": int, "slot": int}`, the pop an arrival at THAT
+## dock started.
+var _dock_pops: Dictionary = {}
 
 ## The crusher spray's pool and bookkeeping. `_crush_anchors` and
 ## `_crush_beats` are per-PLACEMENT and so are cleared with the world;
@@ -17773,14 +17838,31 @@ func _detect_payouts(contracts: Array, current_tick: int) -> void:
 		paid_ids.append(id)
 
 	_payout_seen = live
+	var since := _payout_checked_tick
+	_payout_checked_tick = current_tick
 	if seeding or earned <= 0:
 		return
-	_fire_payout(earned, paid_ids, current_tick)
+	# The docks are re-read here because this runs before `_refresh_buffers`
+	# on a frame, and the payment is this frame's news.
+	_read_dock_states()
+	_fire_payout(earned, paid_ids, current_tick, _docks_paid_since(since))
+
+
+## The tile key of every dock a contract took stock from after `since_tick`,
+## off each dock's own `last_paid_tick`, sorted so the fan is repeatable.
+func _docks_paid_since(since_tick: int) -> Array:
+	var keys: Array = []
+	for key in _dock_states.keys():
+		var paid = _dock_states[key].get("last_paid_tick")
+		if paid != null and int(paid) > since_tick:
+			keys.append(key)
+	keys.sort()
+	return keys
 
 
 ## One payment, celebrated. Split from detection so a test can call it
 ## directly with a known figure.
-func _fire_payout(amount: int, paid_ids: Array, current_tick: int) -> void:
+func _fire_payout(amount: int, paid_ids: Array, current_tick: int, dock_keys: Array = []) -> void:
 	payout_events += 1
 	payout_total += amount
 
@@ -17790,21 +17872,23 @@ func _fire_payout(amount: int, paid_ids: Array, current_tick: int) -> void:
 		_payout_flyout.text = "+%d" % amount
 	for id in paid_ids:
 		_payout_stamp_ticks[String(id)] = current_tick
-	_burst_coins(amount, current_tick)
+	_burst_coins(amount, current_tick, dock_keys)
 	if _audio != null:
 		_audio.play(FactoryAudio.PAYOUT)
 
 
-## Throws coins off every dock.
+## Throws coins off the docks in `dock_keys` — the ones the payment took its
+## goods from (`DockSnapshot::last_paid_tick`), and no other. A dock that
+## gave nothing to this payment throwing coins would say it had.
 ##
-## Every dock, because every dock displays the same shared pool the payment
-## consumed (`_update_dock_stock`'s doc states that rule once) — showing the
-## money leave one arbitrarily-chosen door would be the scene disagreeing
-## with itself. The budget is SPLIT across them rather than repeated, so a
-## player with four docks gets a payout that reads as one payment from a
-## bigger factory and not as four payments.
-func _burst_coins(amount: int, current_tick: int) -> void:
-	var docks: Array = _dock_nodes.keys()
+## The budget is SPLIT across them rather than repeated, so a payment filled
+## from two docks reads as one payment from a bigger factory and not as two
+## payments.
+func _burst_coins(amount: int, current_tick: int, dock_keys: Array) -> void:
+	var docks: Array = []
+	for key in dock_keys:
+		if _dock_nodes.has(key):
+			docks.append(key)
 	if docks.is_empty() or _coins.is_empty():
 		return
 
@@ -18058,48 +18142,64 @@ func _update_payout_stamps(current_tick: int) -> void:
 			label.modulate = Color(1, 1, 1, 1)
 
 
-## Notices a case landing on the dock and pops it in.
+## Notices a case landing on a dock and pops it in — on THAT dock.
 ##
-## The pool's total rising IS a case arriving: `delivery_stock` only goes up
-## when a dock ships into it, and only goes down when a contract consumes a
-## mix. This is far more frequent than a payout, so what it gets is a
-## seven-tick scale pop and a wooden knock, not a burst — see `audio.gd`'s
-## note on why the delivery cue is deliberately small.
-func _detect_dock_arrivals(stock: Array, current_tick: int) -> void:
-	var total := 0
-	for pair in stock:
-		if pair is Array and pair.size() >= 2:
-			total += int(pair[1])
-	var previous: int = _dock_stock_seen
-	_dock_stock_seen = total
-	if previous < 0 or total <= previous:
-		return
-	# The case that appeared is the last visible one; past the deck's slot
-	# count nothing new is drawn, so nothing should pop either.
-	_dock_pop_slot = mini(total, DOCK_STOCK_SLOTS) - 1
-	_dock_pop_tick = current_tick
-	if _audio != null:
+## A dock's `shipped_total` rising IS a case arriving there: it counts every
+## box the dock ever took off its belt and never goes down, so a payment
+## emptying the dock on the same frame cannot hide an arrival the way a
+## falling stock figure would. This is far more frequent than a payout, so
+## what it gets is a seven-tick scale pop and a wooden knock, not a burst —
+## see `audio.gd`'s note on why the delivery cue is deliberately small.
+func _detect_dock_arrivals(current_tick: int) -> void:
+	var live := {}
+	var arrived := false
+	for key in _dock_states.keys():
+		var snapshot: Dictionary = _dock_states[key]
+		var received := int(snapshot.get("shipped_total", 0))
+		live[key] = received
+		if not _dock_received_seen.has(key) or received <= int(_dock_received_seen[key]):
+			continue
+		arrived = true
+		# The case that appeared is the last visible one; past the deck's
+		# slot count the last slot stands for it.
+		var slot: int = mini(int(snapshot.get("used", 0)), DOCK_STOCK_SLOTS) - 1
+		# A pop still in flight on another slot is settled first, or it would
+		# be left standing at whatever size it had reached.
+		_settle_dock_pop(key)
+		if slot >= 0:
+			_dock_pops[key] = {"tick": current_tick, "slot": slot}
+	_dock_received_seen = live
+	if arrived and _audio != null:
 		_audio.play(FactoryAudio.DELIVERY)
 
 
-func _update_dock_pop(current_tick: int) -> void:
-	if _dock_pop_tick < 0 or _dock_pop_slot < 0:
+func _settle_dock_pop(key: String) -> void:
+	if not _dock_pops.has(key):
 		return
-	var age: int = current_tick - _dock_pop_tick
-	var done: bool = age < 0 or age >= DOCK_POP_TICKS
-	var pop := Vector3.ONE
-	if not done:
-		# Overshoot and settle: a case that grows straight to its size reads
-		# as appearing, and one that overshoots reads as landing.
-		var t: float = float(age) / float(DOCK_POP_TICKS)
-		pop = Vector3.ONE * (1.0 + DOCK_POP_OVERSHOOT * sin(PI * t))
-	for key in _dock_nodes.keys():
-		var slots: Array = _dock_nodes[key].get("slots", [])
-		if _dock_pop_slot < slots.size():
-			(slots[_dock_pop_slot] as Node3D).scale = pop
-	if done:
-		_dock_pop_tick = -1
-		_dock_pop_slot = -1
+	var slots: Array = _dock_nodes.get(key, {}).get("slots", [])
+	var slot: int = int(_dock_pops[key]["slot"])
+	if slot < slots.size():
+		(slots[slot] as Node3D).scale = Vector3.ONE
+	_dock_pops.erase(key)
+
+
+func _update_dock_pop(current_tick: int) -> void:
+	for key in _dock_pops.keys():
+		var pop_state: Dictionary = _dock_pops[key]
+		var age: int = current_tick - int(pop_state["tick"])
+		var done: bool = age < 0 or age >= DOCK_POP_TICKS
+		var pop := Vector3.ONE
+		if not done:
+			# Overshoot and settle: a case that grows straight to its size
+			# reads as appearing, and one that overshoots reads as landing.
+			var t: float = float(age) / float(DOCK_POP_TICKS)
+			pop = Vector3.ONE * (1.0 + DOCK_POP_OVERSHOOT * sin(PI * t))
+		var slots: Array = _dock_nodes.get(key, {}).get("slots", [])
+		var slot: int = int(pop_state["slot"])
+		if slot < slots.size():
+			(slots[slot] as Node3D).scale = pop
+		if done:
+			_dock_pops.erase(key)
 
 
 ## Everything the player can turn, applied to the scene that owns it. Called

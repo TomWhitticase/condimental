@@ -59,8 +59,8 @@ fn price_of(kind: &str) -> Money {
 /// this file's purchases several times over, so the returned world has
 /// genuine, earned money to spend. Mirrors `economy.rs`'s own drive loop —
 /// which, since the delivery-dock ticket, only *feeds* the line: the dock at
-/// the chain's tail ships finished boxes into the delivery pool by itself
-/// every tick, so no collect command is issued (there isn't one any more).
+/// the chain's tail takes finished boxes off its belt by itself every
+/// tick, so no collect command is issued (there isn't one any more).
 ///
 /// The threshold is deliberately a generous flat amount rather than "at
 /// least one payout": `data/contracts.ron` now ships three contracts with

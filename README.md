@@ -273,11 +273,11 @@ whether that name was read off the pipe run or stated by you), both get **FILL**
    eight more, each with a price to sign, a quantity, a cadence and a number of
    strikes. The clipboard in the corner tracks every signed order: checklist, payout,
    countdown, and whether it is `✔ READY`, `⚠ AT RISK` or `⚠ LAST CHANCE`.
-6. **Watch the money.** The dock ships finished boxes into a shared delivery pool
-   automatically — one box pays one contract, never two, and the pool caps at 48 per
-   item, at which point the dock refuses deliveries and the belt backs up. Ingredients
-   are roughly a third of revenue, so overproducing into a pool nobody is buying from
-   is a real loss.
+6. **Watch the money.** Finished boxes wait on the dock they arrive at until a
+   contract collects them — one box pays one contract, never two. A dock has 32
+   places; once they are all taken it refuses deliveries and the belt backs up.
+   Ingredients are roughly a third of revenue, so overproducing onto a dock nobody
+   is buying from is a real loss.
 7. **Mind the crew.** Press `H`. Every machine you place adds to what a category asks
    for, whether or not it is running; wages are paid every 1,000 ticks (about 33
    seconds at the 30 Hz tick). A payday you cannot cover idles heads for a period, and

@@ -87,7 +87,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 
 use super::contracts::ContractRegistry;
-use super::economy::{DELIVERY_STOCK_CAPACITY, STARTING_MONEY};
+use super::dock::DOCK_CAPACITY;
+use super::economy::STARTING_MONEY;
 use super::guide::{GuideFact, GuideRegistry, GuideTopic};
 use super::ingredients::{IngredientCatalog, raw_ingredient_ids};
 use super::machines::MachineRegistry;
@@ -800,7 +801,7 @@ fn guide_facts(
                 GuideFact::StarterContracts => {
                     (input.contracts.starters().count() as f64, String::new())
                 }
-                GuideFact::DockCapacity => (f64::from(DELIVERY_STOCK_CAPACITY), String::new()),
+                GuideFact::DockCapacity => (f64::from(DOCK_CAPACITY), String::new()),
                 GuideFact::StartingCrew => (f64::from(starting_crew), String::new()),
                 GuideFact::StartingWageBill => (f64::from(starting_wage_bill), String::new()),
                 GuideFact::PaydayTicks => (input.staff.pay_period_ticks() as f64, String::new()),

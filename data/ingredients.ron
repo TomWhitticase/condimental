@@ -51,7 +51,7 @@
 //      i.e. 4 + 3 + 4 = 11 in ingredients.
 //   2. The contract board pays between 24 and 40 per box of ketchup. So
 //      ingredients are roughly a third of revenue: a running factory is
-//      comfortably profitable, but overproducing into a delivery pool no
+//      comfortably profitable, but overproducing onto a dock no
 //      contract wants is a real waste of money rather than a free
 //      accumulation.
 //   3. Tomatoes are the cheapest per unit and are consumed four at a time,
