@@ -858,6 +858,216 @@ static func build_bbq_running_line(sim) -> void:
 		sim.tick()
 
 
+## OPENS EVERY GATE IN `data/unlocks.ron`, by patching the delivery counter
+## through the same save/load door [method deliver] uses.
+##
+## The threshold is read off the simulation's own `unlocks` rather than
+## written here: a gate is content (`data/unlocks.ron`), and a fixture that
+## restated "25" in GDScript would be the presentation layer holding an
+## opinion about progression — and would go quietly wrong the day a designer
+## moved the number, which is the class of staleness this whole file's
+## tables keep failing on.
+##
+## **Callers with a scene must `_rebuild_world()` afterwards**, for the
+## reason `fill_fluid_runs` gives: the world is reloaded, so it is a new
+## world object and the 3D subtree is built from the old one until told.
+static func open_every_gate(sim) -> void:
+	var economy = JSON.parse_string(sim.economy_snapshot_json())
+	if not (economy is Dictionary):
+		fail_fixture("MUSTARD_FIXTURE_FAIL", "economy_snapshot_json did not parse as a Dictionary")
+		return
+	var threshold := 0
+	for unlock in economy.get("unlocks", []):
+		threshold = maxi(threshold, int(unlock.get("after_deliveries", 0)))
+	if threshold == 0:
+		fail_fixture(
+			"MUSTARD_FIXTURE_FAIL",
+			"data/unlocks.ron gates nothing — a fixture that crossed no gate would prove nothing"
+		)
+		return
+	deliver(sim, threshold)
+
+
+## True when the unlock with this id is open. Asked of the simulation, like
+## everything else here: `BuyIngredient` and `SignContract` are refused for a
+## gated id in `sim_core`, so this is a report of that rule rather than a
+## second copy of it.
+static func unlock_open(sim, id: String) -> bool:
+	var economy = JSON.parse_string(sim.economy_snapshot_json())
+	if not (economy is Dictionary):
+		return false
+	for unlock in economy.get("unlocks", []):
+		if String(unlock.get("id", "")) == id:
+			return bool(unlock.get("open", false))
+	return false
+
+
+## THE MUSTARD LINE (the mustard epic) — the third sauce, running, as a
+## WHOLE SECOND LINE FROM RAW rather than as a branch off an existing one.
+##
+## That is the structural difference from `build_bbq_branch` and the reason
+## this is its own fixture rather than more tiles on that one. BBQ hangs off
+## the ketchup line and drinks its finished ketchup; mustard shares exactly
+## one id with anything already on the floor — `vinegar` — and makes its own
+## way from seed to case. So this builds on bare floor and proves the claim
+## `data/recipes.ron` makes about the tier: a second line, start to finish,
+## on nothing but content.
+##
+## THE SHAPE, and the two joints worth knowing before moving a tile:
+##
+##   seed hopper -> belt -> CRUSHER -> [mash] -> MIXER -> [mix] -> VAT
+##       vinegar tank -> [vinegar] -^      turmeric belt -^
+##   ... -> [mustard] -> BOTTLER -> belt -> PACKER -> belt -> DOCK
+##
+##   * **The crusher is plumbed on both sides**, which no crusher in any
+##     other fixture is. The vinegar run comes along row 1 and stops at
+##     (4, 1), touching the crusher's single tile from the south; the mash
+##     leaves east off its outlet face. A machine taps a network by
+##     TOUCHING it and deposits only through the face it points at, so those
+##     two runs cannot be confused however close they look on the floor.
+##   * **Row 1 carries two different things and they must not meet.** West
+##     of the crusher it is the vinegar pipe run; east of it, it is the
+##     turmeric feed belt into the mixer's second tile. They are separated
+##     by the turmeric hopper at (5, 1), which is a building and not a pipe
+##     — one more pipe there and the vinegar run would reach down the line
+##     and merge with the mash.
+##
+## WHY THE MIXER IS 1x2 HERE TOO, for a different reason than usual: its
+## second tile is not a second solid lane, it is where the turmeric arrives
+## while the mash comes in by pipe. Mustard is the first recipe to use the
+## two chutes asymmetrically.
+##
+## The bill is 932 — the cheapest complete line in this file, because
+## mustard's middle is wet and three stages of it are pipe rather than belt.
+## It still calls `fund` before stocking, like every fixture that intends to
+## RUN: a larder plus its racks costs far more than the line does.
+##
+## **The gate is crossed by patching deliveries, not by earning them.**
+## `build_bbq_running_line` runs a ketchup line until BBQ's 10 deliveries
+## arrive, and that is right for a fixture whose subject IS the unlock.
+## Mustard sits at 25 and this fixture's subject is the line, so it uses
+## `open_every_gate` — the same door `test_ingredient_models.gd` and
+## `test_screenshot.gd` already cross gates through. What stays real is
+## every placement: nothing here is conjured into the world, it is bought
+## and placed over the wire exactly as a player would.
+static func build_mustard_line(sim) -> void:
+	# The raws and the contracts are behind `mustard_sauce`; open it before
+	# buying anything, or `stock_larder` silently skips both of mustard's
+	# ingredients and this becomes a complete line that never makes a case
+	# — the failure `build_bbq_running_line` documents at its own ceiling.
+	open_every_gate(sim)
+	if fixture_failure() != "":
+		return
+	if not unlock_open(sim, MUSTARD_UNLOCK):
+		fail_fixture(
+			"MUSTARD_FIXTURE_FAIL",
+			"'%s' is still shut after crossing every gate — " % MUSTARD_UNLOCK
+			+ "data/unlocks.ron no longer has that id, or the delivery patch did not take"
+		)
+		return
+	fund(sim, 30000)
+
+	# Stage 1, the crusher: seed on a belt from its hopper, vinegar by pipe.
+	place(sim, "hopper", MUSTARD_SEED_HOPPER, "east", "mustard_seed")
+	for x in [0, 1, 2, 3]:
+		place(sim, "belt", Vector2i(x, 0), "east")
+	place(sim, "crusher", Vector2i(4, 0), "east")
+	place(sim, "fluid_tank", MUSTARD_VINEGAR_TANK, "east")
+	for x in [2, 3, 4]:
+		place(sim, "pipe", Vector2i(x, 1), "east")
+
+	# Stage 2, the mixer: mash down a pipe, turmeric along row 1.
+	for x in [5, 6]:
+		place(sim, "pipe", Vector2i(x, 0), "east")
+	place(sim, "hopper", MUSTARD_TURMERIC_HOPPER, "east", "turmeric")
+	place(sim, "belt", Vector2i(6, 1), "east")
+	place(sim, "mixer", Vector2i(7, 0), "east")  # 1x2: also covers y=1
+
+	# Stage 3, the cook. No belt touches it, as no vat's ever does.
+	for x in [8, 9]:
+		place(sim, "pipe", Vector2i(x, 0), "east")
+	place(sim, "cooking_vat", Vector2i(10, 0), "east")  # 2x2: also x=11, y=1
+
+	# Stage 4, back to solids: bottles, cases, dock.
+	for x in [12, 13]:
+		place(sim, "pipe", Vector2i(x, 0), "east")
+	place(sim, "bottler", Vector2i(14, 0), "east")
+	for x in [15, 16, 17, 18]:
+		place(sim, "belt", Vector2i(x, 0), "east")
+	place(sim, "packer", Vector2i(19, 0), "east")
+	for x in [20, 21, 22, 23]:
+		place(sim, "belt", Vector2i(x, 0), "east")
+	place(sim, "dock", MUSTARD_DOCK, "east")
+
+	# And make it RUN: stock, auto-fill, crew, orders.
+	fund(sim, 30000)
+	stock_larder(sim, LARDER_STOCK)
+	for tile in [MUSTARD_SEED_HOPPER, MUSTARD_TURMERIC_HOPPER]:
+		sim.issue_command_json(JSON.stringify({
+			"type": "set_hopper_auto_fill", "tile": [tile.x, tile.y], "enabled": true,
+		}))
+	sim.issue_command_json(JSON.stringify({
+		"type": "set_tank_auto_fill",
+		"tile": [MUSTARD_VINEGAR_TANK.x, MUSTARD_VINEGAR_TANK.y],
+		"enabled": true,
+	}))
+	hire_until_staffed(sim)
+	for id in MUSTARD_CONTRACTS:
+		sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": id}))
+
+	for i in range(MUSTARD_SETTLE_TICKS):
+		if i % RESTOCK_EVERY == 0:
+			restock(sim)
+		sim.tick()
+
+
+## The unlock that holds mustard back (`data/unlocks.ron`).
+const MUSTARD_UNLOCK := "mustard_sauce"
+
+## The tiles any check or shot of the mustard line names, so that a test
+## asserting where something is does not restate the layout above.
+const MUSTARD_SEED_HOPPER := Vector2i(-1, 0)
+const MUSTARD_TURMERIC_HOPPER := Vector2i(5, 1)
+const MUSTARD_VINEGAR_TANK := Vector2i(1, 1)
+const MUSTARD_CRUSHER := Vector2i(4, 0)
+const MUSTARD_MIXER := Vector2i(7, 0)
+const MUSTARD_VAT := Vector2i(10, 0)
+const MUSTARD_BOTTLER := Vector2i(14, 0)
+const MUSTARD_PACKER := Vector2i(19, 0)
+const MUSTARD_DOCK := Vector2i(24, 0)
+
+## One tile of each of the four runs the line stands up, with the fluid the
+## simulation must name it. A run is checked HERE and not by walking the
+## snapshot for "some run carrying mustard", because the thing worth pinning
+## is that the mash is on the crusher's side of the mixer and the mix on the
+## other — a layout that merged them would still report both ids somewhere.
+const MUSTARD_RUNS := [
+	[Vector2i(3, 1), "vinegar"],
+	[Vector2i(5, 0), "mustard_mash"],
+	[Vector2i(8, 0), "mustard_mix"],
+	[Vector2i(12, 0), "mustard"],
+]
+
+## The two single-sauce mustard orders on the board (`data/contracts.ron`):
+## 2 cases and 3 cases. Signed rather than the 8-case `sandwich_franchise`
+## so the clipboard in a shot shows orders this run can actually fill, and
+## deliberately not `deli_chain` — that one wants ketchup too, and this
+## floor has no ketchup line on it.
+const MUSTARD_CONTRACTS := ["deli_counter", "hot_dog_stand"]
+
+## How many placements `build_mustard_line` makes: 13 belts, 9 pipes,
+## 2 hoppers, 1 tank and the six buildings.
+const MUSTARD_LINE_PLACEMENTS := 13 + 9 + 2 + 1 + 6
+
+## How long the line runs once it is built. Mustard's cook is 360 ticks —
+## between ketchup's 240 and BBQ's 600 — and it is the bottleneck of this
+## line as every vat is of its own, so a case leaves the packer at about
+## that cadence once the pipes have primed. 15 000 is the same budget
+## `BBQ_SETTLE_TICKS` uses and leaves the dock a long way short of backing
+## up, which is a different fixture's subject.
+const MUSTARD_SETTLE_TICKS := 15000
+
+
 ## THE SPLIT DOCK LAMPS — `scripts/screenshot-scene.sh --split-docks`: the
 ## BBQ branch run on until ONE of its two docks is backing up and the other
 ## is not, which is the whole subject of the per-dock lamp change.
@@ -1543,10 +1753,10 @@ const BELT_GALLERY_LEFT_CORNERS := {
 }
 
 
-## THE FLUID GALLERY (issue #72) — all SIX fluids the game has, standing in
-## six pipe runs in one frame, so the question "are these six colours
+## THE FLUID GALLERY (issue #72) — all NINE fluids the game has, standing in
+## nine pipe runs in one frame, so the question "are these nine colours
 ## actually tellable apart?" can be answered by looking at a picture instead
-## of by reasoning about six hex values.
+## of by reasoning about nine hex values.
 ##
 ## `main.gd`'s FLUID_TINTS grew from two entries to six across the BBQ epic
 ## and was never once seen whole: the shipped line shows three of them, the
@@ -1579,6 +1789,27 @@ const BELT_GALLERY_LEFT_CORNERS := {
 ##   * F leaves that vat, which now has `bbq_mix` and `liquid_smoke` on two
 ##     distinct input runs and no `ketchup_mix` anywhere: `bbq`.
 ##
+## **MUSTARD'S THREE ride on row 5, in a chain of their own**, because the
+## third sauce shares no fluid with the first two and needs no tank at all:
+##
+##   crusher -> [G] -> mixer -> [H] -> vat -> [I]
+##
+##   * G is filled by a CRUSHER, and that is the tightest naming in this
+##     whole fixture: a crusher has exactly two recipes, one of which
+##     (`tomato_paste`) outputs no fluid, so the only thing a crusher can
+##     ever put in a pipe is `mustard_mash`. The run is named by the machine
+##     kind alone, with nothing plumbed to its far end.
+##   * H is filled by the mixer fed only by G. `ketchup_mix` wants vinegar
+##     and `bbq_mix` wants ketchup, neither of which is on any run this
+##     mixer touches, so `mustard_mix` is the only feasible one.
+##   * I leaves the vat fed only by H, and `mustard` is the one vat recipe
+##     that drinks `mustard_mix`.
+##
+## Row 5 and not row 3: rows 3 and 4 are left EMPTY between the two chains
+## so neither can reach the other. A pipe joins a pipe, and one tile of
+## carelessness here merges two networks into an unnameable one — the first
+## failure mode `check_fluid_gallery` below was written for.
+##
 ## PRESSURE is the other half, and it is set directly rather than earned.
 ## Priming these runs by simulation would mean two full ketchup sub-chains
 ## feeding two mixers, a 600-tick BBQ cook and something like fifteen
@@ -1596,7 +1827,7 @@ const BELT_GALLERY_LEFT_CORNERS := {
 ## caller with no screenshot to suppress can decide for itself.
 ##
 ## READING the result: at the fixture's own framing this frame answers
-## "all six exist, named and standing" well, and "are these six tellable
+## "all nine exist, named and standing" well, and "are these nine tellable
 ## apart" only roughly — two of the runs sit ~600px apart rather than side
 ## by side. `--fluid-gallery --closeup <x>,<y>,6` is the route that answers
 ## the second question, one run at a time at 1:1.
@@ -1635,6 +1866,24 @@ static func build_fluid_gallery(sim) -> String:
 	for x in [15, 16]:
 		place(sim, "pipe", Vector2i(x, 0), "east")
 
+	# --- mustard's chain, on row 5 (see the doc above) -------------------
+	# Run G, mustard mash: a crusher is the only machine whose every
+	# fluid-making recipe makes this one thing, so nothing else is needed to
+	# name it — no tank, no feed belt, no second machine.
+	place(sim, "crusher", Vector2i(0, 5), "east")
+	for x in [1, 2]:
+		place(sim, "pipe", Vector2i(x, 5), "east")
+
+	# Run H, mustard mix: the mixer drinks G and can drink nothing else.
+	place(sim, "mixer", Vector2i(3, 5), "east")  # 1x2: also covers y=6
+	for x in [4, 5]:
+		place(sim, "pipe", Vector2i(x, 5), "east")
+
+	# Run I, mustard: the cook, and the brightest body in the frame.
+	place(sim, "cooking_vat", Vector2i(6, 5), "east")  # 2x2: also x=7, y=6
+	for x in [8, 9]:
+		place(sim, "pipe", Vector2i(x, 5), "east")
+
 	fill_fluid_runs(sim)
 	var complaint := check_fluid_gallery(sim)
 	if complaint != "":
@@ -1648,19 +1897,26 @@ static func build_fluid_gallery(sim) -> String:
 	return complaint
 
 
-## How many placements `build_fluid_gallery` makes: 12 pipes, 2 tanks,
-## 2 mixers and 2 vats — 816 of the 3000 a new game starts with.
-const FLUID_GALLERY_PLACEMENTS := 12 + 2 + 2 + 2
+## How many placements `build_fluid_gallery` makes: 18 pipes, 2 tanks,
+## 3 mixers, 3 vats and 1 crusher — 1,239 of the 3000 a new game starts
+## with, of which mustard's chain on row 5 is 423.
+const FLUID_GALLERY_PLACEMENTS := 18 + 2 + 3 + 3 + 1
 
 ## Every fluid the game has. The gallery's whole claim is that it stands all
 ## of them up at once, so the list it is checked against is written here
 ## once rather than recounted from the layout.
+##
+## In LINE ORDER per sauce, which is the order the frame reads left to
+## right: mustard's three brighten where the other two darken
+## (`main.gd`'s `FLUID_TINTS`), and a reviewer comparing the picture to this
+## list should be able to walk both the same way.
 const FLUID_GALLERY_FLUIDS: PackedStringArray = [
 	"vinegar", "ketchup_mix", "ketchup", "bbq_mix", "liquid_smoke", "bbq",
+	"mustard_mash", "mustard_mix", "mustard",
 ]
 
 
-## Asks the simulation whether the gallery is actually a gallery: all six
+## Asks the simulation whether the gallery is actually a gallery: all nine
 ## fluids present, each on a run the sim can NAME (`carries`, not `ambiguous`
 ## or `unnameable`), each above the pressure `main.gd` will draw a body at.
 ## Returns "" when it is, or what is wrong with it.

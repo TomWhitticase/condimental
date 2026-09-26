@@ -147,6 +147,17 @@
 # put the BBQ tier of the board over it, which is where the epic's mixed
 # orders read.
 #
+# Pass --mustard to build the MUSTARD LINE (test_layouts.gd's
+# `build_mustard_line`): the third sauce, and the first that is a whole
+# SECOND line from raw rather than a branch off an existing one — seed hopper
+# and vinegar tank into a crusher that discharges a FLUID, turmeric joining
+# at the mixer, then vat, bottler, packer and its own dock — funded, fully
+# crewed, auto-filled and run 15 000 ticks, so cases are shipping when the
+# shutter opens. It implies --populate. It is the one fixture whose middle is
+# entirely wet: mustard_mash and mustard_mix exist only in pipes, so this is
+# the only frame that can show whether the three stages of one sauce are
+# three colours. Add --closeup 7,0,14 to fill the frame with the piped half.
+#
 # Pass --stalled-run to build the STALLED RUN (test_layouts.gd's
 # `build_stalled_pipe_run`): the BBQ branch with its liquid-smoke tank turned
 # off its own run — issue #54's own mistake — so that run is one the
@@ -226,6 +237,14 @@
 # every number in them out of the sim. All three imply --populate. None of
 # them names a sauce or a topic: the screen is data/*.ron rendered, and so
 # is the flag.
+#
+# --cookbook-page also takes an optional id (--cookbook-page boxed_mustard),
+# which opens that page instead. The bare form is still the default and is
+# still wire-driven; the argument exists because "the first unlocked node"
+# can only ever reach the FIRST family, and there are now pages behind it.
+# Combine it with a fixture flag to choose the factory behind the plate:
+# `--cookbook-page boxed_mustard --mustard`. An id the book does not hold is
+# refused with the list of ids it does.
 #
 # Pass --split-docks to build the SPLIT-DOCK LINE (test_layouts.gd's
 # `build_split_dock_line`): the BBQ branch, with its two docks, run on until
@@ -396,7 +415,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--cookbook|--cookbook-page|--cookbook-basics] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--split-docks [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--settings] [--debug] [--set KEY=VALUE] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy] [--on-screen]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--bbq] [--mustard] [--stalled-run] [--staff] [--staff-shortfall] [--production] [--cookbook|--cookbook-page [ID]|--cookbook-basics] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--split-docks [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--settings] [--debug] [--set KEY=VALUE] [--shop] [--market] [--board [--board-end]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy] [--on-screen]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
