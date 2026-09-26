@@ -18,6 +18,15 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-26 **The build menu is sectioned by category, has a search box,
+  and may scroll at 1600x900.** The owner asked for categories plus a search
+  box. Categories are content (`data/shop.ron` `categories`), three sections
+  of five/five/two cards do not fit two rows at 1600px, so §5c's "nothing
+  scrolls at 1600x900 but the clipboard" gains the build menu as its one
+  exception. The search box sits outside the scroll as the way to what is
+  below the fold, and the cut lands on a card-row or heading edge. Binds
+  `docs/UI_UX.md` §5c, `godot_project/main.gd` `_position_shop_menu`.
+
 - 2026-09-26 **A new game starts with no contract.** No offer in
   `data/contracts.ron` is `starter: true`, so `World::new` activates nothing
   and the player signs their first order from the contracts board (**C**)

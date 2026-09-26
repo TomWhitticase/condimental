@@ -1586,10 +1586,19 @@ var _shop_money_label: Label
 ## `data/shop.ron`'s file order, i.e. the intended menu order):
 ## {kind, button, icon, price_label, owned_label}.
 var _shop_slots: Array = []
-## The grid and the ScrollContainer around it, kept so `_position_shop_menu`
-## can fit the one inside the other — see `_fit_grid_scroll`.
-var _shop_grid: GridContainer
+## The column of headed sections and the ScrollContainer around it, kept so
+## `_position_shop_menu` can fit the one inside the other — see
+## `_fit_grid_scroll`.
+var _shop_sections: VBoxContainer
 var _shop_grid_scroll: ScrollContainer
+## One dictionary per `categories` entry of the snapshot, in its order:
+## {id, section, grid} — the heading block and the grid its slots live in.
+var _shop_section_list: Array = []
+## The search box over the sections, and the line that stands in for them
+## when it matches nothing. Filtering is presentation: it hides slots, and
+## the sim never hears about it.
+var _shop_search: LineEdit
+var _shop_no_match: Label
 var _shop_open := false
 ## How many icon slots fit across before wrapping. **SIX**, and the number
 ## has been chased by the same constraint every time: the menu has to fit in
@@ -6499,8 +6508,11 @@ func _build_contract_checklist_row(body: VBoxContainer, item_id: String, require
 ## factory UI, and it also has to stay legible while floating over a lit 3D
 ## scene, which is exactly what that dark plate exists for.
 func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	# Opaque, unlike the other modal plates' 0.94: this panel's heading row
+	# (search box, balance) sits over the contract clipboard's cream paper, and
+	# at 0.94 the clipboard's text read through under the Money figure.
 	var panel_style := StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.06, 0.06, 0.07, 0.94)
+	panel_style.bg_color = Color(0.06, 0.06, 0.07, 1.0)
 	panel_style.border_color = Color(0.85, 0.63, 0.11, 0.95)
 	panel_style.border_width_top = _ui_i(4)
 	panel_style.border_width_left = _ui_i(2)
@@ -6554,18 +6566,42 @@ func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_shop_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	heading.add_child(_shop_money_label)
 
-	# The grid lives in a ScrollContainer whose height `_position_shop_menu`
-	# fits to whatever is left above the hotbar. **This is a last resort and
-	# is meant never to engage at a normal window size**: at 1600x900 (the
-	# resolution `scripts/screenshot-scene.sh` reviews at) the whole
-	# twelve-kind catalog fits with room to spare and the scrollbar never
-	# appears. It exists because at `project.godot`'s own 1280x720 the
-	# 2026-09-09 UI scale genuinely does not leave room for two rows of cards
-	# plus a title, a balance and a footer — and of the two ways to lose that
-	# fight, a grid that scrolls a little is much better than a menu whose
-	# footer disappears under the hotbar, which is the exact failure
-	# `_position_shop_menu` was written to prevent in the first place. The
-	# same shape (and the same reasoning) as the contract clipboard's docket
+	# The search box, in the heading row between the title and the balance so
+	# it costs the grid no height. Not focused on open, on purpose: the menu's
+	# keys (E and ESC close it, the digits select) would all type into it
+	# instead. A click puts the cursor there; ENTER or ESC hands the keys back.
+	# Its plate is opaque — the stock LineEdit is translucent, and the HUD's
+	# legend read straight through it.
+	var search_style := StyleBoxFlat.new()
+	search_style.bg_color = Color(0.13, 0.13, 0.15, 1.0)
+	search_style.border_color = Color(0.36, 0.37, 0.40)
+	search_style.set_border_width_all(_ui_i(1))
+	search_style.set_content_margin_all(_ui_px(6.0))
+	var search_focus := search_style.duplicate() as StyleBoxFlat
+	search_focus.border_color = Color(0.85, 0.63, 0.11, 0.95)
+	_shop_search = LineEdit.new()
+	_shop_search.name = "ShopSearch"
+	_shop_search.placeholder_text = "search equipment…"
+	_shop_search.clear_button_enabled = true
+	_shop_search.custom_minimum_size.x = _ui_px(260.0)
+	_shop_search.add_theme_font_size_override("font_size", _ui_font(-2))
+	_shop_search.add_theme_stylebox_override("normal", search_style)
+	_shop_search.add_theme_stylebox_override("focus", search_focus)
+	_shop_search.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_shop_search.text_changed.connect(_on_shop_search_changed)
+	_shop_search.text_submitted.connect(func(_text: String) -> void: _shop_search.release_focus())
+	_shop_search.gui_input.connect(_on_shop_search_gui_input)
+	heading.add_child(_shop_search)
+	heading.move_child(_shop_search, 1)
+
+	# The sections live in a ScrollContainer whose height `_position_shop_menu`
+	# fits to whatever is left above the hotbar, so the footer is never pushed
+	# under the hotbar. Since the catalog was split into headed categories
+	# (2026-09-26, the owner's request for categories plus a search box) it
+	# scrolls even at 1600x900: three sections are three rows of cards, and no
+	# two of them fit side by side (UI_UX.md §5c has the arithmetic). The
+	# search box above is outside the scroll on purpose — it is the way to a
+	# card below the fold. The same shape as the contract clipboard's docket
 	# stack.
 	_shop_grid_scroll = ScrollContainer.new()
 	_shop_grid_scroll.name = "ShopGridScroll"
@@ -6573,18 +6609,26 @@ func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_shop_grid_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
 	body.add_child(_shop_grid_scroll)
 
-	var grid := GridContainer.new()
-	grid.name = "ShopGrid"
-	grid.columns = SHOP_SLOT_COLUMNS
-	grid.add_theme_constant_override("h_separation", _ui_i(8))
-	grid.add_theme_constant_override("v_separation", _ui_i(8))
-	_shop_grid = grid
-	_shop_grid_scroll.add_child(grid)
+	_shop_sections = VBoxContainer.new()
+	_shop_sections.name = "ShopSections"
+	_shop_sections.add_theme_constant_override("separation", _ui_i(10))
+	_shop_grid_scroll.add_child(_shop_sections)
 
 	var snapshot: Dictionary = JSON.parse_string(sim.shop_snapshot_json())
+	for category in snapshot.get("categories", []):
+		_build_shop_section(String(category.get("id", "")),
+			String(category.get("name", "")), String(category.get("note", "")))
 	var entries: Array = snapshot.get("entries", [])
 	for index in range(entries.size()):
-		_build_shop_slot(grid, base_settings, index, String(entries[index]["kind"]))
+		var entry: Dictionary = entries[index]
+		_build_shop_slot(_shop_grid_for(String(entry.get("category", ""))),
+			base_settings, index, String(entry["kind"]))
+
+	_shop_no_match = Label.new()
+	_shop_no_match.name = "ShopNoMatch"
+	_shop_no_match.label_settings = base_settings
+	_shop_no_match.visible = false
+	_shop_sections.add_child(_shop_no_match)
 
 	var footer := Label.new()
 	footer.label_settings = base_settings
@@ -6595,6 +6639,111 @@ func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	body.add_child(footer)
 
 	_position_shop_menu()
+
+
+## One headed section of the build menu: a caption with its note beside it
+## over a grid of slots — THE COOKBOOK's `_section` header (the Sauce Book
+## plate language), so the two screens head a block the same way. Every word
+## comes from the snapshot's `categories`, which is `data/shop.ron`.
+func _build_shop_section(id: String, title: String, note: String) -> void:
+	var column := VBoxContainer.new()
+	column.name = "ShopSection_%s" % id
+	column.add_theme_constant_override("separation", _ui_i(5))
+	_shop_sections.add_child(column)
+
+	var header := HBoxContainer.new()
+	header.name = "Header"
+	header.add_theme_constant_override("separation", _ui_i(10))
+	column.add_child(header)
+
+	var caption_settings := LabelSettings.new()
+	caption_settings.font_size = _ui_font(-2)
+	caption_settings.font_color = Color(0.85, 0.63, 0.11, 0.95) # the panel's hazard rule
+	var caption := Label.new()
+	caption.name = "Caption"
+	caption.label_settings = caption_settings
+	caption.text = title.to_upper()
+	caption.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	header.add_child(caption)
+
+	var note_settings := LabelSettings.new()
+	note_settings.font_size = _ui_font(-4)
+	note_settings.font_color = Color(0.66, 0.68, 0.70)
+	var sub := Label.new()
+	sub.name = "Note"
+	sub.label_settings = note_settings
+	sub.text = note
+	sub.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	# No wrap and no pin: the header sits in a panel `_fit_grid_columns`
+	# measures (godot_project/CLAUDE.md: pin the width or do not wrap).
+	header.add_child(sub)
+
+	var grid := GridContainer.new()
+	grid.name = "ShopGrid_%s" % id
+	grid.columns = SHOP_SLOT_COLUMNS
+	grid.add_theme_constant_override("h_separation", _ui_i(8))
+	grid.add_theme_constant_override("v_separation", _ui_i(8))
+	column.add_child(grid)
+
+	_shop_section_list.append({"id": id, "section": column, "grid": grid})
+
+
+## The grid a category's slots go in. The fallback — the last section, or a
+## bare grid when the snapshot carried no categories at all — is for a stale
+## wire only: the loader refuses a `data/shop.ron` entry whose category the
+## file does not define, so a live snapshot never reaches it. It says so
+## loudly rather than quietly filing the kind under the wrong heading.
+func _shop_grid_for(category: String) -> GridContainer:
+	for section in _shop_section_list:
+		if section["id"] == category:
+			return section["grid"]
+	push_error("shop entry names category '%s', which the snapshot does not define — filed under the last section" % category)
+	if _shop_section_list.is_empty():
+		_build_shop_section("", "", "")
+	return _shop_section_list[-1]["grid"]
+
+
+## How many of a container's children are showing — what a filtered grid
+## balances its columns against.
+func _visible_children(node: Node) -> int:
+	var count := 0
+	for child in node.get_children():
+		if child is Control and child.visible:
+			count += 1
+	return count
+
+
+func _on_shop_search_changed(_text: String) -> void:
+	_apply_shop_search()
+	_position_shop_menu()
+
+
+## ESC in the search box gives the keys back rather than closing the menu
+## under the cursor; a second ESC closes it as it always has.
+func _on_shop_search_gui_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		_shop_search.release_focus()
+		_shop_search.accept_event()
+
+
+## Hides every slot whose display name does not contain the search text
+## (case-insensitive), then every section left with no slot showing. An empty
+## box shows everything. Only what is DRAWN changes: `_shop_slots` keeps its
+## order and its indices, which are the hotbar's slot numbers.
+func _apply_shop_search() -> void:
+	if _shop_search == null:
+		return
+	var query := _shop_search.text.strip_edges().to_lower()
+	for slot in _shop_slots:
+		slot["button"].visible = query == "" \
+			or _kind_display_name(String(slot["kind"])).to_lower().contains(query)
+	var any_shown := false
+	for section in _shop_section_list:
+		var shown := _visible_children(section["grid"]) > 0
+		section["section"].visible = shown
+		any_shown = any_shown or shown
+	_shop_no_match.visible = not any_shown
+	_shop_no_match.text = "nothing matches \"%s\"" % _shop_search.text.strip_edges()
 
 
 # --- Width: what a modal panel gives up when the window is too narrow ------
@@ -6713,14 +6862,77 @@ func _position_shop_menu() -> void:
 	var vp := get_viewport()
 	if vp == null:
 		return
-	var reserved := _hotbar_reserved_height()
+	var reserved := _shop_reserved_height()
 	var bounds := vp.get_visible_rect().size
-	_fit_grid_columns(_shop_menu, _shop_grid, _shop_slots.size(), SHOP_SLOT_COLUMNS)
-	_fit_grid_scroll(_shop_grid_scroll, _shop_grid, bounds.y - reserved - _ui_px(16.0))
+	# Each section's grid is fitted on its own, with every other grid first
+	# folded to one column: the panel is as wide as its widest grid, so a
+	# grid measured beside another still at six across would be squeezed
+	# for a width it was never taking.
+	for section in _shop_section_list:
+		section["grid"].columns = 1
+	for section in _shop_section_list:
+		var grid: GridContainer = section["grid"]
+		_fit_grid_columns(_shop_menu, grid, _visible_children(grid), SHOP_SLOT_COLUMNS)
+	var fitted := _fit_grid_scroll(_shop_grid_scroll, _shop_sections, bounds.y - reserved - _ui_px(16.0))
+	var snapped := _shop_rows_height(fitted)
+	if snapped > 0.0:
+		_shop_grid_scroll.custom_minimum_size.y = snapped
 	_shop_menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
 	var menu_size := _shop_menu.get_combined_minimum_size()
 	_shop_menu.position.x = maxf(0.0, (bounds.x - menu_size.x) * 0.5)
 	_shop_menu.position.y = max(8.0, (bounds.y - reserved - menu_size.y) * 0.5)
+
+
+## How much of the bottom of the screen the build menu must keep clear: the
+## hotbar's PLATE and the gap under it, not the whole strip. The strip's
+## column also holds the name flyout above the plate, and every other panel
+## reserves that too — but the flyout only fires on a placement, and placing
+## from the menu closes the menu (`_enter_build_mode`), so the two are never
+## up together. Reserving it cost the menu ~46px at 1600x900, which is what
+## cut the Production row through its last line. Falls back to the whole
+## strip's estimate before the plate has laid out (a headless run).
+func _shop_reserved_height() -> float:
+	var vp := get_viewport()
+	if vp == null or _hotbar_panel == null or _hotbar_panel.size.y <= 0.0:
+		return _hotbar_reserved_height()
+	var bounds := vp.get_visible_rect().size
+	return bounds.y - _hotbar_panel.get_global_rect().position.y + HOTBAR_BOTTOM_MARGIN
+
+
+## The tallest height not greater than `cap` at which the build menu's scroll
+## can end on an EDGE: after a whole line of cards, or after a section's
+## heading. A card cut through its "Owned" line reads as a rendering fault,
+## where a whole heading with nothing under it yet says "more below" — at
+## 1600x900 it is the Shipping & Storage heading, and the dock, that the cut
+## lands on. 0 when not even the first heading fits.
+func _shop_rows_height(cap: float) -> float:
+	var separation := float(_shop_sections.get_theme_constant("separation"))
+	var used := 0.0
+	var fitted := 0.0
+	var first := true
+	for section in _shop_section_list:
+		var column: Control = section["section"]
+		if not column.visible:
+			continue
+		if not first:
+			used += separation
+		first = false
+		var inner := float(column.get_theme_constant("separation"))
+		var header: Control = column.get_node("Header")
+		used += header.get_combined_minimum_size().y
+		if used > cap:
+			return fitted
+		fitted = used
+		var grid: GridContainer = section["grid"]
+		var rows_height := _whole_grid_rows_height(grid, cap - used - inner)
+		var full := grid.get_combined_minimum_size().y
+		if rows_height > cap - used - inner:
+			return fitted
+		fitted = used + inner + rows_height
+		if rows_height < full:
+			return fitted
+		used += inner + full
+	return fitted
 
 
 ## Gives `grid` as much of `available` as its panel's own chrome leaves it,
@@ -6761,11 +6973,10 @@ func _fit_grid_scroll(scroll: ScrollContainer, grid: Control, available: float, 
 	# `snap_rows` moves the cut down to the last whole row, and it costs height
 	# to buy a tidy edge, so it is for a stack whose rows are DECISIONS the
 	# player signs — an offer on the board, a hire — where half a card is half
-	# a choice (see `_whole_rows_height`). The build menu does NOT ask for it:
-	# its grid wraps six icon slots to a line, so a "row" there is a line of
-	# cards that are all the same height anyway, and the half-row it shows past
-	# the cap is the thing that says "scroll". Neither does the production
-	# panel, for the same reason: its rows are readouts.
+	# a choice (see `_whole_rows_height`). The build menu snaps too, but on
+	# its own edges — a line of cards OR a section's heading — which a
+	# stack of headed grids needs and this does not know (`_shop_rows_height`).
+	# The production panel does not snap: its rows are readouts.
 	if snap_rows:
 		cap = _whole_rows_height(grid, cap)
 	# Both floors above — `_ui_px(110)` and a whole row — may exceed what the
@@ -7282,6 +7493,9 @@ func _update_shop_menu() -> void:
 
 
 func _on_shop_slot_pressed(index: int) -> void:
+	# A click on a card is done typing: hand E, ESC and the digits back.
+	if _shop_search != null:
+		_shop_search.release_focus()
 	_buy_slot(index)
 
 
@@ -7354,6 +7568,13 @@ func _set_shop_menu_open(open: bool) -> void:
 	_shop_open = open
 	_shop_menu.visible = open
 	_cue(FactoryAudio.MENU_OPEN if open else FactoryAudio.MENU_CLOSE)
+	# A search does not outlive the menu: reopened, it shows everything, so
+	# no kind is ever missing from a menu that does not say it is filtered.
+	# (Setting `text` emits no `text_changed`, hence the explicit apply.)
+	if not open and _shop_search != null:
+		_shop_search.release_focus()
+		_shop_search.text = ""
+		_apply_shop_search()
 	if open:
 		_update_shop_menu()
 	# The menu is clickable in first-person too, which means handing the
