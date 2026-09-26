@@ -232,9 +232,8 @@
 # ONE of them is backing up and the other is not. The fixture's mixed exit
 # feeds BBQ onto the ketchup dock too, and that dock fills with the BBQ the
 # orders cannot absorb, while the branch's own dock keeps taking boxes. Each
-# dock holds its own stock, so only the jammed dock's lamp pulses and only
-# it raises the "!". The clipboard still reads ⚠ FULL, correctly: a dock in
-# the world is full.
+# dock holds its own stock, so only the jammed dock's lamp pulses. The
+# clipboard still reads ⚠ FULL, correctly: a dock in the world is full.
 # Honours --dock-lamp dark for the other half of the pulse, as --full-dock
 # does, and refuses to claim the fixture if the docks never disagreed.
 #

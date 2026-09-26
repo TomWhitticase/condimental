@@ -556,3 +556,77 @@ fn two_docks_share_the_starting_logistics_crew() {
         "asking for nobody, so it reports no shortage"
     );
 }
+
+/// The other half of the crew rule: two docks that BOTH hold ordered stock
+/// need two logistics heads, one each, exactly as the establishment
+/// (`required`) says. On one head the dock earlier in topology order takes
+/// it and the other is refused on every tick. The staff snapshot names the
+/// shortage, so the fix is in front of the player: hire one. A deliberate
+/// rule (DECISIONS 2026-09-26), pinned so it cannot drift silently.
+#[test]
+fn two_docks_both_holding_ordered_stock_need_two_heads() {
+    let mut world = bbq_branch(recipes(), BUDGET);
+    stock_up(&mut world);
+    let logistics = |world: &World| {
+        world
+            .staff_snapshot()
+            .categories
+            .into_iter()
+            .find(|category| category.id == "logistics")
+            .expect("data/staff.ron has a logistics category")
+    };
+    assert_eq!(logistics(&world).headcount, 1, "the starting crew of one");
+    let both_stocked = |world: &World| {
+        dock_at(world, KETCHUP_DOCK)
+            .contents
+            .iter()
+            .any(|(item, _)| item == "boxed_ketchup")
+            && dock_at(world, BBQ_DOCK)
+                .contents
+                .iter()
+                .any(|(item, _)| item == "boxed_bbq")
+    };
+    for _ in 0..100_000u32 {
+        supply(&mut world);
+        world.tick();
+        if both_stocked(&world) {
+            break;
+        }
+    }
+    assert!(both_stocked(&world), "both lines must reach their docks");
+    for id in ["corner_shop", "smokehouse_trial"] {
+        world.issue_command(PlayerCommand::SignContract { id: id.to_string() });
+        assert!(
+            world.economy().contract(id).is_some(),
+            "the fixture can sign '{id}'"
+        );
+    }
+    supply(&mut world);
+    world.tick();
+
+    let refused: Vec<(i32, i32)> = [KETCHUP_DOCK, BBQ_DOCK]
+        .into_iter()
+        .filter(|&tile| dock_at(&world, tile).understaffed)
+        .collect();
+    assert_eq!(
+        refused.len(),
+        1,
+        "one head serves one of the two wanted docks and the other is refused: {refused:?}"
+    );
+    let crew = logistics(&world);
+    assert_eq!(
+        (crew.required, crew.short),
+        (2, 1),
+        "the staff snapshot names the missing head: {crew:?}"
+    );
+
+    world.issue_command(PlayerCommand::Hire {
+        category: "logistics".to_string(),
+    });
+    supply(&mut world);
+    world.tick();
+    assert!(
+        !dock_at(&world, KETCHUP_DOCK).understaffed && !dock_at(&world, BBQ_DOCK).understaffed,
+        "a second head crews both docks"
+    );
+}

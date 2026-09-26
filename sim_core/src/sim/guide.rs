@@ -120,7 +120,7 @@ pub enum GuideFact {
     /// [`GuideFact::OpenContractCount`] — only `corner_shop` is a starter,
     /// while nine of the thirteen are ungated.
     StarterContracts,
-    /// `economy::DELIVERY_STOCK_CAPACITY`.
+    /// `dock::DOCK_CAPACITY`: the places on one dock.
     DockCapacity,
     /// Total starting headcount across `data/staff.ron`'s categories.
     StartingCrew,
