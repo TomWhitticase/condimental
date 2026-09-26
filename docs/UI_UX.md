@@ -1094,7 +1094,7 @@ single unpinned footer Label made the real panel 99px wider than that, which
 is 99px of legend it could then not get off. Every label on this panel pins
 its width and wraps — §5c's rule, and the reason that rule exists.
 
-### 5h. THE COOKBOOK: the game explaining itself (built 2026-09-25)
+### 5h. THE COOKBOOK: the game explaining itself (built 2026-09-25, BASICS 2026-09-26)
 
 Everything else in §5 tells the player what the factory is doing right now.
 This one tells them what the game *is*: **B** opens a screen whose first view
@@ -1147,6 +1147,77 @@ would be invisible to every test; the meta is what `test_cookbook.gd`
 asserts against and the pixels are downstream of it. The nodes themselves
 are real Buttons at explicit positions, so a click is a `pressed` signal
 rather than a hit test against a rectangle nobody measured.
+
+**BASICS: the half no graph can answer (built 2026-09-26).** The tree says
+what the factory can make; it cannot say what the loop *is*, what money is
+for, or what an expired contract costs you. So the book opens on a row of
+chips above the tree — one per topic in `data/guide.ron` — and each one is a
+page of prose: a title, a tagline, three or four paragraphs.
+
+That prose is content, in a content file, for the same reason every recipe
+is. What makes it stay true is a rule the file states about itself: **a
+paragraph never writes a number down.** Every quantity is a
+`{placeholder}` — `{starting_money}`, `{payday_ticks}`,
+`{cheapest_buyable}` — that the sim answers from the registries on every
+poll, so halving a price rewrites the sentence that mentions it and nobody
+edits a word. The vocabulary is closed and enforced from both ends:
+`guide.rs` refuses to load a paragraph naming a placeholder the sim cannot
+answer, and a unit test refuses a shipped paragraph that states a bare
+number where a fact exists. The check covers the **title** as well as the
+tagline and the body, and so does the substitution: the title was the one
+line the first version of the loader read past, and a typo there would have
+reached the page as braces in the largest font the book owns. The panel's
+`_fill()` is the only thing that puts the two halves together, and it formats
+each kind the way the rest of the book does — a tick fact reads as seconds, a
+content id goes through the display-name map. `test_cookbook.gd` asserts that
+no brace ever reaches the screen and that no sentence of the prose is written
+in GDScript, and it compares each **whole filled line** against what is on
+screen rather than the words and the numbers apart: a one-digit value checked
+on its own is barely checked at all, since a page that dropped "2" entirely
+still has the 2 in the "12" further down.
+
+**A count that means "right now" is its own fact.** The prose's first draft
+said "six raws on the market" by asking for `{raw_count}`, when three of the
+six were behind a gate — the file was telling a new player about content they
+could not buy. So the vocabulary distinguishes the file from the board:
+`raw_count`/`contract_count` count what the content files hold,
+`open_raw_count`/`open_contract_count` count what the current delivery count
+actually opens, and `starter_contracts` means the orders the game signs for
+you and nothing else. A sentence built out of the wrong one of those is the
+failure this whole section is designed to prevent, and it does not look like
+a bug on screen — it looks like a confident sentence.
+
+And a fact that means "right now" needs a **sentence** that means right now.
+The second draft of the contracts page asked for `open_contract_count`
+correctly and then wrote "of the thirteen orders in the file, nine are on the
+board of a brand-new factory" — true at zero deliveries and false from the
+tenth onwards, because the number moves and "a brand-new factory" does not.
+The prose has to carry the same tense as the fact: *the board is showing nine
+right now, and anything missing from it is behind a gate*. Picking the right
+fact is half the job; the clause around it is the other half, and neither the
+loader nor a test can see that half.
+
+The chips sit at the **top** of the tree rather than behind a tab, because
+the player who needs them most is the one who has just opened the book for
+the first time and does not yet know what a tier is. They are a
+`GridContainer` of pinned cells, not a flow row: a flow decides where to
+break from the width the layout pass gave it, and a headless run has no
+layout pass, so the break a test measures would not be the break a player
+sees.
+
+**Reading on is sideways, and the breadcrumb has a ceiling.** Each page ends
+with KEEP READING — chips for its sibling topics — and those chips *replace*
+the page rather than stacking on it: a sibling is not a level deeper, so BACK
+still means "back to the tree" after six topics, and the breadcrumb does not
+grow a crumb per click. That alone is not enough, because the rest of the
+book is genuinely a graph — a sauce page links machines, a machine page links
+sauces — so a walk has no natural end and neither had the crumb row, which at
+1280x720 ran past the right edge of the modal and took its own buttons
+somewhere they could not be clicked (§5c). The row now shows the last three
+and collapses the rest behind a leading "…" crumb that goes to the oldest
+view in the trail. `test_cookbook.gd` counts crumbs, never pixels: a headless
+run cannot prove a width, so what it asserts is the number of buttons the
+rule allows.
 
 **B and the six-line legend.** B was the build menu's key until E took it
 over, and was left dead rather than aliased; "B for book" claims it the way

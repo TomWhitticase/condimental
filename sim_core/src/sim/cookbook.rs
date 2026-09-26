@@ -87,6 +87,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 
 use super::contracts::ContractRegistry;
+use super::economy::{DELIVERY_STOCK_CAPACITY, STARTING_MONEY};
+use super::guide::{GuideFact, GuideRegistry, GuideTopic};
 use super::ingredients::{IngredientCatalog, raw_ingredient_ids};
 use super::machines::MachineRegistry;
 use super::recipe::RecipeRegistry;
@@ -119,6 +121,36 @@ pub struct CookbookSnapshot {
     pub machines: Vec<MachinePage>,
     /// Every priced raw, in `data/ingredients.ron` order.
     pub ingredients: Vec<IngredientPage>,
+    /// The book's BASICS pages — `data/guide.ron`'s topics in file order,
+    /// **with their `{placeholder}`s still in the text**. Substituting them
+    /// here would mean formatting money and ticks in `sim_core`, and a tick
+    /// span has to be printed in seconds by whoever owns the tick rate
+    /// (`godot_project/CLAUDE.md`: seconds, never ticks).
+    pub guide: Vec<GuideTopic>,
+    /// The values those placeholders stand for, one per
+    /// [`super::guide::GuideFact`] and always all of them — a page that asks
+    /// for a fact must never find it missing, so the wire carries the whole
+    /// vocabulary rather than only what today's prose happens to use.
+    pub facts: Vec<GuideFactLine>,
+}
+
+/// One fact, ready to be formatted by the presentation layer.
+///
+/// `kind` says which of the two value fields means anything: `money`,
+/// `count` and `ticks` are in `number`, `text` is in `text`. Two fields
+/// rather than an untagged union because the wire is JSON and a reader in
+/// GDScript branches on a string far more legibly than it tests a type.
+#[derive(Debug, Clone, Serialize)]
+pub struct GuideFactLine {
+    /// The placeholder name, without braces — what the prose asks for.
+    pub id: String,
+    /// `"money"`, `"count"`, `"ticks"` or `"text"`
+    /// ([`super::guide::GuideFactKind::wire`]).
+    pub kind: String,
+    /// The numeric value for every kind but `text`, where it is 0.
+    pub number: f64,
+    /// The string value for kind `text`, empty otherwise.
+    pub text: String,
 }
 
 /// One arrow in the tree: `from`'s product is consumed by `to`, arriving as
@@ -265,9 +297,9 @@ pub struct GateLine {
     pub deliveries: u32,
 }
 
-/// Everything the book is built out of. A struct rather than eight
-/// arguments because every caller passes the same eight, and because the
-/// next field this needs should not change every call site.
+/// Everything the book is built out of. A struct rather than nine arguments
+/// because every caller passes the same nine, and because the next field
+/// this needs should not change every call site.
 pub struct CookbookInput<'a> {
     pub recipes: &'a RecipeRegistry,
     pub machines: &'a MachineRegistry,
@@ -276,6 +308,7 @@ pub struct CookbookInput<'a> {
     pub shop: &'a ShopCatalog,
     pub staff: &'a StaffCatalog,
     pub unlocks: &'a UnlockRegistry,
+    pub guide: &'a GuideRegistry,
     pub deliveries: u32,
 }
 
@@ -652,13 +685,143 @@ pub fn build(input: &CookbookInput<'_>) -> CookbookSnapshot {
         })
         .collect();
 
+    // The BASICS pages go out as authored; what the book computes for them
+    // is the facts their `{placeholder}`s stand for.
+    let open_raws = ingredients.iter().filter(|page| !page.locked).count();
+    let facts = guide_facts(input, sauces.len(), ingredients.len(), open_raws);
+
     CookbookSnapshot {
         deliveries: input.deliveries,
+        guide: input.guide.ordered().to_vec(),
+        facts,
         sauces,
         edges,
         machines,
         ingredients,
     }
+}
+
+/// Every fact in [`GuideFact::ALL`], in that order.
+///
+/// **All of them, every time, whether the shipped prose uses them or not.**
+/// A page that asks for a fact the wire left out would render a gap, and the
+/// whole reason the vocabulary is closed and checked at load
+/// (`super::guide`) is that a missing number must be impossible rather than
+/// merely unlikely — so the two halves meet here: the loader refuses a
+/// placeholder nothing answers, and this refuses to answer less than
+/// everything.
+///
+/// `sauce_count`, `raw_count` and `open_raw_count` come in as arguments
+/// because they are what [`build`] has just finished deciding: how many
+/// sauces the book ended up with is a fact about the book, not about a
+/// registry, and re-deriving it here would be a second definition of "a
+/// sauce" — or, for the open count, a second reading of the same gate the
+/// ingredient pages already resolved.
+fn guide_facts(
+    input: &CookbookInput<'_>,
+    sauce_count: usize,
+    raw_count: usize,
+    open_raw_count: usize,
+) -> Vec<GuideFactLine> {
+    // The cheapest thing on the shelf, by the price the shop actually
+    // charges. Ties go to the earlier entry (`data/shop.ron` order), which
+    // is the order the build menu shows them in, so the book names the one
+    // the player sees first.
+    let cheapest = input
+        .shop
+        .entries()
+        .iter()
+        .min_by_key(|entry| entry.price_money());
+
+    // The earliest gate, which is the one a new game is walking towards.
+    // Ties go to file order for `data/unlocks.ron`'s own reason: the
+    // announcement is the point of a gate, and the file decides who
+    // announces first.
+    let first_gate = input
+        .unlocks
+        .ordered()
+        .iter()
+        .min_by_key(|unlock| unlock.after_deliveries);
+
+    // Orders the board is showing right now: no gate, or a gate that has
+    // opened. This is what "open to a brand-new factory" means in the
+    // guide's prose, and it is not `starters()` — a starter is one the game
+    // signs for you, and there is exactly one of those.
+    let open_contracts = input
+        .contracts
+        .ordered()
+        .iter()
+        .filter(|contract| {
+            input
+                .unlocks
+                .contract_available(&contract.id, input.deliveries)
+        })
+        .count();
+
+    let starting_crew: u32 = input
+        .staff
+        .categories()
+        .iter()
+        .map(|category| category.starting_headcount)
+        .sum();
+    let starting_wage_bill: u32 = input
+        .staff
+        .categories()
+        .iter()
+        .map(|category| category.starting_headcount * category.wage)
+        .sum();
+
+    GuideFact::ALL
+        .into_iter()
+        .map(|fact| {
+            // A number for every kind but `text`/`kind_id`, a string for
+            // those two — and an absent answer is 0 or empty rather than a
+            // failure, for the reason `build` itself has no error case: a
+            // book with a gap in it beats a book that will not open. Content
+            // with no shop entries or no gates at all is a test fixture, not
+            // a shipped game.
+            let (number, text) = match fact {
+                GuideFact::StartingMoney => (f64::from(STARTING_MONEY), String::new()),
+                GuideFact::CheapestBuyable => {
+                    (0.0, cheapest.map(|e| e.id.clone()).unwrap_or_default())
+                }
+                GuideFact::CheapestBuyablePrice => (
+                    cheapest
+                        .map(|e| e.price_money().to_num::<f64>())
+                        .unwrap_or(0.0),
+                    String::new(),
+                ),
+                GuideFact::BuyableCount => (input.shop.entries().len() as f64, String::new()),
+                GuideFact::RawCount => (raw_count as f64, String::new()),
+                GuideFact::OpenRawCount => (open_raw_count as f64, String::new()),
+                GuideFact::SauceCount => (sauce_count as f64, String::new()),
+                GuideFact::ContractCount => (input.contracts.len() as f64, String::new()),
+                GuideFact::OpenContractCount => (open_contracts as f64, String::new()),
+                GuideFact::StarterContracts => {
+                    (input.contracts.starters().count() as f64, String::new())
+                }
+                GuideFact::DockCapacity => (f64::from(DELIVERY_STOCK_CAPACITY), String::new()),
+                GuideFact::StartingCrew => (f64::from(starting_crew), String::new()),
+                GuideFact::StartingWageBill => (f64::from(starting_wage_bill), String::new()),
+                GuideFact::PaydayTicks => (input.staff.pay_period_ticks() as f64, String::new()),
+                GuideFact::FirstGateName => {
+                    (0.0, first_gate.map(|u| u.name.clone()).unwrap_or_default())
+                }
+                GuideFact::FirstGateDeliveries => (
+                    first_gate
+                        .map(|u| f64::from(u.after_deliveries))
+                        .unwrap_or(0.0),
+                    String::new(),
+                ),
+            };
+            GuideFactLine {
+                id: fact.placeholder().to_string(),
+                kind: fact.kind().wire().to_string(),
+                number,
+                text,
+            }
+        })
+        .collect()
 }
 
 /// How many crafts stand between a raw ingredient and each recipe's output.
