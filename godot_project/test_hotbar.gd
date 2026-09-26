@@ -321,8 +321,11 @@ func _initialize() -> void:
 		var mode: String = step[1]
 		var entry: Dictionary = main.BUILD_MODES[mode]
 		var text: String = main._mode_indicator_label.text
-		if not text.contains(entry["glyph"]) or not text.contains(entry["word"]):
-			_fail("in %s mode the tab should read '%s %s', reads '%s'" % [mode, entry["glyph"], entry["word"], text])
+		if text != entry["word"] or main._mode_indicator_shown != mode:
+			_fail("in %s mode the tab should read '%s' beside a %s, reads '%s' beside a %s" % [
+				mode, entry["word"], entry["glyph"], text,
+				main.BUILD_MODES.get(main._mode_indicator_shown, {}).get("glyph", "nothing")
+			])
 			return
 		# UI_UX.md §7: the rule colour changes too, but never alone.
 		var style: StyleBoxFlat = tab.get_theme_stylebox("panel")
@@ -332,6 +335,22 @@ func _initialize() -> void:
 		seen[text] = true
 	if seen.size() != main.BUILD_MODES.size():
 		_fail("every mode should read differently on the tab, saw %s" % [seen.keys()])
+		return
+	# The glyph is drawn into one cap-height square for every mode, so none
+	# of the three can shrink to a stray dot beside its word (the font's own
+	# ■ rendered 6px tall next to a 14px ✕).
+	var glyph: Control = main._mode_indicator_glyph
+	var cap: float = main._mode_indicator_label.label_settings.font_size * 0.6
+	if glyph == null or glyph.custom_minimum_size.y < cap or glyph.custom_minimum_size.x < cap:
+		_fail("the mode glyph should be about the word's cap height, is %s" % [
+			str(glyph.custom_minimum_size) if glyph != null else "missing"
+		])
+		return
+	var shapes := {}
+	for mode in main.BUILD_MODES:
+		shapes[main.BUILD_MODES[mode]["glyph"]] = true
+	if shapes.size() != main.BUILD_MODES.size():
+		_fail("every mode needs its own glyph shape, saw %s" % [shapes.keys()])
 		return
 
 	# --- The hover tooltip carries the two verbs --------------------------
