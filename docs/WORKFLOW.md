@@ -241,9 +241,10 @@ image, one with a `raw.githubusercontent.com` link, or one linking a file that
 does not exist.
 
 Then **get it reviewed, and land it** — an open PR is unfinished work until it
-merges. It is left open only when its merge is held after the review (by the
-task, or by the owner, below), or when no reviewer subagent could be launched
-at all:
+merges. It is left open only when it is approved and its merge is held (by
+checks not yet green, by the task, or by the owner, below), when it is handed
+over explicitly with its verdict named, or when no reviewer subagent could be
+launched at all:
 
 ```
 gh pr checks <N> --watch      # commitlint must pass; a red PR is not done
@@ -395,13 +396,15 @@ and the banner that reports it. Two rules it exists to enforce:
 - **A branch left behind in a worktree about to be removed is deleted work.**
   If it genuinely cannot land, say so plainly and leave the worktree in place;
   do not report a clean close over the top of it.
-- **A PR of yours ends the session open only if it was reviewed and its
-  merge is held, or if no reviewer subagent could be launched.** You cannot
-  review what you wrote,
-  but you can commission the review: launch the reviewer subagent and wait
-  for its verdict before you close. The subagent does not outlive the
-  session. Then name what the merge waits on. Merging it to tidy up is never
-  finishing it.
+- **A PR of yours ends the session open only if it is approved and its merge
+  is held (by checks not yet green, by the task, or by the owner), or it is
+  explicitly handed over with its latest verdict named, or no reviewer
+  subagent could be launched.** A `CHANGES REQUESTED` verdict is work still in
+  hand: fix it and get a fresh re-review, or hand the PR over saying so. You
+  cannot review what you wrote, but you can commission the review: launch the
+  reviewer subagent and wait for its verdict before you close, because the
+  subagent does not outlive the session. Then name what the merge waits on.
+  Merging it to tidy up is never finishing it.
 
 ## Orchestration (Orca)
 

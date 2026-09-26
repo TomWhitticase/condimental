@@ -56,12 +56,13 @@ matches what code comments and data files cite.
     save-format change.
 
   The review still runs in these cases, so the PR stays open *with* its
-  verdict. #193 is both: an Orca ticket, and a save-schema bump. Its review
-  was commissioned this way from the author's session on 2026-09-26, and
-  only its merge waits. The one case with no review is that no subagent can
-  be launched at all. The author also
-  waits for the verdict before ending the session: the subagent is part of
-  that session and does not outlive it.
+  verdict. #193 was an example of both holds: an Orca ticket and a save-schema
+  bump. It still needed its review. The one case with no review is that no
+  subagent can be launched at all. The author also waits for the verdict
+  before ending the session, because the subagent is part of that session and
+  does not outlive it. A `CHANGES REQUESTED` verdict is work still in hand,
+  not a reason to leave. Fix it and get a fresh re-review, or hand the PR over
+  explicitly, naming the verdict.
 
   **What was rejected.** The first draft of this rule (#198's first review):
   - It listed the owner and no-merge cases as reasons to stop, which would
@@ -3513,7 +3514,9 @@ matches what code comments and data files cite.
   epic. **Self-merging is allowed for routine work and refused for four
   cases**: red or still-running checks, a PR the owner asked to review,
   anything the design docs call a deviation, and a `gdext` bump or save-format
-  change. The agent says it is ready, gives the URL, and stops.
+  change. The agent says it is ready, gives the URL, and stops. *(Amended
+  2026-09-26: a PR with no verdict yet gets a subagent reviewer first, and
+  only its merge stops. See that entry at the top of Part A.)*
 
   `.github/pull_request_template.md` asks for what a review here actually
   needs, which is not "what changed" — the diff says that — but **what was run

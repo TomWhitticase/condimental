@@ -151,8 +151,9 @@ as in a ticketed epic.
 **Do not merge** a PR with no `VERDICT: APPROVED`, one whose checks are red
 or still running, one the owner
 asked to review, or one that deviates from a design doc, bumps `gdext`, or
-changes the save format. Leave it open with the URL and say what it waits on.
-With no verdict at all, the step above is not done yet: launch the reviewer.
+changes the save format. Leave it open with the URL and say what it waits
+on. With no verdict at all, the step above is not done yet: launch the
+reviewer.
 
 ## Afterwards
 

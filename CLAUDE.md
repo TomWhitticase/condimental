@@ -34,15 +34,15 @@ empty, and the player buys and places every tile.
   pull request (`gh pr create`); a `pre-push` hook refuses the alternative.
 - **No PR merges before it is reviewed.** It needs green checks AND a
   `VERDICT: APPROVED` from a session that did not write it (the `review`
-  skill). "Make a PR and merge it" means merge after that verdict. **With
-  no verdict yet, do not stop and wait: launch a fresh subagent** (the Agent
+  skill). "Make a PR and merge it" means merge after that verdict. **With no
+  verdict yet, do not stop and wait: launch a fresh subagent** (the Agent
   tool, `general-purpose`, never a `fork`) to review it with the `review`
   skill, wait for its verdict, and act on it (`open-pr` step 5). The review
-  always runs. Only the *merge* is held when the task forbids merging (an
-  Orca worker's coordinator merges) or the owner must also sign off (a PR
-  the owner asked to review, a design-doc deviation, a `gdext` bump, a
-  save-format change). Only if no
-  subagent can be launched does the PR sit open with no review.
+  always runs. Only the *merge* is held when the task forbids merging (an Orca
+  worker's coordinator merges) or the owner must also sign off (a PR the owner
+  asked to review, a design-doc deviation, a `gdext` bump, a save-format
+  change). Only if no subagent can be launched does the PR sit open with no
+  review.
 - **Every PR body shows the change in a screenshot** — render with
   `scripts/screenshot-scene.sh`, read it, publish with
   `scripts/pr-screenshot.sh`, paste its markdown. A hook and CI both refuse a

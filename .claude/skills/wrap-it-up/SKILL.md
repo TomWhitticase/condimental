@@ -69,13 +69,16 @@ it. The wrap-up-specific parts:
   and the `review` skill), the verdict posted as a comment whose first line is
   `VERDICT: APPROVED`. A session that wrote the branch cannot supply that,
   however carefully it re-runs its own tests. So **a PR of yours ends the
-  session open only if it was reviewed and its merge is held, or if no
-  reviewer subagent could be launched at all**. With no
-  verdict, launch the review yourself as a fresh subagent (`open-pr` step 5:
-  `general-purpose`, never `fork`) rather than ending on "waiting for
-  someone", and **wait for its verdict before you close**. The subagent dies
-  with the session. An approved PR still open is one whose merge the task
-  or the owner holds; say which. Do not merge it to tidy the session up.
+  session open only if it is approved and its merge is held (by checks not yet
+  green, by the task, or by the owner), or it is explicitly handed over with
+  its latest verdict named, or no reviewer subagent could be launched.** With
+  no verdict, launch the review yourself as a fresh subagent (`open-pr` step
+  5: `general-purpose`, never `fork`) rather than ending on "waiting for
+  someone", and **wait for its verdict before you close**: the subagent dies
+  with the session. A `CHANGES REQUESTED` verdict is work still in hand: fix
+  it and get a fresh re-review, or hand the PR over saying so. For an approved
+  PR left open, say which hold applies. Do not merge it to tidy the session
+  up.
 - **Check mergeability before waiting on checks.** A PR with conflicts gets no
   CI run at all, so `--watch` waits forever on nothing:
 
