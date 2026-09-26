@@ -579,7 +579,7 @@ pub fn build(input: &CookbookInput<'_>) -> CookbookSnapshot {
             id: (*root).to_string(),
             tagline: terminal.and_then(|r| r.tagline.clone()),
             blurb: terminal.and_then(|r| r.blurb.clone()),
-            icon: terminal.and_then(|r| r.icon.clone()),
+            icon: terminal.and_then(|r| r.cookbook_icon.clone().or_else(|| r.icon.clone())),
             tier: tier[family],
             steps,
             cost_per_unit: unit_cost(root, ordered, &producer, input.ingredients, &mut Vec::new())

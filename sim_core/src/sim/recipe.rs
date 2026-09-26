@@ -177,6 +177,18 @@ pub struct Recipe {
     /// before this field existed — but nothing new needs to be added to it.
     #[serde(default)]
     pub icon: Option<String>,
+
+    /// The picture THE COOKBOOK draws for a whole sauce, when that is not
+    /// [`Self::icon`]. Read only off a sauce's terminal recipe, and only for
+    /// the sauce itself — its tree node and its page heading.
+    ///
+    /// It exists because the terminal product is a case, and a row of
+    /// identical cardboard boxes is a poor way to tell ketchup from BBQ in
+    /// the tree. The bottle is the sauce's face; the case stays what the
+    /// world, the dock and the contracts show, so `icon` cannot simply be
+    /// changed. Absent, the book falls back to `icon`.
+    #[serde(default)]
+    pub cookbook_icon: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -285,6 +297,7 @@ impl RecipeRegistry {
                 ("tagline", &recipe.tagline),
                 ("blurb", &recipe.blurb),
                 ("icon", &recipe.icon),
+                ("cookbook_icon", &recipe.cookbook_icon),
             ] {
                 if value.as_ref().is_some_and(|text| text.trim().is_empty()) {
                     return Err(RecipeLoadError::BlankText {
@@ -683,12 +696,12 @@ mod tests {
         );
     }
 
-    /// The Cookbook's three prose fields get the same refusal for the same
+    /// The Cookbook's text fields get the same refusal for the same
     /// reason: absent is a real answer the page renders by leaving the line
     /// out, and blank is a line of nothing that only shows up in a frame.
     #[test]
     fn a_blank_cookbook_field_is_rejected_the_way_a_blank_name_is() {
-        for field in ["tagline", "blurb", "icon"] {
+        for field in ["tagline", "blurb", "icon", "cookbook_icon"] {
             let text = EXAMPLE.replacen(
                 "id: \"tomato_sauce\",",
                 &format!("id: \"tomato_sauce\", {field}: Some(\"  \"),"),
