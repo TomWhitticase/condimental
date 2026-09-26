@@ -1378,7 +1378,16 @@ Four consequences worth knowing before changing it:
   animation here (§6a), which reads across a floor at any zoom and cannot
   be confused with a steady lamp. The words are still where the detail is:
   the hover says `⚠ FULL`, and the clipboard's ON THE DOCK line reads
-  `48/48` with its bar at the ceiling (§5e).
+  its figure against the docks' places with its bar at the ceiling (§5e).
+- **A dock's hover draws its places as a grid** (2026-09-26). The dock
+  holds its own stock in places (GAMEPLAY §9), so its hover shows one socket
+  per place under the words that count them: an occupied socket holds the
+  case's own icon, a free one is an empty socket in the meter's track
+  colours. Eight to a row, and as many rows as the snapshot's `places`
+  needs. The count comes off the wire, never a GDScript constant. One
+  `Control` draws every cell (`_draw_places_grid`), because the hover is
+  rebuilt every frame. The words above it still name the items and the
+  count, so the grid is the second reading of a fact, not the only one (§7).
 
 ## 8. What this doc does not cover
 
