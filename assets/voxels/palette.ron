@@ -388,5 +388,101 @@
         // and the powder the bright one, the same way round as sugar's
         // white crystal on pale kraft.
         (name: "sack_spice",      rgb: "#6E2F13", class: "matte"),
+
+        // --- MUSTARD, the game's third sauce, and the yellow trap it walks
+        // into (the mustard epic's art ticket) ---
+        // `mustard_gold` is what is IN a `bottled_mustard` bottle and what
+        // is printed on a case of them, and choosing it is most of that
+        // ticket — because the obvious answer is already spoken for. This
+        // game paints signage, meters and machine trim `hazard_yellow`
+        // #D9A21B, and a sauce wearing the signage colour is a bug, not a
+        // livery. So this is the same family moved two ways at once: **28.8
+        // of 255 of luma ABOVE it** (192.7 against 163.9, Rec.709 over
+        // 0..255 — past the ~26 "reads reliably" anchor DECISIONS.md's
+        // 2026-09-20 record sets) and 13.7 degrees round toward green
+        // (CIELAB h 95.8 against 82.1), which leaves hazard yellow the
+        // darker, oranger, flatter of the two wherever they share a frame.
+        // It clears `vinegar_amber` #AD6B23, the other near neighbour, by
+        // 76.9, and the two sauces it shares a belt with by 135.6
+        // (`ketchup_red`) and 148.6 (`bbq_brown`): three bottles that part
+        // company by VALUE, which is the channel that survives half a tile
+        // — `bbq_brown`'s note above read the other way up, since mustard is
+        // the BRIGHT one.
+        // 192.7 rather than brighter is a deliberate compromise with
+        // `label_cream` #E5DCC5, 27.5 above it, because this same colour is
+        // the print on a mustard CASE and ketchup's print is that cream. A
+        // brighter mustard clears signage by more and the ketchup case by
+        // less; a value near the midpoint is the only one that clears 26
+        // from BOTH, and a case is the smallest thing on the belt.
+        // Matte, for exactly `bbq_brown`'s reason: mustard is only ever seen
+        // through a bottle's glass or printed on a carton. Nothing carries
+        // it in an open pail — the crusher mills the seed WET, so every
+        // bulk stage of this branch stands in a pipe rather than on a belt
+        // — and the fluid standing in a pipe stays `fluid_pale` tinted by
+        // `main.gd`'s FLUID_TINTS, whose mustard entry should be derived
+        // from this number (0.863, 0.776, 0.235), the rule `vinegar_amber`
+        // states. That wet mill is also why this branch adds no `liquid_*`
+        // entry of its own: those exist for product a PAIL carries down a
+        // belt, and mustard never puts any on one.
+        (name: "mustard_gold",    rgb: "#DCC63C", class: "matte"),
+        // The mustard bottle's label band AND its cap, where ketchup's are
+        // `label_cream`/`cap_white` and BBQ's are `label_kraft`/`cap_white`.
+        // A DARK accent on a bright bottle — the other two bottles' contrast
+        // direction reversed, the trick `label_bbq` plays on a case. It is
+        // not decoration: `glass_pale`, the neck every bottle shares, is
+        // 5.0 from `mustard_gold`, so body and neck are already one mass and
+        // a pale cap on top of them leaves the bottle's whole top 21.2 from
+        // its body — under the 26 that reads — and the top of the silhouette
+        // goes. Each PAIR clears the anchor on its own (`cap_white` is 26.6
+        // from the neck, 31.6 from a gold body); what fails is the
+        // three-voxel neck and the two-voxel cap taken together, which is
+        // the one mark the eye gets at the ~16px an item draws at, and which
+        // `a_bottle_s_cap_contrasts_with_the_neck_and_the_body` measures.
+        // One entry doing both jobs because a band and a cap in one dark
+        // ink is what a jar of Dijon looks like, and because ketchup's band
+        // and cap are 4.0 apart already — that pair is one accent too.
+        (name: "label_mustard",   rgb: "#3B3A14", class: "matte"),
+
+        // --- the mustard branch's two RAW ingredients ---
+        // `seed_tan` is bulk mustard seed heaped in its tote: a dull
+        // olive-gold, deliberately the DARKEST member of the mustard family
+        // and 61.8 under the sauce it becomes, so the line reads dull seed
+        // -> bright sauce from end to end, with nothing between them in
+        // this palette because the crusher mills the seed wet and the
+        // middle of the chain is a tinted fluid in a pipe — the way
+        // `liquid_paste`/`liquid_mix`/`liquid_ketchup` read darkening the
+        // other. The number was set against the STEEL it sits in (31.0
+        // under `steel`, 72.2 under the `steel_light` rim), not against the
+        // market row: a heap inside a bright tote is the adjacency that can
+        // swallow it.
+        (name: "seed_tan",        rgb: "#A18234", class: "matte"),
+        // Turmeric's cut flesh — the one raw whose own colour IS the reason
+        // it is in the recipe, and the one number here that **cannot** clear
+        // 26 of luma from both of its neighbours, because no number can:
+        // `vinegar_amber` sits at 115.8 and `hazard_yellow` at 163.9, an
+        // interval 48.1 wide, and the market row stands all the raws side by
+        // side. So this one is separated by HUE and by AREA instead, and the
+        // numbers are stated rather than implied: 20.8 of luma under hazard
+        // yellow with 17.5 degrees of CIELAB hue between them (h 64.6
+        // against 82.1) for dE76 22.6, and 27.3 over vinegar amber for dE76
+        // 23.0 — both about twice the 11.6 dE76 the dock's clipboard icons
+        // are read by. Chroma magnitude is NOT the channel here (dC 2.1 from
+        // hazard yellow; `item_liquid_smoke`'s note records where it was).
+        // The other half is SHAPE, and it is worth being exact about what it
+        // is NOT. The rhizome's mass is `cardboard_dark` skin, 42.6 under
+        // this, which buys the cut face local contrast no yellow-on-yellow
+        // arrangement could. By VOLUME the cut is about a sixth of the root
+        // (28 voxels against 153 of skin) — but `item_turmeric` repaints the
+        // cut onto exactly the faces the game's camera sees, so a play-zoom
+        // frame shows far more of it than that ratio suggests. No figure is
+        // quoted for how much more: the share moves with how the mask treats
+        // the contact shadow, and this file does not rest an argument on a
+        // number that depends on the mask rule. So the argument is not about
+        // how much of it there is: what keeps this off the hazard reading
+        // is that it is a knobbly organic lump 18px across, where signage
+        // in this game is a large flat straight-edged panel on a machine. A
+        // flat plate of this colour is the one that would read as a
+        // marking, whatever fraction of the frame it took.
+        (name: "turmeric_orange", rgb: "#E3821A", class: "matte"),
     ],
 )
