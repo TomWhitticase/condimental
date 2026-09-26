@@ -272,6 +272,15 @@ the same crusher. Mustard's tightest pair is wider than two pairs the game
 already ships. The band is narrow because the palette is nearly full; a
 fourth sauce will have to take value off the older two.
 
+One number the review added, recorded here because the fourth sauce will
+need it: the **pipe's own steel casing reads 209.65** in these frames, and
+every fluid is measured against its neighbours rather than against the
+casing it sits in. `mustard_mash` is 6.09 *below* the casing and
+`mustard_mix` 12.14 above it, both inside the anchor the legibility work
+uses — so those two read as fluid because an empty pipe draws no liquid body
+at all, a geometry cue, not because their tint stands off the metal. That is
+fine for three sauces and it is not a rule to keep leaning on.
+
 **One bug fell out that predates mustard.** THE COOKBOOK's sauce page read
 its nullable wire fields with `String(entry.get("tagline", ""))`. An
 `Option<String>` serialises as JSON `null`, `Dictionary.get` returns the null
