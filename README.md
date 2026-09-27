@@ -270,9 +270,10 @@ whether that name was read off the pipe run or stated by you), both get **FILL**
    it to auto-fill from bought stock every tick, and tell it what it holds. Retargeting
    is destructive — it empties the hopper, and a tank also purges every pipe run it
    feeds — so the picker names the total it is about to destroy before it does it.
-5. **Sign orders.** Press `C`. A new game runs one starter order and the board offers
-   eight more, each with a price to sign, a quantity, a cadence and a number of
-   strikes. The clipboard in the corner tracks every signed order: checklist, payout,
+5. **Sign orders.** Press `C`. A new game starts with no order signed: the board
+   on the right lists every offer (later tiers unlock as you deliver), each with a
+   price to sign, a quantity, a cadence and a number of strikes, and the column on
+   the left holds the orders you are running. The clipboard in the corner tracks every signed order: checklist, payout,
    countdown, and whether it is `✔ READY`, `⚠ AT RISK` or `⚠ LAST CHANCE`.
 6. **Watch the money.** Finished boxes wait on the dock they arrive at until a
    contract collects them — one box pays one contract, never two. A dock has 32
