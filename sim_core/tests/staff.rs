@@ -23,9 +23,9 @@ mod common;
 use sim_core::sim::save::{MoneyBits, SavedStaff};
 use sim_core::sim::types::Money;
 use sim_core::sim::{
-    ContractRegistry, Direction, MachineRegistry, PlayerCommand, RecipeRegistry, STARTING_MONEY,
-    StaffCatalog, StaffLoadError, StaffPools, StallKind, TileSnapshot, WorkState, World,
-    command_from_json, reference_chain, reference_chain_with_budget,
+    ContractRegistry, Direction, LOAD_WINDOW_TICKS, MachineRegistry, PlayerCommand, RecipeRegistry,
+    STARTING_MONEY, StaffCatalog, StaffLoadError, StaffPools, StallKind, TileSnapshot, WorkState,
+    World, command_from_json, reference_chain, reference_chain_with_budget,
 };
 
 fn recipes() -> RecipeRegistry {
@@ -496,7 +496,8 @@ fn understaffed_at(world: &World, tile: (i32, i32)) -> bool {
 /// holds for as long as the machine stays short, where the per-tick
 /// `staff` stall blinks: on a tick the crusher or mixer claims nothing the
 /// vat gets its crew and runs, and its stall goes to none. It is never
-/// raised over a machine idle for its own supply, nor over one switched off.
+/// raised over a machine that has not yet been fed (it asks for nobody, so
+/// it is never refused), nor over one switched off.
 #[test]
 fn an_understaffed_machine_stays_understaffed() {
     let mut world =
@@ -658,6 +659,123 @@ fn a_running_machine_short_on_paper_is_not_understaffed() {
     // The premise: the vat really did run, and was never turned away.
     assert_eq!(refused, 0, "the vat was refused its crew");
     assert!(ran > 1_000, "the vat ran on only {ran} ticks");
+}
+
+/// The 2026-09-27 report: fire a head from a running factory and a cooker
+/// stops with no red person over it. The owner's save had three vats on
+/// one pipe off the mixer; the fire left the last one short. While it sits
+/// refused, the two crewed vats beside it drain the shared pipe, so between
+/// refusals it reads `fluid_input` — and a marker gated on "nothing on its
+/// own supply side" dropped for ~120 ticks at a time. It is idle for want
+/// of a crew all the same, and must keep the person.
+#[test]
+fn a_short_vat_on_a_shared_pipe_keeps_its_marker() {
+    let mut world = running_line(0);
+    // The owner's layout: pipes along both sides of the reference vat, and
+    // two more vats beside it on the same runs (north of it here, where the
+    // reference line leaves room).
+    for (kind, tiles) in [
+        (
+            "pipe",
+            vec![
+                (11, -1),
+                (11, -2),
+                (11, -3),
+                (11, -4),
+                (14, -1),
+                (14, -2),
+                (14, -3),
+                (14, -4),
+            ],
+        ),
+        ("cooking_vat", vec![(12, -2), (12, -4)]),
+    ] {
+        world.issue_command(PlayerCommand::Purchase {
+            kind: kind.into(),
+            quantity: tiles.len() as u32,
+        });
+        for tile in tiles {
+            world.issue_command(PlayerCommand::Place {
+                kind: kind.into(),
+                tile,
+                direction: Direction::East,
+                item: None,
+            });
+        }
+    }
+    for _ in 0..4 {
+        hire(&mut world, "manufacturing");
+    }
+    let vats = |world: &World| {
+        world
+            .machine_load_snapshots()
+            .into_iter()
+            .filter(|e| [(12, 0), (12, -2), (12, -4)].contains(&e.tile))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(vats(&world).len(), 3, "all three vats are placed");
+    assert!(
+        vats(&world).iter().all(|e| e.crewed),
+        "every vat starts crewed"
+    );
+    for _ in 0..1_500 {
+        common::supply(&mut world);
+        world.tick();
+    }
+    fire(&mut world, "manufacturing");
+    let short: Vec<_> = vats(&world)
+        .iter()
+        .filter(|e| !e.crewed)
+        .map(|e| e.tile)
+        .collect();
+    assert_eq!(short.len(), 1, "the fire leaves exactly one vat short");
+    let last = short[0];
+    let entry = |world: &World| {
+        world
+            .machine_load_snapshots()
+            .into_iter()
+            .find(|e| e.tile == last)
+            .unwrap()
+    };
+
+    // Run until it is first refused, then it must hold the person.
+    let mut marked_from = None;
+    let (mut starved_while_marked, mut unmarked) = (0, 0);
+    for tick in 0..3_000 {
+        common::supply(&mut world);
+        world.tick();
+        let e = entry(&world);
+        if marked_from.is_none() {
+            if e.understaffed {
+                marked_from = Some(tick);
+            }
+            continue;
+        }
+        if e.understaffed {
+            if matches!(e.stall.map(|s| s.kind), Some(StallKind::FluidInput)) {
+                starved_while_marked += 1;
+            }
+        } else {
+            unmarked += 1;
+        }
+    }
+    let from = marked_from.expect("the short vat is never marked");
+    // It rises the first tick the vat asks for its crew and is turned
+    // away, which waits on its next batch's worth of sauce.
+    assert!(
+        from < LOAD_WINDOW_TICKS,
+        "the person took {from} ticks to appear"
+    );
+    assert_eq!(
+        unmarked, 0,
+        "the short vat lost its person on {unmarked} ticks"
+    );
+    // The premise: it really did go without sauce between refusals, which
+    // is what the old supply gate cleared the person on.
+    assert!(
+        starved_while_marked > 100,
+        "the vat was waiting for sauce on only {starved_while_marked} ticks"
+    );
 }
 
 /// A paused craft keeps its elapsed time exactly, and finishes the same

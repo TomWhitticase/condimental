@@ -245,6 +245,18 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-27 — The red person holds over a short vat on a shared pipe
+
+The owner fired a head from a running three-vat factory, and the short
+cooker stopped without its red person. The sim's `understaffed` also
+required "nothing on its own supply side holding it up", but a short vat on
+a pipe shared with crewed vats loses its sauce to them while it sits
+refused, so between refusals it read `fluid_input` and the person dropped
+for ~120 ticks at a time (11 of 101 polls on the owner's save). That gate
+is gone: short on the establishment and refused within the last load
+window is the whole rule, and the person clears a window after the last
+refusal. `a_short_vat_on_a_shared_pipe_keeps_its_marker` pins it.
+
 ### 2026-09-26 — A reviewer needs a clean context, not a different session
 
 The owner amended the review rule. A PR still needs a `VERDICT: APPROVED`
