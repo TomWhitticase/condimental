@@ -25,8 +25,8 @@ See [WORKFLOW.md](WORKFLOW.md).
   the verdict before ending the session, because the subagent does not
   outlive it. It commissions one even when the merge cannot happen: when the
   checks are not green, when the task forbids the author merging (an Orca
-  worker's coordinator merges), or the change also needs the owner (a PR the
-  owner asked to review, a design-doc deviation, a `gdext` bump, a
+  worker's coordinator merges), or when the change also needs the owner (a PR
+  the owner asked to review, a design-doc deviation, a `gdext` bump, a
   save-format change), the PR ends up open *with* its verdict, naming the
   hold. Those held PRs, one handed over
   with its latest verdict named, and one for which no subagent could be

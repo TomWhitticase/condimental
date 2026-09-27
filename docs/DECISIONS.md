@@ -68,10 +68,10 @@ matches what code comments and data files cite.
   held when the checks are not green, when the task forbids the author merging
   (an Orca worker's coordinator merges), or when the change needs the owner as
   well: a PR the owner asked to review, a design-doc deviation, a `gdext`
-  bump, a save-format change. The
-  review happens anyway, and the PR then stays open *with* its verdict, naming
-  the hold. #193 was an example of both holds — an Orca ticket and a
-  save-schema bump — and still needed reviewing. The one case with no review
+  bump, a save-format change. The review happens anyway, and the PR then stays
+  open *with* its verdict, naming the hold. #193 was an example of two of them
+  at once — an Orca ticket and a save-schema bump — and still needed
+  reviewing. The one case with no review
   at all is that no subagent can be launched. The author also waits for the
   verdict before ending the session, because the subagent is part of that
   session and does not outlive it. A `CHANGES REQUESTED` verdict is work still

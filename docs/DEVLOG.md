@@ -99,8 +99,8 @@ below is history and should only ever be appended to.)*
   first-person cameras disagree about how strong it is. See the log entry
   below and `docs/DECISIONS.md`.
 - **Agent context restructured (2026-09-16).** `CLAUDE.md` was cut to 72 lines
-  (98 today, as rules have been added) and `@`-includes nothing; it maps a task
-  to the doc that covers it. The
+  (98 on 2026-09-27, as rules have been added) and `@`-includes nothing; it
+  maps a task to the doc that covers it. The
   condensed decisions log lives in `docs/DECISIONS_LOG.md`, workflow in
   `docs/WORKFLOW.md`, and `sim_core/`, `godot_project/` and `assets/voxels/`
   each carry their own `CLAUDE.md` of local invariants with `AGENTS.md`
@@ -268,11 +268,11 @@ for it before closing — the reviewer subagent does not outlive the session.
 The review is commissioned even when the merge cannot happen, because the
 checks are not green, the task reserves the merge for a coordinator, or the
 change also needs the owner; the PR then ends up open *with* its verdict,
-naming what the merge waits on. Those
-holds, an explicit handover naming the latest verdict, and "no subagent could
-be launched" are the only ways a PR may end a session open; a `CHANGES
-REQUESTED` verdict is work still in hand. `CLAUDE.md`, `docs/WORKFLOW.md` and
-the `open-pr` and `wrap-it-up` skills say this too.
+naming what the merge waits on. Those holds, an explicit handover naming the
+latest verdict, and "no subagent could be launched" are the only ways a PR may
+end a session open; a `CHANGES REQUESTED` verdict is work still in hand.
+`CLAUDE.md`, `docs/WORKFLOW.md` and the `open-pr` and `wrap-it-up` skills say
+this too.
 
 ### 2026-09-26 — A reviewer needs a clean context, not a different session
 
