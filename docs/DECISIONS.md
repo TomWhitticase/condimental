@@ -65,9 +65,10 @@ matches what code comments and data files cite.
   this, they get a subagent to do the review rather than stop"*.
 
   **The review always runs; some cases hold only the merge.** The merge is
-  held when the task forbids the author merging (an Orca worker's coordinator
-  merges) or the change needs the owner as well: a PR the owner asked to
-  review, a design-doc deviation, a `gdext` bump, a save-format change. The
+  held when the checks are not green, when the task forbids the author merging
+  (an Orca worker's coordinator merges), or when the change needs the owner as
+  well: a PR the owner asked to review, a design-doc deviation, a `gdext`
+  bump, a save-format change. The
   review happens anyway, and the PR then stays open *with* its verdict, naming
   the hold. #193 was an example of both holds — an Orca ticket and a
   save-schema bump — and still needed reviewing. The one case with no review

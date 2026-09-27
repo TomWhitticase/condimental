@@ -93,8 +93,10 @@ it. The wrap-up-specific parts:
 - **Do not merge** a PR with no `VERDICT: APPROVED`, one whose checks are red
   or still running, one the owner
   asked to review, or one that deviates from a design doc, bumps `gdext` or
-  changes the save format. That is a NOT-SAFE ending (step 7), not a
-  judgement call to make on the way out.
+  changes the save format. A missing verdict is not an ending at all — launch
+  the reviewer, above. The rest are an approved PR left open on a named hold,
+  which is a red banner (step 7) rather than a judgement call to make on the
+  way out.
 - The lint ratchet counts **files**, not lines: new Rust almost always needs
   `cargo fmt -p <crate>` before CI goes green.
 

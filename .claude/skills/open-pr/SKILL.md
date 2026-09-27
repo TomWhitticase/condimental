@@ -139,9 +139,10 @@ as in a ticketed epic.
 **Do not merge** a PR with no `VERDICT: APPROVED`, one whose checks are red or
 still running, one the owner asked to review, or one that deviates from a
 design doc, bumps `gdext`, or changes the save format. Leave **an approved
-one** open, give the URL, and say what it waits on. The other two are not
-"leave it open": a missing verdict means step 5 is not finished — launch the
-reviewer — and `CHANGES REQUESTED` means rework, per the paragraph above.
+one** open, give the URL, and say what it waits on. Neither of the other two
+verdict states is a "leave it open": no verdict means step 5 is not finished —
+launch the reviewer — and `CHANGES REQUESTED` means rework, per the paragraph
+above.
 
 ## Afterwards
 

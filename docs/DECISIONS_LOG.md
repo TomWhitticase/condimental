@@ -24,10 +24,11 @@ See [WORKFLOW.md](WORKFLOW.md).
   `VERDICT:` yet commissions the reviewer instead of stopping, and waits for
   the verdict before ending the session, because the subagent does not
   outlive it. It commissions one even when the merge cannot happen: when the
-  task forbids the author merging (an Orca worker's coordinator merges), or
-  the change also needs the owner (a PR the owner asked to review, a
-  design-doc deviation, a `gdext` bump, a save-format change), the PR ends up
-  open *with* its verdict, naming the hold. Those held PRs, one handed over
+  checks are not green, when the task forbids the author merging (an Orca
+  worker's coordinator merges), or the change also needs the owner (a PR the
+  owner asked to review, a design-doc deviation, a `gdext` bump, a
+  save-format change), the PR ends up open *with* its verdict, naming the
+  hold. Those held PRs, one handed over
   with its latest verdict named, and one for which no subagent could be
   launched are the only PRs that may end a session open — a `CHANGES
   REQUESTED` verdict is work still in hand, not a way to close. Binds
