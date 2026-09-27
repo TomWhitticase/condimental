@@ -4679,11 +4679,11 @@ const WARNING_MARKER_SCALE := 0.75
 const WARNING_MARKER_BOB_TICKS := 48
 const WARNING_MARKER_BOB := 0.08 * TILE
 var _world_warnings: Dictionary = {} # caller's key -> Node3D, one marker each
-## The same door's second asset: a red person over a machine standing idle
-## for want of its crew (the sim's `understaffed`), raised from
+## The same door's second asset: a red person over a machine throttled or
+## stopped for want of its crew (the sim's `understaffed`), raised from
 ## `_poll_machine_load` under `"machine:x,y"`. Red, not amber, because the
-## machine has STOPPED; a person, not a "!", because the fix is a hire. Its
-## hover says "short of <category> staff" in words (UI_UX §7).
+## machine is losing output to it; a person, not a "!", because the fix is a
+## hire. Its hover says "short of <category> staff" in words (UI_UX §7).
 const UNDERSTAFFED_MARKER_ASSET := "understaffed_marker"
 ## How far above a machine's own highest voxel its marker's feet float. A
 ## dock's anchor is its deck and WARNING_MARKER_LIFT clears its roof; a
