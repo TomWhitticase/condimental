@@ -112,6 +112,18 @@ verdict. On `CHANGES REQUESTED`, fix the branch and launch a fresh reviewer
 with the same bare prompt. If no reviewer can be launched, give the URL, say
 the PR is waiting on review, and stop.
 
+**The review always runs; some cases hold only the merge.** Launch the
+reviewer even when the task told you not to merge (an Orca worker's
+coordinator merges), and even when a rule below says the owner decides too.
+Wait for its verdict before you finish: the subagent belongs to your session,
+so ending early either kills the review or lands the verdict with nobody left
+to act on it. On `APPROVED`, merge unless one of those holds applies — if one
+does, leave the PR open with its URL, its verdict, and what the merge is still
+waiting on. `CHANGES REQUESTED` is work still in hand, not a reason to leave:
+do the rework and the re-review above, or hand the PR over explicitly, naming
+the latest verdict. Relaunching reviewers on unchanged code until one approves
+is shopping for a verdict, not a review.
+
 ```
 gh pr checks <N> --watch
 gh pr view <N> --json reviews,comments --jq '[(.reviews[]|{t:.submittedAt,b:.body}),(.comments[]|{t:.createdAt,b:.body})]|sort_by(.t)|map(.b|split("\n")[0]|select(startswith("VERDICT:")))|last // "NO VERDICT"'
@@ -124,10 +136,13 @@ the change, so it must pass the same lint (`scripts/lint-commit-msg.sh`). Keep
 a real merge commit only when each commit is a reviewed unit in its own right,
 as in a ticketed epic.
 
-**Do not merge** a PR with no `VERDICT: APPROVED`, one whose checks are red
-or still running, one the owner
-asked to review, or one that deviates from a design doc, bumps `gdext`, or
-changes the save format. Say it is ready, give the URL, and stop.
+**Do not merge** a PR with no `VERDICT: APPROVED`, one whose checks are red or
+still running, one the owner asked to review, or one that deviates from a
+design doc, bumps `gdext`, or changes the save format. Leave **an approved
+one** open, give the URL, and say what it waits on. Neither of the other two
+verdict states is a "leave it open": no verdict means step 5 is not finished —
+launch the reviewer — and `CHANGES REQUESTED` means rework, per the paragraph
+above.
 
 ## Afterwards
 

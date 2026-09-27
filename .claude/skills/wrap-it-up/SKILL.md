@@ -61,19 +61,24 @@ Run the full gate once, here, rather than repeatedly during the session.
 Follow the `open-pr` skill — it is the authority, and the hooks and CI enforce
 it. The wrap-up-specific parts:
 
-- **Every PR opened in this session is merged or explicitly handed over before
-  the session ends.** An open PR is unfinished work; an open PR whose worktree
-  has been deleted is unfinished work nobody can finish.
+- **Every PR opened in this session is merged, explicitly handed over, or left
+  open for one of the reasons below, before the session ends.** An open PR is
+  unfinished work; an open PR whose worktree has been deleted is unfinished
+  work nobody can finish.
 - **A PR merges on a review verdict, and you cannot write your own.** A PR is
   reviewed adversarially by a reviewer that does not share your context
   (`docs/WORKFLOW.md`, and the `review` skill): launch a fresh subagent given
   only the PR number and the `review` skill, and merge on its
   `VERDICT: APPROVED`. You cannot supply that verdict yourself, however
   carefully you re-run your own tests, and neither can a subagent you briefed
-  with your reasoning. If no reviewer can be launched, **a PR of yours
-  awaiting review is the one legitimate way to end with a PR still open**.
-  Push it, say what it is waiting on, and do not merge it to tidy the session
-  up.
+  with your reasoning. **Wait for that verdict before you close**: the subagent
+  dies with the session. So **a PR of yours ends the session open only if it is
+  approved and its merge is held (by checks not yet green, by the task, or by
+  the owner), or it is explicitly handed over with its latest verdict named, or
+  no reviewer could be launched at all.** A `CHANGES REQUESTED` verdict is work
+  still in hand: fix it and get a fresh re-review, or hand the PR over saying
+  so. For an approved PR left open, say which hold applies. Do not merge it to
+  tidy the session up.
 - **Check mergeability before waiting on checks.** A PR with conflicts gets no
   CI run at all, so `--watch` waits forever on nothing:
 
@@ -88,8 +93,11 @@ it. The wrap-up-specific parts:
 - **Do not merge** a PR with no `VERDICT: APPROVED`, one whose checks are red
   or still running, one the owner
   asked to review, or one that deviates from a design doc, bumps `gdext` or
-  changes the save format. That is a NOT-SAFE ending (step 7), not a
-  judgement call to make on the way out.
+  changes the save format. A missing verdict is not an ending at all — launch
+  the reviewer, above — and `CHANGES REQUESTED` is rework, also above. The
+  red checks and the four sign-off cases leave an *approved* PR open on a
+  named hold, which is a red banner (step 7) rather than a judgement call to
+  make on the way out.
 - The lint ratchet counts **files**, not lines: new Rust almost always needs
   `cargo fmt -p <crate>` before CI goes green.
 
@@ -181,8 +189,9 @@ numbers filed and why they were not fixed, and the exact worktree-removal
 command. Under the red one, add what is unfinished, where it is (branch,
 file, PR), the next concrete step, and — separately and in as many words —
 **whether the tree can still be deleted safely**. "PR #162 is pushed and
-waiting on review; the worktree can go, the work cannot be lost" is a red
-banner with a clean tree, and saying only one half of that misleads.
+approved, its merge held for the owner; the worktree can go, the work cannot
+be lost" is a red banner with a clean tree, and saying only one half of that
+misleads.
 
 **Never print the green banner with work outstanding.** The banner is a
 promise; a wrong one costs someone their work, or merges something nobody

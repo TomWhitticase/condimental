@@ -18,6 +18,23 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-26 **The review always runs; only the merge is ever held.** An
+  amendment to the entry below, stated after PR #193 ended a session open
+  and "waiting on review" that nobody had been asked for. An author with no
+  `VERDICT:` yet commissions the reviewer instead of stopping, and waits for
+  the verdict before ending the session, because the subagent does not
+  outlive it. It commissions one even when the merge cannot happen: when the
+  checks are not green, when the task forbids the author merging (an Orca
+  worker's coordinator merges), or when the change also needs the owner (a PR
+  the owner asked to review, a design-doc deviation, a `gdext` bump, a
+  save-format change), the PR ends up open *with* its verdict, naming the
+  hold. Those held PRs, one handed over
+  with its latest verdict named, and one for which no subagent could be
+  launched are the only PRs that may end a session open — a `CHANGES
+  REQUESTED` verdict is work still in hand, not a way to close. Binds
+  `CLAUDE.md`, `docs/WORKFLOW.md` and the `open-pr` and `wrap-it-up` skills.
+  Recorded in the same `docs/DECISIONS.md` record as the entry below.
+
 - 2026-09-26 **A PR's reviewer must not share its author's context; it need
   not be another session.** The merge still gates on green checks plus a
   `VERDICT: APPROVED` review, but the reviewer is now typically a fresh
@@ -222,9 +239,12 @@ See [WORKFLOW.md](WORKFLOW.md).
   review. This replaces the old WORKFLOW.md wording that let authors merge
   their own routine work unreviewed. Binds `CLAUDE.md`, `docs/WORKFLOW.md`,
   `.githooks/pre-push` and the `open-pr` and `wrap-it-up` skills. Full record in `docs/DECISIONS.md`.
-  **Amended 2026-09-26:** the reviewer need not be another session, only one
-  that does not share the author's context — typically a fresh subagent given
-  just the PR number (see that entry above).
+  **Amended 2026-09-26** (see that entry above), in both halves: the reviewer
+  need not be another session, only one that does not share the author's
+  context — typically a fresh subagent given just the PR number — and with
+  no verdict the author commissions that review rather than stopping.
+  Stopping with the PR open is now the fallback for when no reviewer can be
+  launched at all, not the answer to a missing verdict.
 - 2026-09-25 **The review render's clock is PINNED, so the same command twice
   is the same picture.** `scripts/screenshot-scene.sh` passes Godot's own
   `--fixed-fps 60`; `_advance_simulation` is untouched, so the tick loop a
@@ -1032,6 +1052,8 @@ See [WORKFLOW.md](WORKFLOW.md).
   which is a judgement call and only warns. Do not merge a PR that is red,
   still running, requested for review, or that deviates from a design doc,
   bumps `gdext` or changes the save format — say it is ready and stop.
+  *(Amended 2026-09-26: the review still runs in those cases; only the merge
+  stops — see the entry at the top of this log.)*
   **Deciding something is out of scope is only half the decision; filing it is
   the other half** *(the bar was raised on 2026-09-21 — see the entry at the
   top of this log)*: `gh issue create --label deferred`, with file *and*
@@ -1049,7 +1071,7 @@ See [WORKFLOW.md](WORKFLOW.md).
   `@`-included the three design docs and carried this log plus a per-file
   project structure, so every single request paid for ~2,000 lines
   (~34,500 tokens) whether or not any of it applied. An `@`-include is
-  inlining. The root file is now 72 lines: the project in a sentence, the
+  inlining. The root file was cut to 72 lines: the project in a sentence, the
   rules that genuinely always apply, a directory-level layout, and a table
   from "what you are working on" to "which doc to read". This log, the
   workflow material and the design docs are **linked, not included**;

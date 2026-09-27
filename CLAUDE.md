@@ -37,9 +37,11 @@ empty, and the player buys and places every tile.
   context: launch a fresh subagent given only the PR number and the `review`
   skill, never your reasoning or a summary of the change (a session that did
   not write the branch also qualifies). "Make a PR and merge it" means run
-  that review, then merge on its verdict. On `CHANGES REQUESTED`, fix and
-  send a fresh reviewer; if none can be launched, leave the PR open and say
-  it is waiting on review.
+  that review, then merge on its verdict. The review always runs: a task that
+  forbids you merging (an Orca worker's coordinator merges) or a change that
+  also waits on the owner holds only the *merge*. On `CHANGES REQUESTED`, fix
+  and send a fresh reviewer; if none can be launched, leave the PR open and
+  say it is waiting on review.
 - **Every PR body shows the change in a screenshot** — render with
   `scripts/screenshot-scene.sh`, read it, publish with
   `scripts/pr-screenshot.sh`, paste its markdown. A hook and CI both refuse a

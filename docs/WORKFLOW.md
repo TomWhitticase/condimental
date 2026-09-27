@@ -241,8 +241,10 @@ image, one with a `raw.githubusercontent.com` link, or one linking a file that
 does not exist.
 
 Then **get it reviewed, and land it** — an open PR is unfinished work until it
-merges, and the one legitimate reason to leave it open is that it is waiting
-on a reviewer's verdict (below):
+merges. It is left open only when it is approved and its merge is held (by
+checks not yet green, by the task, or by the owner, below), when it is handed
+over explicitly with its latest verdict named, or when no reviewer could be
+launched at all:
 
 ```
 gh pr checks <N> --watch      # commitlint must pass; a red PR is not done
@@ -267,12 +269,18 @@ merges only once it has a `VERDICT: APPROVED` comment from a reviewer that
 does not share the author's context (below), and its checks are green. An
 instruction to "open a PR and merge it" means that: get the review, then
 merge on its verdict. PR #163 is why this is spelled out. It merged on green
-CI under the
-old wording ("merging your own work unreviewed is fine for routine
-changes"), and its review could only happen afterwards, with the code
+CI under the old wording ("merging your own work unreviewed is fine for
+routine changes"), and its review could only happen afterwards, with the code
 already on `main`. A deviation from the design docs, a `gdext` bump, a
 save-format change, or anything the owner flagged also waits for the owner,
 on top of the review.
+
+**The review always runs; some cases hold only the merge.** Commission it
+even when the task forbids you merging (an Orca worker whose coordinator
+merges) or the owner has to sign off as well. The PR then ends up open *with*
+its verdict, naming what the merge is still waiting on — so no PR sits
+waiting on a review nobody was asked for, as #193 did until the owner said so
+(2026-09-26).
 
 **A PR is reviewed adversarially, by a reviewer that does not share the
 author's context.** What makes a review independent is not which session runs
@@ -394,12 +402,13 @@ issue is the right home only for work that is not being done yet.
 ### Closing out a session
 
 A session ends when its worktree could be deleted without losing anything —
-not when the last edit is made. Every branch has reached `main` through a
-merged pull request, nothing is uncommitted, unpushed or left in the shared
-stash, and no pull request this session opened is still open.
+not when the last edit is made. Nothing is uncommitted, unpushed or left in
+the shared stash, and every branch has reached `main` through a merged pull
+request — or is pushed, with its pull request open for one of the reasons
+below.
 
 The `wrap-it-up` skill is the procedure, including the sweep that proves it
-and the banner that reports it. Two rules it exists to enforce:
+and the banner that reports it. Three rules it exists to enforce:
 
 - **Being near the end of a session is not a reason to file an issue.** The
   gate above is unchanged at the close: finish it, drop it deliberately, or —
@@ -407,11 +416,15 @@ and the banner that reports it. Two rules it exists to enforce:
 - **A branch left behind in a worktree about to be removed is deleted work.**
   If it genuinely cannot land, say so plainly and leave the worktree in place;
   do not report a clean close over the top of it.
-- **A PR of your own waiting on its review verdict is the one legitimate way
-  to end with a PR open.** You cannot review what you wrote, but you can
-  launch a context-free reviewer subagent for it (above). If that is not
-  possible, pushing it and naming what it waits on is finishing your half;
-  merging it unreviewed to tidy up is not.
+- **A PR of yours ends the session open only if it is approved and its merge
+  is held (by checks not yet green, by the task, or by the owner), or it is
+  explicitly handed over with its latest verdict named, or no reviewer could
+  be launched at all.** You cannot review what you wrote, but you can launch a
+  context-free reviewer subagent for it (above) — and you must wait for its
+  verdict before you close, because the subagent does not outlive the session.
+  A `CHANGES REQUESTED` verdict is work still in hand: fix it and get a fresh
+  re-review, or hand the PR over saying so. Then name what the merge waits on;
+  merging it unreviewed to tidy up is never finishing it.
 
 ## Orchestration (Orca)
 

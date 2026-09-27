@@ -56,11 +56,39 @@ matches what code comments and data files cite.
   reviewer with the same bare prompt. Everything else in the 2026-09-25 rule
   stands: review before merge, no routine exemption, and green checks.
 
+  **The case it came from.** PR #193 was an Orca worker's ticket (the P
+  screen's pay cycle). Its checks went green, no verdict arrived, and the
+  session closed correctly under the 2026-09-25 wording, leaving the PR open
+  and "waiting on review" — but nobody had been asked to review it, so it had
+  nothing to wait on. The owner's instruction was: *"use a subagent to do the
+  review, and update claudemd or whatever so in future no agent gets stuck on
+  this, they get a subagent to do the review rather than stop"*.
+
+  **The review always runs; some cases hold only the merge.** The merge is
+  held when the checks are not green, when the task forbids the author merging
+  (an Orca worker's coordinator merges), or when the change needs the owner as
+  well: a PR the owner asked to review, a design-doc deviation, a `gdext`
+  bump, a save-format change. The review happens anyway, and the PR then stays
+  open *with* its verdict, naming the hold. #193 was an example of two of them
+  at once — an Orca ticket and a save-schema bump — and still needed
+  reviewing. The one case with no review
+  at all is that no subagent can be launched. The author also waits for the
+  verdict before ending the session, because the subagent is part of that
+  session and does not outlive it. A `CHANGES REQUESTED` verdict is work still
+  in hand, not a way to end one: fix it and get a fresh re-review, or hand the
+  PR over explicitly, naming that latest verdict.
+
   **What was rejected.** Letting the author review its own work "carefully"
   was rejected for the same reason the routine-change exemption was: the
   judgement being checked is the author's. Keeping the other-session
   requirement was rejected because it added waiting without adding
-  independence.
+  independence. Three readings of the commissioning half were rejected as it
+  was written down: that an owner hold or a no-merge task excuses the review
+  as well as the merge, which would have left #193 exactly where it was; that
+  the author may close the session once the reviewer is launched, when the
+  subagent dies with it; and that `CHANGES REQUESTED` may be answered by
+  relaunching fresh reviewers until one approves — a fresh re-review is of the
+  *rework*, never a second opinion on the same code.
 
 - 2026-09-26: **A new game starts with no contract.** (Owner's call;
   supersedes call (1)'s "at least one offer must be a `starter`" in the
@@ -718,7 +746,10 @@ matches what code comments and data files cite.
   from it. An instruction to merge is read as "merge once reviewed". If no
   reviewer is available, the author stops with the PR open. `wrap-it-up`
   already treats that as the one legitimate way to end a session with a PR
-  still open.
+  still open. *(Also amended by that 2026-09-26 entry: the author commissions
+  the review rather than stopping, so an open PR must be approved with its
+  merge held, handed over with its latest verdict named, or unreviewable for
+  want of a subagent.)*
 
   **What was rejected.** Keeping the routine-change exemption was rejected.
   Whether a change counts as "routine" is judged by its author, which is
@@ -3729,7 +3760,9 @@ matches what code comments and data files cite.
   epic. **Self-merging is allowed for routine work and refused for four
   cases**: red or still-running checks, a PR the owner asked to review,
   anything the design docs call a deviation, and a `gdext` bump or save-format
-  change. The agent says it is ready, gives the URL, and stops.
+  change. The agent says it is ready, gives the URL, and stops. *(Amended
+  2026-09-26: the review itself never stops — a PR with no verdict gets a
+  subagent reviewer, and only the merge waits. See the top of Part A.)*
 
   `.github/pull_request_template.md` asks for what a review here actually
   needs, which is not "what changed" — the diff says that — but **what was run
@@ -3810,7 +3843,8 @@ matches what code comments and data files cite.
 
   The restructure, following the video's own prescriptions:
 
-  - **`CLAUDE.md` is 72 lines / ~950 tokens** (a 97% cut). It holds the
+  - **`CLAUDE.md` was cut to 72 lines / ~950 tokens** (a 97% cut; it grows a
+    little as rules are added — 98 lines on 2026-09-27). It holds the
     project in a sentence, the rules that genuinely always apply — Rust owns
     gameplay logic, content is data, no floats in sim state, follow the
     design docs, small increments, plan mode, text scenes, Conventional
