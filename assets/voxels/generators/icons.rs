@@ -33,9 +33,9 @@
 //!      uses a near-black colour in its *interior* (none do today; see
 //!      `palette.ron`) can't be falsely keyed out just for being dark.
 //!   3. Crop to the remaining opaque content's bounding box, downscale onto
-//!      a square `ICON_SIZE` (or `APP_ICON_SIZE`) canvas centered with a small margin. Rendering
-//!      larger than the final size and downscaling is what keeps isometric
-//!      cube edges from looking jagged at icon size.
+//!      a square `ICON_SIZE` (or `APP_ICON_SIZE`) canvas centered with a
+//!      small margin. Rendering larger than the final size and downscaling
+//!      is what keeps isometric cube edges from looking jagged at icon size.
 //!
 //! Like preview rendering, this needs `vengi-thumbnailer` installed — see
 //! `scripts/build-voxels.sh`'s header for how to get it. Unlike the
@@ -63,8 +63,12 @@ const CROP_MARGIN_FRAC: f32 = 0.06;
 /// The model the desktop app icon (`config/icon` in `project.godot`) is
 /// rendered from: the ketchup bottle, the game's first finished product.
 const APP_ICON_MODEL: &str = "item_bottle";
-/// The window/dock icon is shown far larger than a UI slot, so it gets its
-/// own bigger render rather than an upscale of the 64px icon.
+/// The window/dock icon is shown far larger than a UI slot, so it is keyed
+/// and downscaled from its own render instead of upscaling the finished 64px
+/// icon, which is visibly muddier. The render adds no detail over 256px:
+/// vengi rasterises `--image` at a fixed internal size and resamples to
+/// `-s` (a 256px render upscaled to 1024 differs from a native 1024 one by
+/// ~0.1/255). 1024 just keeps the resample above the output size.
 const APP_ICON_RENDER_SIZE: u32 = 1024;
 const APP_ICON_SIZE: u32 = 512;
 
