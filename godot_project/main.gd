@@ -4983,8 +4983,7 @@ func _poll_machine_load() -> void:
 		# every tick, so a short machine is handed its crew on any tick an
 		# upstream one claims nothing, and the stall blinks while the
 		# machine stays short; `understaffed` holds (short on the
-		# establishment, refused its crew within the last load window, and
-		# nothing on its own supply side holding it up).
+		# establishment and refused its crew within the last load window).
 		if _machine_marker_anchors.has(key):
 			_set_world_warning(
 				"machine:" + key, _machine_marker_anchors[key],
@@ -10252,9 +10251,10 @@ func _staff_move_head(index: int, verb: String) -> void:
 		"category": id,
 	}))
 	_poll_staff()
-	# A hire or a fire moves `understaffed` with no tick: re-read now, so
-	# the red person over a machine goes (or comes) with the click, not up
-	# to LOAD_POLL_TICKS later.
+	# A hire moves `understaffed` with no tick: re-read now, so the red
+	# person over a machine goes with the click, not up to LOAD_POLL_TICKS
+	# later. A fire raises it only once the short machine is actually
+	# refused its crew, which is the next tick it asks for one.
 	_poll_machine_load()
 	_update_staff_panel()
 	var after := _headcount_of(id)
