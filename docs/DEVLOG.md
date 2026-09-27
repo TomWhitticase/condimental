@@ -245,6 +245,23 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-26 — Seven owner patches: an empty start, a split board, a searchable shop
+
+One batch of small owner requests, each its own reviewed PR. A new game now
+signs no contract: every offer is bought from the board, like every tile
+(#194, reversing the 2026-09-10 starter rule). **C** opens a two-column
+board, the running dockets on the left and the offers on the right (#195).
+The build menu is sectioned by category with a search box, and is the one
+panel allowed to scroll at 1600x900 (#196). A tab beside the hotbar names
+the current build mode (#190). A machine the staff pools refused its crew
+wears a red person, decided in the sim as `understaffed` and gated on a real
+recent refusal so it does not blink (#192). The P screen's pay-cycle block
+is below (#193), and both crusher rolls are grey (#189). #192's saved
+`refusal_hold` rides #193's schema 4 bump. GitHub Actions was blocked by
+account billing for the whole batch, so each PR merged by admin override at
+its reviewed tip, after `verify-core-loop.sh` passed locally for the author,
+the reviewer, and once more on the combined `main`.
+
 ### 2026-09-26 — The P screen weighs output against the pay cycle's orders
 
 The production screen (P) opens on a pay-cycle block: one row per product an
