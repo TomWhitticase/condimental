@@ -1,7 +1,9 @@
 //! `cargo run -p voxgen --bin voxicons` — renders a small, UI-appropriate
 //! icon PNG for every combined voxel model in `assets/voxels/models/`,
 //! written to `assets/voxels/icons/` (UI_UX.md §5: "icons are rendered from
-//! the real assets ... not separately-drawn 2D icon art").
+//! the real assets ... not separately-drawn 2D icon art"). It also renders
+//! `APP_ICON_MODEL` a second time, larger, as `app_icon.png`: the 512px
+//! window/dock icon `project.godot`'s `config/icon` points at.
 //!
 //! **Why this isn't just `assets/voxels/previews/`, reused as-is (a real
 //! open question this binary resolves by checking, not assuming — see
@@ -31,7 +33,7 @@
 //!      uses a near-black colour in its *interior* (none do today; see
 //!      `palette.ron`) can't be falsely keyed out just for being dark.
 //!   3. Crop to the remaining opaque content's bounding box, downscale onto
-//!      a square `ICON_SIZE` canvas centered with a small margin. Rendering
+//!      a square `ICON_SIZE` (or `APP_ICON_SIZE`) canvas centered with a small margin. Rendering
 //!      larger than the final size and downscaling is what keeps isometric
 //!      cube edges from looking jagged at icon size.
 //!
@@ -56,7 +58,7 @@ const RENDER_SIZE: u32 = 256;
 /// full-scene review render.
 const ICON_SIZE: u32 = 64;
 /// A small breathing margin around the model's content, as a fraction of
-/// `ICON_SIZE`, so the icon doesn't touch its own edges.
+/// the output size, so the icon doesn't touch its own edges.
 const CROP_MARGIN_FRAC: f32 = 0.06;
 /// The model the desktop app icon (`config/icon` in `project.godot`) is
 /// rendered from: the ketchup bottle, the game's first finished product.
@@ -197,7 +199,10 @@ fn main() {
         &app_icon_path,
     );
     match app_icon {
-        Ok(()) => println!("  {}", app_icon_path.display()),
+        Ok(()) => {
+            println!("  {}", app_icon_path.display());
+            written += 1;
+        }
         Err(e) => {
             eprintln!("  FAIL app_icon ({e})");
             failures += 1;
