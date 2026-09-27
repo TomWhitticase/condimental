@@ -293,7 +293,9 @@ reviewer to distrust it. A separate session that did not write the branch is
 just as good. What never counts is the author reviewing its own work, however
 carefully it re-runs its tests, or a subagent briefed with the author's
 reasoning. On `CHANGES REQUESTED`, fix the branch and send a fresh subagent
-the same bare prompt for the re-review.
+the same bare prompt for the re-review. A subagent also loads the auto-memory
+index, so do not write memory about the PR under review before its verdict
+is in; that briefs the reviewer by the back door.
 
 The reviewer builds the branch in its own worktree, re-runs the reproduction
 of every issue the PR claims to close, and reverts each fix in turn to prove

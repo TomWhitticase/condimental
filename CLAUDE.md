@@ -35,7 +35,8 @@ empty, and the player buys and places every tile.
 - **No PR merges before it is reviewed.** It needs green checks AND a
   `VERDICT: APPROVED` from a reviewer that does not share the author's
   context: launch a fresh subagent given only the PR number and the `review`
-  skill, never your reasoning or a summary of the change. "Make a PR and
+  skill, never your reasoning or a summary of the change (a session that did
+  not write the branch also qualifies). "Make a PR and
   merge it" means run that review, then merge on its verdict. On
   `CHANGES REQUESTED`, fix and send a fresh reviewer; if none can be
   launched, leave the PR open and say it is waiting on review.
