@@ -116,14 +116,24 @@ matches what code comments and data files cite.
   the file-order-is-tier-order claim in this record true in the one case
   where two thresholds are comparable at all.
 
-  **A cross-file check is a test here, not a construction-time panic**, and
-  this record said the opposite in its first two drafts. `validate_covers` is
-  called only from `mod tests`, which runs it against the shipped files, so a
-  gate nobody could open fails `cargo test` rather than a player's boot —
-  exactly the arrangement the 2026-09-08 chain-rework record set for
+  **This cross-file check is a test, not a construction-time panic**, and this
+  record said the opposite in its first two drafts. `UnlockRegistry::
+  validate_covers` is called only from `mod tests`, which runs it against the
+  shipped files, so a gate nobody could open fails `cargo test` rather than a
+  player's boot — the arrangement the 2026-09-08 chain-rework record set for
   `IngredientCatalog::validate_covers` ("a **test**, not a construction-time
-  panic") and the 2026-09-08 contracts record set for the contracts-vs-recipes
-  cross-check. The reason is the same one those give: `bundled()` panicking on
+  panic"), and the one `ShopCatalog::validate_covers` uses too.
+
+  It is **not** a house-wide rule, and the line is worth naming because the
+  crate holds a counter-example: `MachineCatalog::validate_covers` *does* panic
+  at world construction (`world.rs`, beside `validate_chain`). The difference
+  is what the failure leaves behind. A machine kind with no footprint is a
+  world the sim cannot lay out or tick — incoherent, so it must not be built.
+  A gate naming an id nothing defines leaves the world perfectly coherent; it
+  simply holds nothing back, which no amount of ticking will reveal. That is
+  also why it is the more dangerous of the two in play and the less dangerous
+  at construction. The reason for keeping it out of `bundled()` is the one the
+  2026-09-08 records give: `bundled()` panicking on
   a cross-file check would take down every test that builds a world from
   fabricated content, and the shipped files are checked once in CI rather than
   on every boot. The cost is honest and worth writing down — an

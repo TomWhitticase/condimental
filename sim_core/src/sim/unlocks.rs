@@ -524,10 +524,10 @@ impl UnlockRegistry {
             .is_none_or(|gate| gate.is_open(sold))
     }
 
-    /// Every gate that is open at `deliveries` and was not at `before`, in
-    /// file order — what an announcement announces.
+    /// Every gate that is open against the ledger `after` and was not against
+    /// `before`, in file order — what an announcement announces.
     ///
-    /// Takes both counts rather than "the ones that opened this tick"
+    /// Takes both ledgers rather than "the ones that opened this tick"
     /// because presentation polls rather than subscribing: Godot diffs the
     /// unlocked set it last drew against the one it just read, exactly as
     /// it diffs the active-contract list to announce a signature or a loss.
@@ -1134,7 +1134,8 @@ mod tests {
             )
             .expect_err(
                 "a gate on a product no contract ever orders can never open — the ledger \
-                 is fed only by a paid window's mix, so this has to be refused at load",
+                 is fed only by a paid window's mix, so `validate_covers` has to refuse \
+                 it (this check is the test suite's, not the loader's)",
             );
         assert!(
             matches!(
@@ -1165,7 +1166,8 @@ mod tests {
             )
             .expect_err(
                 "a later gate that is cheaper than an earlier one on the SAME product \
-                 makes file order stop being tier order — it has to be refused at load",
+                 makes file order stop being tier order — `validate_covers` has to \
+                 refuse it (this check is the test suite's, not the loader's)",
             );
         assert!(
             matches!(

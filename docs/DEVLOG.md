@@ -318,6 +318,14 @@ so at 44-50 it mostly does not fire any more — by side
 effect, not by design, and #92/#93 are still the right fixes. Full record:
 `docs/DECISIONS.md`, 2026-09-26.
 
+**One thing is left for the owner.** GAMEPLAY §2's tier table now has the
+mustard row it never got, with every cell filled from the content or the
+measurement — except the tier *number*, which reads `?`. Mustard is a
+recipe-complexity peer of BBQ (no new machine, no new handling axis, one more
+recipe on the line that exists), so it is either a second tier 3 beside BBQ or
+a renumber that pushes mayonnaise, hot sauce and the aged sauces down one. No
+code reads the column.
+
 ### 2026-09-26 — Open-source licence and alpha-release groundwork
 
 CONDIMENTAL has a licence: **GPL-3.0-only** plus a §7 linking exception for

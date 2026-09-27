@@ -46,6 +46,7 @@ Concrete example tiers, in the order the user's original pitch laid them out. Ex
 | 1 | Tomato sauce | Tomatoes, salt | Basic cooker/kettle | Baseline: one process step, no special handling |
 | 2 | Ketchup | + vinegar, sugar, spices | Reduction/thickening step, bottling & sealing | First multi-step recipe: cook down, blend, bottle |
 | 3 | BBQ sauce — **shipped 2026-09-18**, and it needed **no new machine** | + spice mix, molasses, liquid smoke, and *finished ketchup* | None: a second recipe on the mixer and the cooking vat the ketchup line already owns | A 600-tick cook — the longest process in the game by 2.5x — bought the "low and slow" identity with a number instead of a machine. It is gated instead by output sold — a hundred boxes of ketchup (§9's progression-gates bullet) — which is this table's first gate that is neither of the two kinds below |
+| **?** — see below | Mustard — **shipped 2026-09-26**, and it needed **no new machine** either | + mustard seed, turmeric. **Not** vinegar: the ketchup mixer drinks that from tick 0, so the gate cannot hold it back (`data/unlocks.ron`) | None: the same crusher, mixer, cooking vat, bottler and packer. The novelty is a *wet mill*: `mustard_mash` takes 4 seed **and 2 vinegar** and sends a fluid mash out, where the crusher's only other recipe (`tomato_paste`) is solid in, solid out. That is placement, not new capital: `ketchup_mix` already drinks raw `vinegar` on the mixer, and a second mixer recipe drinking any raw fluid leaves a pipe run the narrowing pass cannot name — the shipped ketchup line would stall on `AmbiguousPipe` — so the crusher, which drank nothing, is where a raw fluid could still enter (`data/recipes.ron`) | A second tier that buys no capital, so like BBQ the only thing making it arrive later is a **progression gate**: 100 boxes of BBQ sold. Its cook sits between the two it follows (360 ticks against ketchup's 240 and BBQ's 600). Measured from a new game, the gate opens at tick 141 000 — ~78 min at 30 ticks/sec, 89 000 ticks after the BBQ gate at 52 000 — on a line that never runs dry, so that is a floor (`godot_project/measure_gate_ticks.gd`) |
 | 4 | Mayonnaise / aioli | Eggs, oil, acid | **Refrigeration** (cold storage + cold-chain handling) + emulsifier machine | Perishable-ingredient handling is a new *axis*, not just a harder recipe — eggs/oil spoil without cold storage upstream of the machine, not just in a warehouse |
 | 5 | Hot sauce | Chilies, vinegar (high concentration) | **Acid-handling equipment** (acid-resistant tanks/piping) + fermentation vessel for mash-based variants | High-acid ingredients corrode standard equipment; this tier is gated by a *material/durability* requirement, not just a recipe unlock |
 | 6 | Elaborate/aged sauces (fermented hot sauce, barrel-aged BBQ, whole-grain mustard, etc.) | Combines multiple tier 2–5 ingredient classes | Multiple equipment lines feeding one recipe, plus multi-stage `TimedProcess` chains (mash → ferment → strain → blend → age → bottle) lasting far longer than any earlier tier | The payoff tier: production chains that span the whole factory, not one station |
@@ -57,9 +58,21 @@ Two structurally different kinds of gate recur through this table, and both shou
 
 Tier 6 combines both: by then the player has every equipment category, and the remaining challenge is orchestrating long multi-stage chains across them.
 
-**A third kind of gate exists now, and tier 3 is the one that has it.** BBQ
-shipped as a recipe-complexity tier that buys nothing — its machines are the
-ones the ketchup line already has — so neither gate above could hold it back,
+**Mustard's tier number is an open owner decision, which is why the row above
+carries a `?`.** It is a recipe-complexity peer of BBQ — no new machine, no new
+handling axis, one more recipe on the line that already exists — so it is
+either a *second* tier 3 beside BBQ or a renumber that makes it tier 4 and
+pushes mayonnaise, hot sauce and the aged sauces to 5/6/7. Both readings are
+defensible and the choice changes what "tiers 1→3" means in the two bullets
+above, so the table records what mustard *is* and leaves the number to whoever
+owns the progression. Nothing in the code reads this number: gate order is
+`data/unlocks.ron`'s file order, and the only two thresholds the sim ever
+compares are two gates on the *same* product (`docs/DECISIONS.md`,
+2026-09-26). This column is design prose.
+
+**A third kind of gate exists now, and it is the one both shipped sauces above
+tier 2 use.** BBQ shipped as a recipe-complexity tier that buys nothing — its
+machines are the ones the ketchup line already has — so neither gate above could hold it back,
 and the game would have handed a new player the whole two-sauce board in their
 first minute. What gates it is a **progression gate**: a count of boxes of a
 named product SOLD that releases a group of ingredients and contracts
