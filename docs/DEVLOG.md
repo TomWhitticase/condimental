@@ -46,8 +46,9 @@ below is history and should only ever be appended to.)*
   BBQ cook against the vat's 240 splits it 3 ketchup to 2 BBQ. Two of the four
   new contracts name both sauces. **BBQ is gated now (2026-09-19):**
   `data/unlocks.ron` holds its three ingredients and four contracts back until
-  the tenth lifetime delivery, so a new game's market and board show only what
-  a one-sauce factory can use. See the log entries below.
+  **a hundred boxes of ketchup have been sold** (the trigger was ten lifetime
+  delivery windows until 2026-09-26), so a new game's market and board show
+  only what a one-sauce factory can use. See the log entries below.
 - **The game explains itself (2026-09-25).** **B** opens THE COOKBOOK: a
   sauce tree with a node per family in a column that says how far from raw it
   is, an arrow wherever one sauce is an ingredient in another, and a page
@@ -312,6 +313,87 @@ tick. **Save schema 4:** those counts cannot be re-derived, so a v3 save is
 refused by number rather than migrated (re-run `make-demo-saves.sh`). Review
 caught two Godot checks that could never fail and a test loop that hung
 instead of failing; both now go red under the mutation they guard (PR #193).
+### 2026-09-26 — A sauce is earned by selling the sauce before it
+
+The two progression gates count boxes now. `data/unlocks.ron` used to say
+`after_deliveries: 10`; it says `after_sold: (item: "boxed_ketchup",
+boxes: 100)`, and mustard says the same about `boxed_bbq`. "Sold" is a box
+delivered into a satisfied contract window — the dock being paid — tallied per
+item id in a saved ledger (`Economy::lifetime_boxes_sold`).
+
+The old trigger was lifetime satisfied delivery *windows*, and the reason to
+change it is that a window counted the same whether it carried one box or
+eight, of anything at all. It therefore did not measure output: it measured how
+many contract clocks happened to be ticking while the dock was stocked, so a
+player who signed three orders crossed the gate roughly three times faster than
+one with the starter order alone and the same factory — and mustard's gate could
+be satisfied entirely by ketchup. Counting boxes of a named product makes each
+tier depend on the line before it actually running, which is what the tier table
+in GAMEPLAY §2 always claimed.
+
+`lifetime_deliveries` still counts and is still shown; no gate reads it. A
+gate nobody can ever open is worse than a badly tuned one, so five mistakes
+are now refused — but in two different places, deliberately. A zero threshold
+is refused by the loader itself (`UnlockRegistry::from_ron_str`, so it is a
+startup panic); the four cross-file ones — an unknown item id, an item no
+recipe produces, an item no contract's `mix` orders, and two gates on one
+product whose thresholds fall — live in `validate_covers`, which only the test
+suite calls, against the shipped files. That split is the 2026-09-08 rule for
+`IngredientCatalog::validate_covers`, kept: a bad gate in `data/unlocks.ron`
+fails `cargo test`, and a world built from fabricated content in some other
+test is not dragged down with it. Tier order is `unlocks.ron`'s file order,
+since 100 boxes of ketchup and 100 boxes of BBQ are not comparable numbers. The wire publishes the
+product, the requirement and the count, so the padlock and the cookbook read
+"34 of 100 boxes of Boxed Ketchup" with the name resolved by Godot's existing
+display-name map and nothing about the rule written in GDScript.
+
+**Existing saves stop loading, deliberately.** `SaveData` gains
+`lifetime_boxes_sold` and the format goes to **version 5**; a v4 file is
+refused with a sentence saying what changed. The first cut of this branch
+tried one `#[serde(default)]` instead, and review found what that costs: gate
+state is derived from the ledger on every load, so an old save came back with
+both tiers re-locked, its gated raws unbuyable and a signed BBQ contract
+stranded mid-run. No release has ever written a save; the local demo saves
+are rebuilt by `scripts/make-demo-saves.sh`, as after any version move.
+
+**A v4 save can be carried over, just not by the loader.** A delivery window
+never recorded what was in it, so the ledger is not in a v4 file — but it can
+be *reconstructed* from one, and `scripts/migrate-save-v4-to-v5.py` does:
+every contract still on the books records how many windows it satisfied,
+`data/contracts.ron` records what a window ships, and the single entry in
+`contracts_lost` takes the windows `lifetime_deliveries` leaves unaccounted.
+The answer is then checked against a figure the save holds independently —
+each dock's `shipped_total` counts boxes that came off its belt, so boxes
+shipped must equal boxes sold plus boxes still standing on the docks. On a
+real 37 000-tick save that identity came out exact (193 = 158 + 35), which is
+what distinguishes a reconstruction from a grandfather clause. It stays a tool
+and does not become a loader path: it reads `data/contracts.ron` to do its job,
+so a rebalance changes its answer, and it degrades to a floor when more than
+one contract has been struck off. The loader still refuses, by number.
+
+**The gates are much later, and that is a flag rather than a tuning
+decision.** The numbers are the owner's. Measured headless at 30 ticks/sec:
+the first gate arrives at tick 52 000 (~29 min, 50 delivery windows) with
+`corner_shop` signed alone, tick 33 000 (~18 min, 44 windows) with three orders
+signed at tick 0 — where ten windows used to be a couple of minutes. A new game
+signs nothing for you, so 50 is the floor a real run pays. The second gate is
+measured from zero by `godot_project/measure_gate_ticks.gd` and lands at tick
+141 000 — 78 minutes, and 89 000 ticks (~49 min) after the BBQ gate opened at
+tick 52 000 — because the BBQ branch puts about 1.2 boxes per 1 000 ticks into
+paid windows against the ~4.5 the four BBQ orders ask for. The 2026-09-20
+measurement behind issue #55 found its trap stopped biting around 40 windows,
+so at 44-50 it mostly does not fire any more — by side
+effect, not by design, and #92/#93 are still the right fixes. Full record:
+`docs/DECISIONS.md`, 2026-09-26.
+
+**GAMEPLAY §2 gained the mustard row it never got**, every cell filled from
+the content or the measurement, and the tier number is **3 — a second one,
+beside BBQ**. By that table's own definition mustard is a recipe-complexity
+gate (no new machine, no new handling axis, one more recipe on a line that
+already exists), and renumbering it to 4 would have pushed mayonnaise, hot
+sauce and the aged sauces to 5/6/7 to record a sauce that introduces nothing
+new. A tier is a class of obstacle, so two sauces can share one. No code reads
+the column.
 
 ### 2026-09-26 — Open-source licence and alpha-release groundwork
 

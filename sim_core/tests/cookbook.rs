@@ -12,13 +12,14 @@
 //!   sugar at 3 and two vinegar at 2, found by walking five recipes back.
 //! - The five ketchup stages belong to Ketchup and not to BBQ, even though
 //!   BBQ's walk reaches all five of them.
-//! - BBQ is locked at 0 deliveries and readable at 10, although
-//!   `data/unlocks.ron` never mentions a recipe.
+//! - BBQ is locked until a hundred cases of ketchup have been sold and
+//!   readable after, although `data/unlocks.ron` never mentions a recipe.
 //!
 //! An empty world is enough, for `display_names.rs`'s reason — the book is
-//! content read back, not state — with the single exception of the delivery
-//! count, which is the only thing in the whole snapshot that moves.
+//! content read back, not state — with the single exception of the boxes-sold
+//! ledger, which is the only thing in the whole snapshot that moves.
 
+use sim_core::sim::unlocks::BoxesSold;
 use sim_core::sim::{CookbookInput, CookbookSnapshot, RecipeRegistry, World, cookbook};
 
 fn recipes() -> RecipeRegistry {
@@ -30,11 +31,15 @@ fn book() -> CookbookSnapshot {
     World::new(recipes()).cookbook()
 }
 
-/// The same book at a chosen delivery count. Reaching past `World` rather
-/// than driving an economy to ten deliveries: the padlock is a pure
-/// function of the number, and a test that shipped a thousand boxes to
-/// prove it would be testing the dock.
-fn book_after(deliveries: u32) -> CookbookSnapshot {
+/// The same book for a factory that has sold `ledger`. Reaching past `World`
+/// rather than driving an economy to a hundred boxes: the padlock is a pure
+/// function of the ledger, and a test that shipped a hundred cases to prove it
+/// would be testing the dock.
+fn book_after(ledger: &[(&str, u32)]) -> CookbookSnapshot {
+    let sold: BoxesSold = ledger
+        .iter()
+        .map(|(item, boxes)| ((*item).to_string(), *boxes))
+        .collect();
     let machines = sim_core::sim::MachineRegistry::bundled();
     let ingredients = sim_core::sim::IngredientCatalog::bundled();
     let contracts = sim_core::sim::ContractRegistry::bundled();
@@ -51,7 +56,7 @@ fn book_after(deliveries: u32) -> CookbookSnapshot {
         staff: &staff,
         unlocks: &unlocks,
         guide: &guide,
-        deliveries,
+        sold: &sold,
     })
 }
 
@@ -134,7 +139,7 @@ fn a_chain_this_test_invents_gets_its_own_tiers_with_no_rust_edit() {
         staff: &staff,
         unlocks: &unlocks,
         guide: &guide,
-        deliveries: 0,
+        sold: &BoxesSold::new(),
     });
 
     // No contract asks for dough, so it is rooted at the end of its own
@@ -252,24 +257,48 @@ fn a_machine_is_new_only_on_the_shallowest_sauce_that_uses_it() {
 /// `data/unlocks.ron` gates ingredient ids and contract ids and never once
 /// names a recipe — its header explains why at length. "BBQ is locked" is
 /// therefore something this module works out, and it has to stop being
-/// true at exactly the delivery the gate names.
+/// true at exactly the box the gate names.
 #[test]
 fn lockedness_is_derived_from_the_ingredient_gates_rather_than_declared() {
-    let shut = book_after(0);
+    // The gate's product and count come from the content; what this test
+    // pins is that the page reports them and flips on the last box.
+    let gate = sim_core::sim::UnlockRegistry::bundled()
+        .get("bbq_sauce")
+        .expect("the shipped BBQ gate")
+        .clone();
+    let item = gate.after_sold.item.as_str();
+    let boxes = gate.after_sold.boxes;
+
+    let shut = book_after(&[]);
     let bbq = sauce(&shut, "boxed_bbq");
     assert!(bbq.locked);
-    assert_eq!(bbq.gate.as_ref().map(|g| g.after_deliveries), Some(10));
+    assert_eq!(bbq.gate.as_ref().map(|g| g.required), Some(boxes));
+    assert_eq!(bbq.gate.as_ref().map(|g| g.item.as_str()), Some(item));
     assert_eq!(
         bbq.gate.as_ref().map(|g| g.name.as_str()),
         Some("BBQ Sauce")
     );
-    assert_eq!(bbq.gate.as_ref().map(|g| g.deliveries), Some(0));
+    assert_eq!(bbq.gate.as_ref().map(|g| g.sold), Some(0));
     assert!(!sauce(&shut, "boxed_ketchup").locked);
 
-    let nearly = book_after(9);
-    assert!(sauce(&nearly, "boxed_bbq").locked, "9 of 10 is still shut");
+    let nearly = book_after(&[(item, boxes - 1)]);
+    assert!(
+        sauce(&nearly, "boxed_bbq").locked,
+        "{} of {boxes} is still shut",
+        boxes - 1
+    );
+    assert_eq!(
+        sauce(&nearly, "boxed_bbq").gate.as_ref().map(|g| g.sold),
+        Some(boxes - 1),
+        "and the page carries the progress, so the padlock can show it"
+    );
+    let wrong = book_after(&[("boxed_mustard", boxes * 10)]);
+    assert!(
+        sauce(&wrong, "boxed_bbq").locked,
+        "boxes of another product are not this gate's"
+    );
 
-    let open = book_after(10);
+    let open = book_after(&[(item, boxes)]);
     assert!(!sauce(&open, "boxed_bbq").locked);
     assert!(
         open.sauces
@@ -372,10 +401,14 @@ fn every_bought_ingredient_has_a_page_saying_what_it_is_for() {
     let smoke = raw(&book, "liquid_smoke");
     assert!(smoke.fluid);
     assert!(smoke.locked);
-    assert_eq!(smoke.gate.as_ref().map(|g| g.after_deliveries), Some(10));
+    assert_eq!(
+        smoke.gate.as_ref().map(|g| (g.item.as_str(), g.required)),
+        Some(("boxed_ketchup", 100)),
+        "the BBQ tier's raws wait on cases of the tier below"
+    );
 
-    // Mustard's raws are solids, they belong to one sauce, and they are held
-    // back further than BBQ's — the gate is in `data/unlocks.ron` and the
+    // Mustard's raws are solids, they belong to one sauce, and they wait on a
+    // different product from BBQ's — the gate is in `data/unlocks.ron` and the
     // page only reports it. WHICH raws those are is derived from `used_in`,
     // not from a slice of the shelf: a raw that feeds nothing but mustard is
     // mustard's, whether it is the two shipped today or a third tomorrow.
@@ -401,9 +434,9 @@ fn every_bought_ingredient_has_a_page_saying_what_it_is_for() {
             page.id
         );
         assert_eq!(
-            page.gate.as_ref().map(|g| g.after_deliveries),
-            Some(25),
-            "'{}' is held back by a gate other than mustard_sauce's 25 deliveries",
+            page.gate.as_ref().map(|g| (g.item.as_str(), g.required)),
+            Some(("boxed_bbq", 100)),
+            "'{}' is held back by a gate other than mustard_sauce's hundred cases of BBQ",
             page.id
         );
     }
@@ -584,18 +617,31 @@ fn every_fact_the_guide_can_ask_for_is_answered_from_the_content_files() {
     );
     assert_eq!(fact("payday_ticks").kind, "ticks");
 
-    // The earliest gate in `data/unlocks.ron`, by the number it wants.
+    // The earliest gate in `data/unlocks.ron`, which is the first one in the
+    // file: two gates counting different products have no comparable numbers,
+    // so file order is the tier order (that file's header says so).
     let unlocks = sim_core::sim::UnlockRegistry::bundled();
     let first = unlocks
         .ordered()
-        .iter()
-        .min_by_key(|u| u.after_deliveries)
+        .first()
         .expect("the shipped game has a gate");
     assert_eq!(fact("first_gate_name").text, first.name);
     assert_eq!(fact("first_gate_name").kind, "text");
     assert_eq!(
-        fact("first_gate_deliveries").number,
-        f64::from(first.after_deliveries)
+        fact("first_gate_boxes").number,
+        f64::from(first.after_sold.boxes)
+    );
+    assert_eq!(fact("first_gate_boxes").kind, "count");
+    assert_eq!(
+        fact("first_gate_product").text,
+        first.after_sold.item,
+        "the product goes out as an ID — the panel titles it with the display-name \
+         map, which is the one place a name is written"
+    );
+    assert_eq!(
+        fact("first_gate_product").kind,
+        "kind_id",
+        "so the panel knows to look that id up rather than print it"
     );
 
     // The orders the board is showing a brand-new factory, which is neither
@@ -604,7 +650,7 @@ fn every_fact_the_guide_can_ask_for_is_answered_from_the_content_files() {
     let open_now = contracts
         .ordered()
         .iter()
-        .filter(|c| unlocks.contract_available(&c.id, 0))
+        .filter(|c| unlocks.contract_available(&c.id, &BoxesSold::new()))
         .count();
     assert_eq!(fact("open_contract_count").number, open_now as f64);
     assert!(
@@ -647,10 +693,23 @@ fn the_open_counts_follow_the_gates_and_the_file_counts_do_not() {
             .number
     };
 
-    let new_game = book_after(0);
+    let new_game = book_after(&[]);
     // Past every gate the shipped file holds, without driving a dock to get
-    // there, for `book_after`'s own reason.
-    let veteran = book_after(10_000);
+    // there, for `book_after`'s own reason. Every gate's product at ten times
+    // what it asks for, read from the file so a new tier cannot leave this
+    // fixture short.
+    let unlocks = sim_core::sim::UnlockRegistry::bundled();
+    let past_everything: Vec<(&str, u32)> = unlocks
+        .ordered()
+        .iter()
+        .map(|unlock| {
+            (
+                unlock.after_sold.item.as_str(),
+                unlock.after_sold.boxes * 10,
+            )
+        })
+        .collect::<Vec<_>>();
+    let veteran = book_after(&past_everything);
 
     assert_eq!(
         fact(&new_game, "raw_count"),

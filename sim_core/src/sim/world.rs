@@ -2437,20 +2437,19 @@ impl World {
     /// [`super::ingredients::ContentsChoice`] for why the market hides what
     /// the contents picker shows.
     pub fn ingredients_snapshot(&self) -> IngredientsSnapshot {
-        let deliveries = self.economy.lifetime_deliveries;
+        let sold = &self.economy.lifetime_boxes_sold;
         let bays = self.storage_bays();
         self.ingredients.snapshot(
             self.economy.money,
             &self.raw_items,
             self.raw_fluids.iter().cloned().collect(),
-            deliveries,
             |id| self.storage.cap_for(id, &self.ingredients.owned, bays),
             |id| {
                 self.economy
                     .unlocks()
                     .gate_for_ingredient(id)
-                    .filter(|gate| !gate.is_open(deliveries))
-                    .map(|gate| (gate.name.clone(), gate.after_deliveries))
+                    .filter(|gate| !gate.is_open(sold))
+                    .map(|gate| gate.progress(sold))
             },
         )
     }
@@ -2611,7 +2610,7 @@ impl World {
             staff: self.staff.catalog(),
             unlocks: self.economy.unlocks(),
             guide: &self.guide,
-            deliveries: self.economy.lifetime_deliveries,
+            sold: &self.economy.lifetime_boxes_sold,
         })
     }
 
@@ -2629,11 +2628,19 @@ impl World {
             .collect()
     }
 
-    /// Lifetime successful contract deliveries — the counter every
-    /// progression gate is keyed off. Read-only; it is written by
-    /// [`Economy::tick`] and by a load, never by a caller.
+    /// Lifetime successful contract deliveries — satisfied windows, whatever
+    /// each one carried. Read-only; it is written by [`Economy::tick`] and by
+    /// a load, never by a caller. **The gates read
+    /// [`Self::boxes_sold`]**, not this.
     pub fn lifetime_deliveries(&self) -> u32 {
         self.economy.lifetime_deliveries
+    }
+
+    /// Lifetime boxes sold per item id — the ledger every progression gate is
+    /// keyed off (`data/unlocks.ron`). Read-only, for
+    /// [`Self::lifetime_deliveries`]' reason.
+    pub fn boxes_sold(&self) -> &super::unlocks::BoxesSold {
+        &self.economy.lifetime_boxes_sold
     }
 
     /// Whether the market may sell `id` right now. The same answer
@@ -5900,6 +5907,20 @@ impl World {
         true
     }
 
+    /// Sets the boxes-sold ledger outright — the seam
+    /// [`super::reference::open_every_gate`] uses to say "this factory belongs
+    /// to a player who has already shipped that much", which is what
+    /// [`super::reference::bbq_branch`] needs to reach a gated raw at all.
+    ///
+    /// [`restore_money`](Self::restore_money)'s rule, for its reason: the
+    /// ledger otherwise only ever grows through a satisfied delivery window,
+    /// and a second public way to raise it would be a cheat surface on the
+    /// real API. It reaches a state a player genuinely reaches, and
+    /// `pub(super)` keeps it out of reach of anything but this module tree.
+    pub(super) fn restore_boxes_sold(&mut self, sold: super::unlocks::BoxesSold) {
+        self.economy.lifetime_boxes_sold = sold;
+    }
+
     /// Sets the money balance outright. Money otherwise only ever moves
     /// through [`Economy::try_spend`] and a contract payout, deliberately
     /// ([`World::with_content_and_money`]'s own doc) — a load is the one
@@ -5907,20 +5928,6 @@ impl World {
     /// has to do so twice: once to fund each rebuild purchase, and once at
     /// the end to install the saved balance, so those purchases cannot leak
     /// into it.
-    /// Sets the lifetime delivery counter outright — the seam a load uses
-    /// to put back what [`Economy::tick`] counted, and the one
-    /// [`super::reference::bbq_branch`] uses to say "this factory belongs to
-    /// a player who has already earned the BBQ tier".
-    ///
-    /// [`restore_money`](Self::restore_money)'s rule, for its reason: the
-    /// counter otherwise only ever moves through a satisfied delivery
-    /// window, and a second public way to raise it would be a cheat surface
-    /// on the real API. It reaches a state a player genuinely reaches, and
-    /// `pub(super)` keeps it out of reach of anything but this module tree.
-    pub(super) fn restore_lifetime_deliveries(&mut self, deliveries: u32) {
-        self.economy.lifetime_deliveries = deliveries;
-    }
-
     pub(super) fn restore_money(&mut self, money: Money) {
         self.economy.money = money;
     }

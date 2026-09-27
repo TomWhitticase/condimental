@@ -404,7 +404,7 @@ func _hopper_items() -> Array:
 	var snapshot = JSON.parse_string(main.sim.ingredients_snapshot_json())
 	if not (snapshot is Dictionary):
 		return []
-	# Entries, not ids: each is `{id, locked, unlock_name, after_deliveries}`,
+	# Entries, not ids: each is `{id, locked, unlock_name, unlock_item, ...}`,
 	# so an `Array.has("turmeric")` over the raw list is false for every raw
 	# there is. That was the second way this one guard managed to pass
 	# without looking at anything.

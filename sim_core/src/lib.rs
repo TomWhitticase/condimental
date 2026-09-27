@@ -626,21 +626,25 @@ impl SimBridge {
     /// "lifetime_deliveries": 7,
     /// "unlocks": [
     ///   {"id": "bbq_sauce", "name": "BBQ Sauce", "open": false,
-    ///    "deliveries": 7, "after_deliveries": 10,
+    ///    "item": "boxed_ketchup", "sold": 34, "required": 100,
     ///    "ingredients": 3, "contracts": 4}
     /// ]
     /// ```
     ///
     /// `lifetime_deliveries` is every delivery window this save has ever
     /// satisfied — it never decreases, and losing a contract does not take
-    /// its past deliveries back. `unlocks` is `data/unlocks.ron` in file
-    /// order, each entry already resolved against that counter: `open`
-    /// is the answer, `deliveries`/`after_deliveries` are the progress a
-    /// HUD can draw as "7/10". `name` is player-facing prose, so it is
-    /// what an announcement says, and `ingredients`/`contracts` are how
-    /// many ids it puts on sale and on the board — counts, not lists, so
-    /// the announcement can name the halves of the game that changed
-    /// without assuming every gate touches both.
+    /// its past deliveries back. **Nothing gates off it**: since 2026-09-26 a
+    /// gate counts boxes of a named product sold, and each entry carries its
+    /// own. `unlocks` is `data/unlocks.ron` in file order (which is the tier
+    /// order — two gates counting different products have no comparable
+    /// numbers), each entry already resolved: `open` is the answer,
+    /// `sold`/`required` are the progress a HUD can draw as "34 of 100", and
+    /// `item` is the product's **id**, to be titled with
+    /// [`Self::display_names_json`] like every other id on the wire. `name`
+    /// is player-facing prose, so it is what an announcement says, and
+    /// `ingredients`/`contracts` are how many ids it puts on sale and on the
+    /// board — counts, not lists, so the announcement can name the halves of
+    /// the game that changed without assuming every gate touches both.
     ///
     /// **`board` is filtered by those gates**, and so is
     /// `ingredients_snapshot_json`'s `entries`: an offer behind a closed
@@ -943,7 +947,6 @@ impl SimBridge {
     ///
     /// ```json
     /// {
-    ///   "deliveries": 4,
     ///   "sauces": [{
     ///     "id": "boxed_ketchup", "tier": 0, "locked": false,
     ///     "tagline": "The first sauce. Everything else in the book is built on it.",
@@ -961,9 +964,11 @@ impl SimBridge {
     ///
     /// **Not folded into `economy_snapshot_json`.** That one is polled
     /// every frame and this is a static graph: the only part of it that
-    /// moves is the padlocks, which move with `lifetime_deliveries`. Read
-    /// it on open, and again on the panel's own poll cadence while it is
-    /// open.
+    /// moves is the padlocks, which move with the boxes-sold ledger. A locked
+    /// page carries its own `gate` — `{"id", "name", "item", "required",
+    /// "sold"}` — so the padlock reads "34 of 100 boxes of Boxed Ketchup"
+    /// from the page it is drawn on. Read it on open, and again on the
+    /// panel's own poll cadence while it is open.
     ///
     /// **Ids go out as ids.** Title them with the map
     /// [`Self::display_names_json`] returns, the way every other id on the

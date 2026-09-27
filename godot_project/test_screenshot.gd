@@ -139,6 +139,12 @@
 # an id the book does not hold is refused in words that list the ones it
 # does, rather than photographing the wrong page.
 #
+# `--cookbook-basics ID` opens that topic's page instead, for the same reason
+# and with the same refusal: "the first BASICS page" can only ever be the
+# first topic in `data/guide.ron`, so a change to any page below it — the
+# contracts page, the growing page — has no frame at all otherwise. An id the
+# guide does not ship is refused with the list it does.
+#
 # `--full-dock` builds the FULL-DOCK LINE (test_layouts.gd's
 # `build_full_dock_line`: the reference line on auto-fill, run until the
 # dock has every one of its 32 places taken) and freezes the frame
@@ -432,16 +438,16 @@ var _contents_refill := false
 ## --hover-*); a junction shot does not need it in frame.
 var _no_hud := false
 ## `--unlocked` puts the world on the far side of every progression gate in
-## `data/unlocks.ron` — the shipped one takes ten deliveries — so the market,
-## the larder and the board photograph with the BBQ tier released. Combine it
-## with `--market` or `--board` to shoot the "after" half of a before/after
-## pair; without it those panels show the "before" half, which is what a new
-## game actually looks like.
+## `data/unlocks.ron` — the shipped first one takes a hundred boxes of ketchup
+## sold — so the market, the larder and the board photograph with the BBQ tier
+## released. Combine it with `--market` or `--board` to shoot the "after" half
+## of a before/after pair; without it those panels show the "before" half,
+## which is what a new game actually looks like.
 ##
-## It sets the counter through `test_layouts.gd`'s `deliver`, i.e. the save
-## file, rather than running a chain for the ten thousand ticks it would take
-## to earn them: this is a camera, and `sim_core/tests/unlocks.rs` is what
-## earns the gate honestly.
+## It sets the boxes-sold ledger through `test_layouts.gd`'s `sell`, i.e. the
+## save file, rather than running a chain for the fifty thousand ticks it
+## would take to sell them: this is a camera, and
+## `sim_core/tests/unlocks.rs` is what earns the gate honestly.
 var _unlocked := false
 ## `--unlock-toast` crosses the gate WHILE the HUD is watching, one frame
 ## before the shutter, so the announcement line is up in the frame. The
@@ -481,6 +487,11 @@ var _cookbook_page := false
 ## the argument exists and why the default is still the default.
 var _cookbook_page_id := ""
 var _cookbook_basics := false
+## `--cookbook-basics ID`'s argument, or "" for the flag's wire-driven default
+## (the first topic `data/guide.ron` lists). It exists for `--cookbook-page`'s
+## reason: "the first page" can only ever be the first topic in the file, and a
+## change to any page below it has no frame otherwise.
+var _cookbook_basics_id := ""
 var _understaffed := false
 ## `--staff-shortfall` opens the staff panel over a line funded to less than
 ## its next payday's bill (the quality pass, ticket 4's BEFORE warning) —
@@ -695,7 +706,14 @@ func _initialize() -> void:
 	_cookbook_page_id = _string_arg(args, "--cookbook-page")
 	if _cookbook_page_id.begins_with("--"):
 		_cookbook_page_id = ""
-	_cookbook_basics = args.has("--cookbook-basics")
+	_cookbook_basics = (
+		args.has("--cookbook-basics") or _string_arg(args, "--cookbook-basics") != ""
+	)
+	# Same trap as `--cookbook-page` above: a bare `--cookbook-basics --populate`
+	# would otherwise ask the guide for a topic called "--populate".
+	_cookbook_basics_id = _string_arg(args, "--cookbook-basics")
+	if _cookbook_basics_id.begins_with("--"):
+		_cookbook_basics_id = ""
 	_cookbook = _cookbook_page or _cookbook_basics or args.has("--cookbook")
 	if _cookbook:
 		var flag := "--cookbook"
@@ -940,23 +958,16 @@ func _string_arg(args: Array, flag: String) -> String:
 	return ""
 
 
-## Moves the lifetime delivery counter to `offset` away from the last gate
-## in `data/unlocks.ron` — 0 to sit exactly on the threshold, -1 to sit one
-## delivery short of it. The threshold is read off the wire, never written
-## out here, so a balance pass on that file cannot leave these shots
+## Sells enough boxes to cross every gate in `data/unlocks.ron`, leaving the
+## last one `offset` boxes away from its threshold — 0 to sit exactly on it,
+## -1 to sit one box short. What each gate counts is read off the wire, never
+## written out here, so a balance pass on that file cannot leave these shots
 ## photographing the wrong side of the gate.
 func _cross_gates(offset: int) -> void:
-	var econ: Dictionary = JSON.parse_string(_main.sim.economy_snapshot_json())
-	var threshold := 0
-	for unlock in econ.get("unlocks", []):
-		threshold = maxi(threshold, int(unlock.get("after_deliveries", 0)))
-	if threshold == 0:
-		push_error("_cross_gates(): data/unlocks.ron gates nothing")
-		return
-	Layouts.deliver(_main.sim, maxi(0, threshold + offset))
-	# `deliver` goes through save/load, so the rendered world is rebuilt from
-	# the reloaded one — identical by construction, but the scene has to be
-	# told, exactly as `_build_fixture` tells it.
+	Layouts.cross_every_gate(_main.sim, offset, "SCREENSHOT_FAIL")
+	# `cross_every_gate` goes through save/load, so the rendered world is
+	# rebuilt from the reloaded one — identical by construction, but the scene
+	# has to be told, exactly as `_build_fixture` tells it.
 	_main._rebuild_world()
 	_main._refresh_owned_counts()
 
@@ -1422,13 +1433,25 @@ func _open_first_basics_topic() -> bool:
 		printerr("SCREENSHOT_FAIL: --cookbook-basics could not read cookbook_json")
 		_refuse()
 		return false
+	var known: Array[String] = []
 	for topic in (book as Dictionary).get("guide", []):
 		var id := String(topic.get("id", ""))
 		if id == "":
 			continue
+		known.append(id)
+		if _cookbook_basics_id != "" and id != _cookbook_basics_id:
+			continue
 		_main._cookbook.open("topic", id)
 		_main._position_cookbook_panel()
 		return true
+	if _cookbook_basics_id != "":
+		printerr(
+			"SCREENSHOT_FAIL: --cookbook-basics %s — data/guide.ron has no topic with \
+that id. It ships: %s"
+			% [_cookbook_basics_id, ", ".join(known)]
+		)
+		_refuse()
+		return false
 	printerr(
 		"SCREENSHOT_FAIL: --cookbook-basics found no topics in cookbook_json, so there \
 is no page to open. data/guide.ron ships the BASICS pages — check it loaded."

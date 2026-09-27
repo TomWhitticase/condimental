@@ -107,7 +107,7 @@ use fixed::types::I48F16;
 use super::contracts::{Contract, ContractRegistry};
 use super::inventory::Inventory;
 use super::types::{ItemId, Money};
-use super::unlocks::{UnlockRegistry, UnlockSnapshot};
+use super::unlocks::{BoxesSold, UnlockRegistry, UnlockSnapshot};
 
 /// What a new game starts with in the bank (the "Real Placement" epic's
 /// ticket 1).
@@ -375,7 +375,27 @@ pub struct Economy {
     /// Saturating on increment. At one delivery per hundred ticks it would
     /// take about three hundred thousand hours of play to reach `u32::MAX`,
     /// but the alternative is a wrap that would close every gate at once.
+    ///
+    /// **Nothing gates off this any more** (2026-09-26). It is still counted
+    /// and still saved, because it is what a docket's "deliveries made" sums
+    /// to and what the board's own ledgers are checked against; the gates
+    /// moved to [`Self::lifetime_boxes_sold`] because a window counted the
+    /// same whether it carried one box or eight.
     pub lifetime_deliveries: u32,
+    /// **Lifetime boxes sold, per item id** — the ledger every progression
+    /// gate is keyed off (`data/unlocks.ron`, [`super::unlocks`]).
+    ///
+    /// "Sold" is the same event `lifetime_deliveries` counts, measured
+    /// properly: incremented in the same place and by the same rule, but by
+    /// the QUANTITY of each item the satisfied window took off the docks
+    /// rather than by one per window. A missed window adds nothing; a lost
+    /// contract does not un-sell what it shipped, so no entry ever decreases
+    /// and a gate, once open, stays open.
+    ///
+    /// A `BTreeMap` because it is walked and serialized (ARCHITECTURE.md
+    /// §3.9), and `u32` counts for the reason `lifetime_deliveries` is a
+    /// `u32`: these are whole boxes, and there is no half box.
+    pub lifetime_boxes_sold: BoxesSold,
 }
 
 /// A presentation-facing snapshot of economy state (ARCHITECTURE.md §4/§5) —
@@ -417,9 +437,10 @@ pub struct EconomySnapshot {
     /// renders — and it is genuine: `SignContract` on a locked id is
     /// refused (`SignRefusal::Locked`) whether or not a row was ever drawn.
     pub board: Vec<ContractOfferSnapshot>,
-    /// **Lifetime successful deliveries** — the counter every gate below is
-    /// keyed off, on the wire so a UI can show progress toward the next one
-    /// without knowing the rule.
+    /// **Lifetime successful deliveries** — satisfied windows, whatever
+    /// they carried. On the wire because a payout readout wants it; the
+    /// gates below do NOT read it, and each one carries its own progress
+    /// (`sold` of `required` boxes of `item`).
     pub lifetime_deliveries: u32,
     /// Every progression gate in `data/unlocks.ron` order, open or not.
     ///
@@ -530,6 +551,7 @@ impl Economy {
             losses: BTreeMap::new(),
             unlocks,
             lifetime_deliveries: 0,
+            lifetime_boxes_sold: BoxesSold::new(),
         }
     }
 
@@ -555,7 +577,7 @@ impl Economy {
     /// `BuyIngredient` arm and `ingredients_snapshot` both ask.
     pub fn ingredient_unlocked(&self, id: &str) -> bool {
         self.unlocks
-            .ingredient_available(id, self.lifetime_deliveries)
+            .ingredient_available(id, &self.lifetime_boxes_sold)
     }
 
     /// Whether the board may offer `id` right now. [`Self::try_sign`]
@@ -563,7 +585,7 @@ impl Economy {
     /// presentation agreeing with the sim rather than enforcing anything.
     pub fn contract_unlocked(&self, id: &str) -> bool {
         self.unlocks
-            .contract_available(id, self.lifetime_deliveries)
+            .contract_available(id, &self.lifetime_boxes_sold)
     }
 
     /// Spends `amount` if there is enough money, and reports whether it
@@ -751,6 +773,13 @@ impl Economy {
             let mut from = Vec::new();
             for (item, qty) in &self.contracts[i].contract.mix {
                 stock.take(item, *qty, &mut from);
+                // The ledger every progression gate reads, incremented HERE
+                // and nowhere else: EVERY box this window carried, by item.
+                // A window asking for three cases of ketchup sells three —
+                // which is the whole difference between this and the counter
+                // below, and the reason the gates moved off it.
+                let sold = self.lifetime_boxes_sold.entry(item.clone()).or_insert(0);
+                *sold = sold.saturating_add(*qty);
             }
             from.sort_unstable();
             // Saturating, never wrapping (and never panicking in a debug
@@ -758,11 +787,10 @@ impl Economy {
             self.money = self.money.saturating_add(self.contracts[i].contract.payout);
             self.contracts[i].deliveries_made += 1;
             self.contracts[i].consecutive_misses = 0;
-            // The lifetime counter every progression gate reads, incremented
-            // HERE and nowhere else: one satisfied window, one delivery. A
-            // missed window above takes this path's `continue` and counts
-            // for nothing, which is the whole point of keying gates off it
-            // (`data/unlocks.ron`).
+            // One satisfied window, one delivery — the count a docket shows
+            // and the sum the board's per-contract ledgers are checked
+            // against. A missed window above takes this path's `continue`
+            // and counts for nothing, here and in the box ledger alike.
             self.lifetime_deliveries = self.lifetime_deliveries.saturating_add(1);
             events.push(ContractEvent::Paid { id, from });
         }
@@ -841,9 +869,10 @@ impl Economy {
                 .map(|unlock| UnlockSnapshot {
                     id: unlock.id.clone(),
                     name: unlock.name.clone(),
-                    open: unlock.is_open(self.lifetime_deliveries),
-                    deliveries: self.lifetime_deliveries,
-                    after_deliveries: unlock.after_deliveries,
+                    open: unlock.is_open(&self.lifetime_boxes_sold),
+                    item: unlock.after_sold.item.clone(),
+                    sold: unlock.sold(&self.lifetime_boxes_sold),
+                    required: unlock.after_sold.boxes,
                     ingredients: unlock.ingredients.len(),
                     contracts: unlock.contracts.len(),
                 })
