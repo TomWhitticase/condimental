@@ -266,8 +266,10 @@ commit is a reviewed unit.
 **Every PR is reviewed before it merges. No exceptions for routine changes,
 and no reviewing after the merge** (the owner's rule, 2026-09-25). A PR
 merges only once it has a `VERDICT: APPROVED` comment from a reviewer that
-does not share the author's context (below), and its checks are green. An
-instruction to "open a PR and merge it" means that: get the review, then
+does not share the author's context (below), and its checks are green (only
+the owner waives that half, and only when they could not run at all —
+`--admin`, below). An instruction to "open a PR and merge it" means that: get
+the review, then
 merge on its verdict. PR #163 is why this is spelled out. It merged on green
 CI under the old wording ("merging your own work unreviewed is fine for
 routine changes"), and its review could only happen afterwards, with the code

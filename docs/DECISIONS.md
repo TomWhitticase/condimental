@@ -3822,6 +3822,11 @@ matches what code comments and data files cite.
   deliberately rather than a default to impose. The command is one line when
   wanted.
 
+  *(Amended: protection was enabled later. `main` requires the `lint` context,
+  with `strict` on and `enforce_admins` off — so the owner keeps the override
+  this record was protecting, and it is `gh pr merge --admin`. See the
+  2026-09-27 entry at the top.)*
+
 
 - 2026-09-16: **The agent context was restructured: `CLAUDE.md` is a map,
   not the manual.** Everything below in this file is a record of a decision
