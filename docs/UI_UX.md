@@ -1515,14 +1515,17 @@ Four consequences worth knowing before changing it:
   read off its meshes, under `"machine:x,y"`. It reads the sim's
   `understaffed` off the polled machine-load entry: short on the
   establishment, AND actually refused its crew within the last load window
-  (ten seconds), AND nothing on its own supply side holding it up. It never
-  reads the per-tick `staff` stall, which blinks. Being short on paper is
-  not enough: a spare, unfed machine early in the order can leave the last
-  one short on the books while that one runs on every tick, and a hire
-  there would buy nothing. So a machine that is running, unfed, backed up
-  or switched off never shows it. A short one shows it steadily until a
-  hire or the mothball switch clears it (both re-poll at once), or until a
-  whole window passes without a refusal. The hover names the shortfall in
+  (ten seconds). It never reads the per-tick `staff` stall, which blinks.
+  Being short on paper is not enough: a spare, unfed machine early in the
+  order can leave the last one short on the books while that one runs on
+  every tick, and a hire there would buy nothing. So a machine that is
+  running, has never been fed, or is switched off never shows it. It is
+  NOT cleared by the machine's own supply running dry between refusals: a
+  short vat on a pipe shared with crewed vats loses its sauce to them
+  while it sits refused, and is idle for want of a crew all the same. A
+  short one shows it steadily until a hire or the mothball switch clears
+  it (both re-poll at once), or until a whole window passes without a
+  refusal. The hover names the shortfall in
   words ("short of <category> staff") on the ticks the machine is refused,
   so the colour is not the only signal; on the ticks between refusals it
   shows whatever else the machine is doing.
