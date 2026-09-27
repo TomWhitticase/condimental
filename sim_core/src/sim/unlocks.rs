@@ -742,6 +742,15 @@ mod tests {
     /// `validate_covers` reaches the tier-ordering pass instead of stopping
     /// at an unknown id. `boxes` is the second gate's threshold on the same
     /// product as the first.
+    /// `EXAMPLE` with its deliberately-unknown contract swapped for a real
+    /// one. A test that breaks exactly one thing has to fail *for that thing*:
+    /// with `something_else` left in, a test that disables the check it is
+    /// about trips `UnknownEntry` on the next gate instead, and the failure
+    /// reads as the wrong bug.
+    fn example_with_real_content() -> String {
+        EXAMPLE.replacen(r#"["something_else"]"#, r#"["bbq_festival"]"#, 1)
+    }
+
     fn two_gates_on_one_product(first: u32, second: u32) -> UnlockRegistry {
         let text = format!(
             r#"(
@@ -1048,7 +1057,11 @@ mod tests {
     /// opens.
     #[test]
     fn validate_covers_refuses_a_product_no_data_file_names() {
-        let text = EXAMPLE.replacen(r#"item: "boxed_ketchup""#, r#"item: "boxed_ketchupp""#, 1);
+        let text = example_with_real_content().replacen(
+            r#"item: "boxed_ketchup""#,
+            r#"item: "boxed_ketchupp""#,
+            1,
+        );
         let unlocks = UnlockRegistry::from_ron_str(&text).unwrap();
         let err = unlocks
             .validate_covers(
@@ -1075,7 +1088,11 @@ mod tests {
     /// ship a box of it and the gate would be shut forever.
     #[test]
     fn validate_covers_refuses_a_product_nothing_produces() {
-        let text = EXAMPLE.replacen(r#"item: "boxed_ketchup""#, r#"item: "tomato""#, 1);
+        let text = example_with_real_content().replacen(
+            r#"item: "boxed_ketchup""#,
+            r#"item: "tomato""#,
+            1,
+        );
         let unlocks = UnlockRegistry::from_ron_str(&text).unwrap();
         let err = unlocks
             .validate_covers(
@@ -1101,7 +1118,11 @@ mod tests {
     /// exactly as dead as `tomato` above, and much easier to author.
     #[test]
     fn validate_covers_refuses_a_product_no_contract_orders() {
-        let text = EXAMPLE.replacen(r#"item: "boxed_ketchup""#, r#"item: "bottled_ketchup""#, 1);
+        let text = example_with_real_content().replacen(
+            r#"item: "boxed_ketchup""#,
+            r#"item: "bottled_ketchup""#,
+            1,
+        );
         let unlocks = UnlockRegistry::from_ron_str(&text).unwrap();
         let err = unlocks
             .validate_covers(
@@ -1109,7 +1130,10 @@ mod tests {
                 &ContractRegistry::bundled(),
                 &recipes(),
             )
-            .unwrap_err();
+            .expect_err(
+                "a gate on a product no contract ever orders can never open — the ledger \
+                 is fed only by a paid window's mix, so this has to be refused at load",
+            );
         assert!(
             matches!(
                 err,
@@ -1137,7 +1161,10 @@ mod tests {
                 &ContractRegistry::bundled(),
                 &recipes(),
             )
-            .unwrap_err();
+            .expect_err(
+                "a later gate that is cheaper than an earlier one on the SAME product \
+                 makes file order stop being tier order — it has to be refused at load",
+            );
         assert!(
             matches!(
                 err,
