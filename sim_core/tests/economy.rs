@@ -56,7 +56,7 @@ fn contracts() -> ContractRegistry {
 /// `money`.
 fn single_contract_world() -> World {
     let board = contracts();
-    let c = board.get("corner_shop").expect("shipped starter contract");
+    let c = board.get("corner_shop").expect("shipped corner_shop offer");
     let mix: Vec<String> = c
         .mix
         .iter()
@@ -133,11 +133,11 @@ fn full_chain_delivers_against_a_contract_and_pays_out_exactly_that_contracts_pa
     let final_item = linear_prefix(&registry).last().unwrap().id.clone();
 
     let board = contracts();
-    let corner_shop = board.get("corner_shop").expect("shipped starter contract");
+    let corner_shop = board.get("corner_shop").expect("shipped corner_shop offer");
     let (want_item, want_qty) = corner_shop.mix.first().unwrap().clone();
     assert_eq!(
         want_item, final_item,
-        "this test assumes the starter contract targets the chain's final product"
+        "this test assumes the corner_shop offer targets the chain's final product"
     );
     let cadence = corner_shop.cadence_ticks;
     let payout = corner_shop.payout;
@@ -386,13 +386,13 @@ fn the_economy_snapshot_reports_one_entry_per_shipped_contract() {
     let snapshot = world.economy_snapshot();
     let board = contracts();
 
-    // Active = the board's starters only (the contract-board epic: the rest
-    // are signed); the whole board rides along beside them.
+    // Active = the one offer the reference chain signs (a new game signs
+    // none); the whole board rides along beside it.
     let ids: Vec<&str> = snapshot.contracts.iter().map(|c| c.id.as_str()).collect();
-    let expected: Vec<&str> = board.starters().map(|c| c.id.as_str()).collect();
+    let expected = vec![board.ordered()[0].id.as_str()];
     assert_eq!(
         ids, expected,
-        "a new world's active contracts are the starters, in contracts.ron order"
+        "the fixture's active contract is the board's first offer"
     );
     assert!(
         snapshot.board.len() >= 2,
@@ -413,8 +413,9 @@ fn the_economy_snapshot_reports_one_entry_per_shipped_contract() {
     );
     for offer in &snapshot.board {
         assert_eq!(
-            offer.active, offer.starter,
-            "in a new world exactly the starters are active"
+            offer.active,
+            ids.contains(&offer.id.as_str()),
+            "the board reads active for exactly what was signed"
         );
         assert!(offer.price > 0.0);
         assert!(offer.strikes >= 1);

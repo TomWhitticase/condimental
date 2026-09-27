@@ -2,8 +2,8 @@
 //! epic, 2026-09-10; GAMEPLAY.md §6/§9/§11). `sim_core/src/sim/economy.rs`
 //! unit-tests signing, strikes and loss against an inline fixture; this
 //! file proves the same rules through the real `World` command path and the
-//! shipped `data/contracts.ron`: a new game starts with the board's starters
-//! only, `{"type": "sign_contract"}` buys the rest out of the one money
+//! shipped `data/contracts.ron`: a new game starts with no contract running,
+//! `{"type": "sign_contract"}` buys every one out of the one money
 //! counter, an offer is signed once at a time, a contract that misses its
 //! strikes in a row is lost, and a lost contract is bought back at the same
 //! price with a clean record.
@@ -42,19 +42,21 @@ fn sign(world: &mut World, id: &str) {
 }
 
 #[test]
-fn a_new_game_starts_with_exactly_the_boards_starters_and_offers_the_rest() {
+fn a_new_game_starts_with_no_contract_and_offers_the_whole_board() {
     let world = world();
     let board = ContractRegistry::bundled();
-    let starters: Vec<String> = board.starters().map(|c| c.id.clone()).collect();
     assert_eq!(
-        starters.len(),
-        1,
-        "the shipped board starts a new game with ONE basic contract"
+        board.starters().count(),
+        0,
+        "the shipped board signs nothing on a new player's behalf"
     );
-    assert_eq!(active_ids(&world), starters);
     assert!(
-        board.len() > 1,
-        "and there must be bigger contracts to work toward"
+        active_ids(&world).is_empty(),
+        "a new game runs no contract until the player signs one"
+    );
+    assert!(
+        world.economy_snapshot().contracts.is_empty(),
+        "and the clipboard Godot draws from is empty too"
     );
     let snapshot = world.economy_snapshot();
     // Every offer EXCEPT the ones a progression gate holds back
@@ -83,10 +85,13 @@ fn a_new_game_starts_with_exactly_the_boards_starters_and_offers_the_rest() {
             "'{id}' is behind a closed gate and must not be on a new game's board"
         );
     }
-    assert_eq!(
-        snapshot.board.iter().filter(|o| o.active).count(),
-        1,
-        "exactly the starter reads active on the board"
+    assert!(
+        snapshot.board.iter().all(|o| !o.active),
+        "every offer on a new game's board is still for sale"
+    );
+    assert!(
+        snapshot.board.iter().any(|o| o.affordable),
+        "and the starting balance can sign at least one of them"
     );
 }
 
@@ -245,16 +250,6 @@ fn an_offer_cannot_be_held_twice() {
         1,
         "one of each contract, never two"
     );
-
-    // The starter is active from tick 0 and is just as unsignable.
-    let starter = ContractRegistry::bundled()
-        .starters()
-        .next()
-        .unwrap()
-        .id
-        .clone();
-    sign(&mut world, &starter);
-    assert_eq!(world.money(), after_first);
 }
 
 #[test]
@@ -282,21 +277,21 @@ fn an_unaffordable_or_unknown_signature_changes_nothing() {
         id: "midnight_kebab_van".to_string(),
     });
     assert_eq!(world.money(), short);
-    assert_eq!(active_ids(&world).len(), 1);
+    assert!(active_ids(&world).is_empty());
 }
 
 #[test]
 fn a_contract_left_unserved_for_its_strikes_is_lost_and_goes_back_on_the_board() {
     let mut world = world();
-    let starter = ContractRegistry::bundled()
-        .starters()
-        .next()
-        .unwrap()
-        .clone();
+    // The board's first offer, signed on tick 0 the way a new player's
+    // first signature would be.
+    let starter = ContractRegistry::bundled().ordered()[0].clone();
     assert!(
         starter.strikes >= 2,
-        "the shipped starter forgives at least one miss"
+        "the first offer on the board forgives at least one miss"
     );
+    sign(&mut world, &starter.id);
+    assert!(world.economy().is_active(&starter.id));
 
     // Every window is missed: nothing is ever placed, let alone delivered.
     let first_loss_tick = starter.cadence_ticks * u64::from(starter.strikes);

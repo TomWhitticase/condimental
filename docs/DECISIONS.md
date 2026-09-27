@@ -25,53 +25,107 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
-- 2026-09-26: **An author with no review verdict commissions one: a fresh
-  subagent reviews the PR.** (Owner's rule, stated after PR #193.)
+- 2026-09-26: **A PR's reviewer must not share its author's context; it need
+  not be another session.** (Owner's rule, amending 2026-09-25.)
 
-  **What happened.** PR #193 was an Orca worker's ticket (the P screen's pay
-  cycle). By the end of the session its checks were green, and the
-  `wrap-it-up` skill ended correctly under the rule of 2026-09-25: no
-  verdict, so the PR stayed open, "waiting on review". Nobody had been asked
-  to do that review, so the PR had nothing to wait on. The owner's
-  instruction was: *"use a subagent to do the review, and update claudemd or
-  whatever so in future no agent gets stuck on this, they get a subagent to
-  do the review rather than stop"*.
+  **What changed.** The 2026-09-25 rule required the `VERDICT: APPROVED` to
+  come from "a session that did not write it". The owner restated what that
+  was for: *"it doesnt require a different session to review it, but ... an
+  adversarial review should be done by a subagent or technique similar where
+  the reviewer doesnt have all the context of reasoning and decisions and
+  stuff from the author agent"*. Independence is a property of what the
+  reviewer knows, not of which session it runs in.
 
-  **The rule.** The review requirement is unchanged: the verdict still has to
-  come from a session that did not write the branch. A subagent launched
-  fresh is such a session. It starts cold, builds the branch in its own
-  worktree, and has none of the author's reasoning to lean on. So the author
-  launches it, and the PR's wait ends. The subagent must be
-  `general-purpose` and never `fork`. A fork inherits the author's whole
-  conversation, which makes its review the author re-reading their own work.
-  Its prompt says what the PR claims, but not why the author believes it.
-  After `CHANGES REQUESTED`, the re-review goes to another fresh subagent,
-  not the one that asked for the changes.
+  **Why context, not session.** A reviewer that has read the author's
+  reasoning reviews that reasoning: it inherits the same framing, the same
+  "this is known to be fine", and the same blind spots, and a flawed argument
+  it has already been walked through looks sound. A reviewer that starts from
+  the diff, the PR body (which the `review` skill already tells it to
+  distrust) and the repository has to rebuild every claim, which is the point
+  of an adversarial review. The other-session wording also left an author with
+  nobody to ask stuck with an open PR, although a fresh subagent is exactly as
+  isolated as a new session and is always available.
 
-  **What still stops.** Only the *merge*. As before, it needs green checks
-  on top of the verdict. It is also held when:
-  - the task forbids merging (an Orca worker's coordinator merges);
-  - the change also needs the owner, on top of the review: a PR the owner
-    asked to review, a design-doc deviation, a `gdext` bump, or a
-    save-format change.
+  **The rule.** The author may launch the reviewer. It is a fresh subagent
+  whose entire prompt is the PR number and the instruction to follow the
+  `review` skill and post its verdict. Nothing else goes in: no description of
+  the change, no list of what was verified, no pointer to what to skip. A
+  separate session that did not write the branch still qualifies. The author
+  itself, or any reviewer briefed with the author's reasoning, does not. On
+  `CHANGES REQUESTED` the author fixes the branch and launches a fresh
+  reviewer with the same bare prompt. Everything else in the 2026-09-25 rule
+  stands: review before merge, no routine exemption, and green checks.
 
-  The review still runs in these cases, so the PR stays open *with* its
-  verdict. #193 was an example of both holds: an Orca ticket and a save-schema
-  bump. It still needed its review. The one case with no review is that no
-  subagent can be launched at all. The author also waits for the verdict
-  before ending the session, because the subagent is part of that session and
-  does not outlive it. A `CHANGES REQUESTED` verdict is work still in hand,
-  not a reason to leave. Fix it and get a fresh re-review, or hand the PR over
-  explicitly, naming the verdict.
+  **The case it came from.** PR #193 was an Orca worker's ticket (the P
+  screen's pay cycle). Its checks went green, no verdict arrived, and the
+  session closed correctly under the 2026-09-25 wording, leaving the PR open
+  and "waiting on review" — but nobody had been asked to review it, so it had
+  nothing to wait on. The owner's instruction was: *"use a subagent to do the
+  review, and update claudemd or whatever so in future no agent gets stuck on
+  this, they get a subagent to do the review rather than stop"*.
 
-  **What was rejected.** The first draft of this rule (#198's first review):
-  - It listed the owner and no-merge cases as reasons to stop, which would
-    have left #193 exactly where it was.
-  - It let the author close once the reviewer was launched, when the
-    subagent dies with the session.
-  - It did not forbid relaunching fresh reviewers until one approves. A
-    fresh re-review is of the *rework*, never a second opinion on the same
-    code.
+  **The review always runs; some cases hold only the merge.** The merge is
+  held when the task forbids the author merging (an Orca worker's coordinator
+  merges) or the change needs the owner as well: a PR the owner asked to
+  review, a design-doc deviation, a `gdext` bump, a save-format change. The
+  review happens anyway, and the PR then stays open *with* its verdict, naming
+  the hold. #193 was an example of both holds — an Orca ticket and a
+  save-schema bump — and still needed reviewing. The one case with no review
+  at all is that no subagent can be launched. The author also waits for the
+  verdict before ending the session, because the subagent is part of that
+  session and does not outlive it. A `CHANGES REQUESTED` verdict is work still
+  in hand, not a way to end one: fix it and get a fresh re-review, or hand the
+  PR over explicitly, naming the verdict.
+
+  **What was rejected.** Letting the author review its own work "carefully"
+  was rejected for the same reason the routine-change exemption was: the
+  judgement being checked is the author's. Keeping the other-session
+  requirement was rejected because it added waiting without adding
+  independence. Three readings of the commissioning half were rejected as it
+  was written down: that an owner hold or a no-merge task excuses the review
+  as well as the merge, which would have left #193 exactly where it was; that
+  the author may close the session once the reviewer is launched, when the
+  subagent dies with it; and that `CHANGES REQUESTED` may be answered by
+  relaunching fresh reviewers until one approves — a fresh re-review is of the
+  *rework*, never a second opinion on the same code.
+
+- 2026-09-26: **A new game starts with no contract.** (Owner's call;
+  supersedes call (1)'s "at least one offer must be a `starter`" in the
+  2026-09-10 contract-board record below.)
+
+  **What was asked.** The owner asked that a new game start with no
+  contracts already purchased. Until now `corner_shop` was the board's one
+  `starter: true` offer, active from tick 0 without being signed, and the
+  loader refused a board with no starter (`ContractLoadError::NoStarter`).
+
+  **Why the old rule stopped holding.** The 2026-09-10 rule existed so "a
+  new game is never a factory with nobody to sell to". But the world starts
+  empty and the player buys and places every tile, so the starter contract
+  ran for minutes before any machine existed and its countdown did nothing but
+  burn strikes — the player's first sight of the contract system was a
+  contract failing for a reason they could not act on. Signing the first
+  order is the same act as buying the first tile: a choice made from the
+  money counter once the player knows what they are building.
+
+  **What replaced the guard.** The "nobody to sell to" risk is now carried
+  by the UI, not the data: the empty clipboard reads "no contracts — press C
+  to sign one", so a fresh game names the key that fixes it. The board is
+  still cheap to enter — the cheapest signature is 40 against a starting
+  balance of 3000 — and an idle, unsigned opening only pays the starting
+  crew's wages (14 a period), which leaves around 200 periods of runway.
+  The `spend_preview` payday check (#183) assumes no contract income, so it
+  is unaffected.
+
+  **What did not change.** `starter` stays an optional field in schema 2, so
+  a future board may mark one again without a schema bump; the loader simply
+  no longer insists on one. Saves keep whatever contracts they hold. The
+  starter *tier* (the three cheap offers sized to one line) is unchanged —
+  it is a sizing rule, not an activation rule. Fixtures that need a running
+  order now sign one explicitly through the real `SignContract` command
+  (`sim::reference_chain`, `test_layouts.gd`'s `build_reference_line`) and
+  fail loudly if the signature does not take: the Rust fixture asserts the
+  contract is active, and the GDScript one prints `REFERENCE_FIXTURE_FAIL:`,
+  which `scripts/verify-core-loop.sh` treats as a failed script.
 
 - 2026-09-26: **CONDIMENTAL is GPL-3.0-only; the name and brand are
   reserved.** (Owner's call, from a release-readiness audit.)
@@ -483,6 +537,11 @@ matches what code comments and data files cite.
 - 2026-09-25: **Every PR is reviewed before it merges, with no exceptions.**
   (Owner's rule, stated after PR #163.)
 
+  *(Amended 2026-09-26 by "A PR's reviewer must not share its author's
+  context" above: the reviewer need not be another session, only one without
+  the author's context, typically a fresh subagent given just the PR number.
+  The "session that did not write the branch" wording below is superseded.)*
+
   **What happened.** A session was told to "pick an issue, fix it, make a PR
   and merge it". It fixed #99, opened PR #163 and merged it on green CI. That
   was allowed at the time: WORKFLOW.md said "merging your own work
@@ -499,12 +558,12 @@ matches what code comments and data files cite.
   every PR. A post-merge review is not a substitute, because by then the
   unreviewed code is already on `main` and every other worktree branches
   from it. An instruction to merge is read as "merge once reviewed". If no
-  reviewer is available, the author stops with the PR open, and
-  `wrap-it-up` treated that as the one legitimate way to end a session with
-  a PR still open. **Amended 2026-09-26** (entry above): the author now
-  launches a subagent as the reviewer rather than stopping. A PR stays open
-  only if it is approved with its merge held, handed over with its latest
-  verdict named, or unreviewable because no subagent could be launched.
+  reviewer is available, the author stops with the PR open. `wrap-it-up`
+  already treats that as the one legitimate way to end a session with a PR
+  still open. *(Also amended by that 2026-09-26 entry: the author commissions
+  the review rather than stopping, so an open PR must be approved with its
+  merge held, handed over with its latest verdict named, or unreviewable for
+  want of a subagent.)*
 
   **What was rejected.** Keeping the routine-change exemption was rejected.
   Whether a change counts as "routine" is judged by its author, which is
@@ -3516,8 +3575,8 @@ matches what code comments and data files cite.
   cases**: red or still-running checks, a PR the owner asked to review,
   anything the design docs call a deviation, and a `gdext` bump or save-format
   change. The agent says it is ready, gives the URL, and stops. *(Amended
-  2026-09-26: a PR with no verdict yet gets a subagent reviewer first, and
-  only its merge stops. See that entry at the top of Part A.)*
+  2026-09-26: the review itself never stops — a PR with no verdict gets a
+  subagent reviewer, and only the merge waits. See the top of Part A.)*
 
   `.github/pull_request_template.md` asks for what a review here actually
   needs, which is not "what changed" — the diff says that — but **what was run
@@ -5626,7 +5685,9 @@ matches what code comments and data files cite.
   recover contract cannot be lost in any sense that matters; a zero-strike
   contract can never be lost at all, which is v1's contract and v1 is gone
   on purpose), and at least one offer must be a `starter`, so a new game is
-  never a factory with nobody to sell to.
+  never a factory with nobody to sell to. *(Superseded on 2026-09-26 by "A new
+  game starts with no contract" above: no offer is a starter and the loader
+  no longer requires one.)*
 
   (2) **The economy owns the board and the active list is a subset of
   it.** `Economy` now holds a clone of the `ContractRegistry` beside

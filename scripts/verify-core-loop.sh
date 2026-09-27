@@ -157,6 +157,14 @@ run_godot_script() {
     echo "FAIL: $script exited $status" >&2
     exit "$status"
   fi
+  # A layout fixture that could not build what it promised (`test_layouts.gd`'s
+  # `fail_fixture`) prints `<NAME>_FIXTURE_FAIL:` and carries on, and a caller
+  # that never reads `Layouts.fixture_failure()` would still print its own
+  # success marker over a broken fixture. The marker is the failure.
+  if printf '%s\n' "$out" | grep -q "_FIXTURE_FAIL:"; then
+    echo "FAIL: $script printed a _FIXTURE_FAIL: marker — its fixture did not build" >&2
+    exit 1
+  fi
   if ! printf '%s\n' "$out" | grep -q "$marker"; then
     echo "FAIL: $script exited 0 but never printed '$marker' — it did not actually run" >&2
     exit 1
@@ -194,6 +202,7 @@ run_godot_script test_fluids.gd FLUIDS_OK "pipe rendering + fluid hover, milesto
 run_godot_script test_machines.gd MACHINES_OK "per-kind machine models, multi-tile footprints, hopper fill"
 run_godot_script test_connections.gd CONNECTIONS_OK "belt-to-building junctions at every facing, retired belt variants gone"
 run_godot_script test_shop_menu.gd SHOP_MENU_OK "build menu grid + purchases, UI_UX.md §5"
+run_godot_script test_shop_search.gd SHOP_SEARCH_OK "build menu category sections + search box"
 run_godot_script test_hotbar.gd HOTBAR_OK "always-visible hotbar, number-key selection, UI_UX.md §5"
 run_godot_script test_ui_scale.gd UI_SCALE_OK "one UI_SCALE knob, no pre-scale label, everything fits the window"
 run_godot_script test_hud_plates.gd HUD_PLATES_OK "the right-hand STOCK plate and the collapsible CONTROLS legend — one row per raw ingredient clear of the clipboard and hotbar, the legend folded by its button and by F1, and every cursor panel reading the plates' current rects — plus first person parking a world panel in the corner instead of on the crosshair"
@@ -209,7 +218,7 @@ run_godot_script test_pipe_shapes.gd PIPE_SHAPES_OK "pipe shape, turn, fittings 
 run_godot_script test_belt_shapes.gd BELT_SHAPES_OK "belt shape from links at every facing, frame from tick, corner item arcs, belt hover — pipes & conveyors ticket 5"
 run_godot_script test_payout_feedback.gd PAYOUT_FEEDBACK_OK "the payout celebration: coins, the money punch, the PAID stamp and the sound — payout juice"
 run_godot_script test_machine_motion.gd MACHINE_MOTION_OK "machine motion overlays: frames per kind, frame from the machine's own elapsed ticks, and motion only while it is actually working"
-run_godot_script test_machine_load.gd MACHINE_LOAD_OK "machine load in the hover panel (glyph, word, status-coloured bar), polled on the tick, right on the first frame of a load, and NO poles on the floor — the machine-load epic, ticket 3 as amended"
+run_godot_script test_machine_load.gd MACHINE_LOAD_OK "machine load in the hover panel (glyph, word, status-coloured bar), polled on the tick, right on the first frame of a load, and NO poles on the floor — the machine-load epic, ticket 3 as amended; a red person over a machine refused its crew"
 run_godot_script test_staff_panel.gd STAFF_PANEL_OK "the staff panel (H): rows from staff_snapshot_json, HIRE/FIRE through the real commands, an understaffed machine and dock in hover, one modal at a time — the staff pools MVP, ticket 3"
 run_godot_script test_production_stats.gd PRODUCTION_STATS_OK "the production panel (P): rows sorted and formatted from production_snapshot_json, windows and all time, a running line counted, one modal at a time, polled only while open — the production-stats epic"
 run_godot_script test_audio.gd AUDIO_OK "sound effects for every player action and the looping music track: streams deterministic and unclipped, cues fired from the handlers that know the outcome, the score ducked under the pause menu — audio, 2026-09-12"

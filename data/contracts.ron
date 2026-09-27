@@ -13,9 +13,10 @@
 //
 // SCHEMA 2 (2026-09-10, the contract-board epic): this file is a BOARD OF
 // OFFERS, not the list of what is running. A new game starts with only the
-// contracts marked `starter: true` active; every other contract here is an
-// offer the player SIGNS from the contracts board (the C key) for its
-// `price`, out of the one money counter. A contract that misses `strikes`
+// contracts marked `starter: true` active — and since 2026-09-26 none is, so
+// a new game runs no contract at all; every contract here is an offer the
+// player SIGNS from the contracts board (the C key) for its `price`, out of
+// the one money counter. A contract that misses `strikes`
 // windows IN A ROW is LOST — it leaves the active list and goes back on the
 // board, and the player has to pay its price again to get it back. One
 // signature per contract: a contract is either on the board or active,
@@ -51,7 +52,8 @@
 //                 least 1 (1 = a single miss loses it). A paid window resets
 //                 the count to zero.
 //   starter       (optional, default false) active in a new game without
-//                 being signed. At least one contract must be a starter.
+//                 being signed. None is today: the player picks their first
+//                 contract the same way they buy their first tile.
 //
 // THE BOARD ASKS FOR TWO SAUCES (2026-09-18, the BBQ epic). Until BBQ landed,
 // every contract here asked for `boxed_ketchup` — not as a design statement
@@ -108,10 +110,11 @@
 // of a ketchup line**, which takes the whole board from about seven and a
 // quarter lines' worth of demand to about **nine**.
 //
-// The starter tier is deliberately just inside ONE line's capacity — but
-// only `corner_shop` is `starter: true` (auto-active from tick 0, per the
-// board-of-offers rule above); `diner_supply` and `market_stall` are the
-// starter tier's other two rungs, cheap enough (150, 60) to sign within a
+// The starter tier is deliberately just inside ONE line's capacity. None of
+// it is active from tick 0 (the world starts empty, so a contract running
+// before the first machine is placed would only burn strikes): `corner_shop`
+// is the cheap first signature (40), and `diner_supply` and `market_stall`
+// are the tier's other two rungs, cheap enough (150, 60) to sign within a
 // window or two of `corner_shop`'s own payouts, so a new player is meant to
 // hold all three within their first several minutes, not from the first
 // tick. A first factory kept fed (hoppers and tank on auto-fill) can serve
@@ -182,12 +185,12 @@
     contracts: [
         // --- The starter tier ---
         // Exactly milestone 5's hardcoded contract (2 boxes every 1000
-        // ticks for 50), kept numerically identical so that the first thing
-        // a new player — and the full-chain integration test — sees is
-        // unchanged by this file's arrival. Three strikes: a new player's
-        // first line WILL miss its first window or two while it is being
-        // built, and losing the only contract before the first box ships
-        // would be a dead start, not a lesson. Cheap to get back.
+        // ticks for 50), kept numerically identical so that the full-chain
+        // integration test is unchanged by this file's arrival. The
+        // cheapest first signature on the board. Three strikes: a new
+        // player's first line WILL miss a window or two while it is being
+        // tuned, and losing the first contract they signed before its first
+        // box ships would be a dead start, not a lesson. Cheap to get back.
         Contract(
             id: "corner_shop",
             name: "Corner Shop Standing Order",
@@ -196,7 +199,6 @@
             payout: 50,
             price: 40,
             strikes: 3,
-            starter: true,
         ),
         // The reason to keep the line running rather than babysitting one
         // window: a bigger box count on a much slower cadence, at a better

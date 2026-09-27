@@ -18,25 +18,59 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
-- 2026-09-26 **An author with no review verdict commissions one: a fresh
-  subagent reviews the PR.** When a PR has green checks and no `VERDICT:`
-  yet, its author does not stop and wait for a reviewer. They launch one,
-  using the Agent tool with `subagent_type: general-purpose` and never
-  `fork`, because a fork inherits the author's context. The subagent runs
-  the `review` skill in its own worktree and posts the verdict itself. The
-  author waits for that verdict before ending the session, since the
-  subagent does not outlive it, and acts on it. On `CHANGES REQUESTED`, they
-  fix the findings, push, and have a *fresh* subagent re-review the rework;
-  relaunching until one approves is not a review. **The review always
-  runs.** When the task forbids merging, or the change also waits on the
-  owner (a PR the owner asked to review, a design-doc deviation, a `gdext`
-  bump, a save-format change), only the *merge* is held. A PR sits open
-  unreviewed only if no subagent can be launched. A `CHANGES REQUESTED`
-  verdict is work still in hand: fix it and re-review, or hand the PR over
-  naming the verdict. This amends the 2026-09-25
-  rule below, which read "with no verdict, the author stops".
-  Binds `CLAUDE.md`, `docs/WORKFLOW.md` and the `open-pr`, `wrap-it-up` and
-  `review` skills. Full record in `docs/DECISIONS.md`.
+- 2026-09-26 **The review always runs; only the merge is ever held.** An
+  amendment to the entry below, stated after PR #193 ended a session open
+  and "waiting on review" that nobody had been asked for. An author with no
+  `VERDICT:` yet commissions the reviewer instead of stopping, and waits for
+  the verdict before ending the session, because the subagent does not
+  outlive it. It commissions one even when the merge cannot happen: when the
+  task forbids the author merging (an Orca worker's coordinator merges), or
+  the change also needs the owner (a PR the owner asked to review, a
+  design-doc deviation, a `gdext` bump, a save-format change), the PR ends up
+  open *with* its verdict, naming the hold. Those held PRs, one handed over
+  with its latest verdict named, and one for which no subagent could be
+  launched are the only PRs that may end a session open — a `CHANGES
+  REQUESTED` verdict is work still in hand, not a way to close. Binds
+  `CLAUDE.md`, `docs/WORKFLOW.md` and the `open-pr` and `wrap-it-up` skills.
+  Recorded in the same `docs/DECISIONS.md` record as the entry below.
+
+- 2026-09-26 **A PR's reviewer must not share its author's context; it need
+  not be another session.** The merge still gates on green checks plus a
+  `VERDICT: APPROVED` review, but the reviewer is now typically a fresh
+  subagent the author launches. Its whole prompt is the PR number and the
+  instruction to follow the `review` skill, with none of the author's
+  reasoning, summary, list of what was verified or hints at what is fine. A
+  separate session that did not write the branch also qualifies. The author
+  reviewing its own work, or a subagent briefed with the author's reasoning,
+  never does. "Make a PR and merge it" now means: launch that reviewer, then
+  merge on its verdict. This amends the 2026-09-25 rule below. Binds
+  `CLAUDE.md`, `CONTRIBUTING.md`, `docs/WORKFLOW.md`, `.githooks/pre-push` and
+  the `open-pr`, `review` and `wrap-it-up` skills. Full record in
+  `docs/DECISIONS.md`.
+
+- 2026-09-26 **The build menu is sectioned by category, has a search box,
+  and may scroll at 1600x900.** The owner asked for categories plus a search
+  box. Categories are content (`data/shop.ron` `categories`), three sections
+  of five/five/two cards do not fit two rows at 1600px, so §5c's "nothing
+  scrolls at 1600x900 but the clipboard" gains the build menu as its one
+  exception. The search box sits outside the scroll as the way to what is
+  below the fold, and the cut lands on a card-row or heading edge. Binds
+  `docs/UI_UX.md` §5c, `godot_project/main.gd` `_position_shop_menu`.
+
+- 2026-09-26 **A new game starts with no contract.** No offer in
+  `data/contracts.ron` is `starter: true`, so `World::new` activates nothing
+  and the player signs their first order from the contracts board (**C**)
+  the same way they buy their first tile. This reverses the 2026-09-10 rule
+  that at least one offer must be a starter, at the owner's request: the
+  world starts empty, so a contract running before the first tile is placed
+  only burns strikes. The loader no longer requires a starter
+  (`ContractLoadError::NoStarter` is gone); `starter` stays an optional
+  field, so the schema and saves are unchanged. The guard against "a factory
+  with nobody to sell to" is now the empty clipboard, which names **C**.
+  Fixtures that need an order sign one through `SignContract`
+  (`sim::reference_chain`, `test_layouts.gd`'s `build_reference_line`).
+  Full record in `docs/DECISIONS.md`.
+
 - 2026-09-26 **CONDIMENTAL is GPL-3.0-only; the name and brand are
   reserved.** The code is licensed `GPL-3.0-only` (`LICENSE`, and `license =`
   in every workspace `Cargo.toml`) **with a GPLv3 §7 additional permission**
@@ -166,9 +200,10 @@ See [WORKFLOW.md](WORKFLOW.md).
   no verdict, the author stops with the PR open and says it is waiting on
   review. This replaces the old WORKFLOW.md wording that let authors merge
   their own routine work unreviewed. Binds `CLAUDE.md`, `docs/WORKFLOW.md`,
-  `.githooks/pre-push` and the `open-pr` and `wrap-it-up` skills. Full record
-  in `docs/DECISIONS.md`. **Amended 2026-09-26** (entry above): with no
-  verdict, the author commissions a subagent review rather than stopping.
+  `.githooks/pre-push` and the `open-pr` and `wrap-it-up` skills. Full record in `docs/DECISIONS.md`.
+  **Amended 2026-09-26:** the reviewer need not be another session, only one
+  that does not share the author's context — typically a fresh subagent given
+  just the PR number (see that entry above).
 - 2026-09-25 **The review render's clock is PINNED, so the same command twice
   is the same picture.** `scripts/screenshot-scene.sh` passes Godot's own
   `--fixed-fps 60`; `_advance_simulation` is untouched, so the tick loop a
@@ -974,8 +1009,8 @@ See [WORKFLOW.md](WORKFLOW.md).
   which is a judgement call and only warns. Do not merge a PR that is red,
   still running, requested for review, or that deviates from a design doc,
   bumps `gdext` or changes the save format — say it is ready and stop.
-  *(Amended 2026-09-26: a PR with no verdict yet gets a subagent reviewer
-  first, and only its merge stops; see that entry above.)*
+  *(Amended 2026-09-26: the review still runs in those cases; only the merge
+  stops — see the entry at the top of this log.)*
   **Deciding something is out of scope is only half the decision; filing it is
   the other half** *(the bar was raised on 2026-09-21 — see the entry at the
   top of this log)*: `gh issue create --label deferred`, with file *and*
@@ -1314,8 +1349,9 @@ See [WORKFLOW.md](WORKFLOW.md).
 - 2026-09-10 **Contract board: contracts are signed, struck and lost.**
   `contracts.ron` is schema 2: every contract has a `price` to sign, a
   `strikes` count, and an optional `starter` (a new game runs only
-  starters). Missing `strikes` windows in a row loses the contract —
-  losing IS the penalty, no fine on top; a paid window resets the count.
+  starters — none since 2026-09-26). Missing `strikes` windows in a row
+  loses the contract — losing IS the penalty, no fine on top; a paid
+  window resets the count.
   **C** opens the contracts board to sign offers; the clipboard docket
   gains a status line, strike pips and a state border.
 - 2026-09-11 **Contract board sized in lines' worth of demand.** The board

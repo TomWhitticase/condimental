@@ -1,6 +1,6 @@
 ---
 name: review
-description: Review a pull request you did not write, adversarially — build the branch in your own worktree, reproduce the failure it claims to fix, revert each fix to prove its test bites, and post the VERDICT comment the merge gates on. Use when asked to review or re-review a PR, when a branch is waiting on a gate before it merges, or when you are about to approve work somebody else wrote.
+description: Review a pull request you did not write and whose author's reasoning you have not been given, adversarially — build the branch in your own worktree, reproduce the failure it claims to fix, revert each fix to prove its test bites, and post the VERDICT comment the merge gates on. Use when asked to review or re-review a PR, when a branch is waiting on a gate before it merges, or when you are about to approve work somebody else wrote.
 ---
 
 # Adversarial review
@@ -10,11 +10,13 @@ find what is wrong before `main` does, not to bless it, so **trust none of
 the author's claims**: not the PR body, not the green checks, not the
 screenshots, and not "the new test passes".
 
-That still holds when the author launched you as a subagent to review their
-PR (`open-pr` step 5). The prompt you were given describes the change, and
-that description is one more claim to check. Being launched by the author
-does not make you theirs to agree with. Post the verdict yourself, and make
-it the one this document calls for.
+**You review from the PR and the repository alone.** You are usually a fresh
+subagent the author launched with nothing but the PR number, so that none of
+the author's reasoning reaches you. If your prompt came with the author's
+explanation of the change, what they verified or why something is fine, do not
+build on it. Say in the review that you were briefed, and derive every claim
+yourself. If you wrote this branch, or took part in the conversation that did,
+you cannot review it: say so and stop.
 
 ## 0. Your own worktree, your own build
 

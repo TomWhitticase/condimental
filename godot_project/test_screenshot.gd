@@ -218,6 +218,8 @@
 # which is the same class of confidently-wrong report as issues #4 and #70.
 #
 # `--shop` opens the build menu (docs/UI_UX.md §5) before rendering.
+# `--shop-search TEXT` opens it too, and types TEXT into its search box, so the
+# frame shows the filter: matching slots only, empty category sections hidden.
 #
 # `--stock` buys an assorted starting kit (belts, pipes, a hopper, a tank and
 # a machine or two) so the hotbar shows CARRIED sockets, multi-digit counts and
@@ -385,6 +387,7 @@ var _cursor_park_noise_tile := Vector2i(-999999, -999999)
 ## by side, with the hover saying which is which.
 var _stalled_run := false
 var _shop := false
+var _shop_search := ""
 ## `--config TX,TY` clicks the hopper or tank standing on that tile once
 ## the fixture is built, so the frame shows its configuration panel — the
 ## level bar, FILL with its reason when it is blocked, the AUTO-FILL switch
@@ -566,7 +569,7 @@ const CRUSHING_REVIEW_HOLD_TICKS := 6
 ## photographed on demand: `--bottleneck` leaves the dock part-filled.
 ##
 ## `Layouts.build_full_dock_line` does the waiting (some 25 000 ticks against
-## the starter contract's appetite); what is left here is the same freeze
+## the signed corner-shop order's appetite); what is left here is the same freeze
 ## `--payout` and `--crushing` need, plus which HALF of the blink to stop on.
 ## A pulse is a rhythm rather than a state, so a single frame can land on the
 ## dark half and photograph a dock that looks like it holds nothing — this
@@ -723,7 +726,8 @@ func _initialize() -> void:
 		_populate = true
 	_first_person = args.has("--first-person")
 	_hover_flags = HoverTargets.requested_flags(args)
-	_shop = args.has("--shop")
+	_shop_search = _string_arg(args, "--shop-search")
+	_shop = args.has("--shop") or _shop_search != ""
 	_payday_warning = args.has("--payday-warning")
 	if _payday_warning:
 		_pick_fixture("payday_warning", "--payday-warning")
@@ -1885,6 +1889,10 @@ for a fixture (--fixture, or a flag that implies one)."
 
 func _open_shop_menu() -> void:
 	_main._set_shop_menu_open(true)
+	if _shop_search != "":
+		# What a keystroke does: the box's text changes and it says so.
+		_main._shop_search.text = _shop_search
+		_main._shop_search.text_changed.emit(_shop_search)
 
 
 ## `--payday-warning`: the build menu, then a real belt purchase through
@@ -1994,8 +2002,8 @@ func _mothball_the_vat() -> void:
 ## contracts draw from is the belt at the end of the line, not a command
 ## issued from here.
 func _run_contract_cycles() -> void:
-	# A new game runs the starter only (the contract-board epic); the review
-	# frame wants the whole board competing, so sign every offer first — the
+	# A new game runs no contract (since 2026-09-26); the review frame
+	# wants the whole board competing, so sign every offer first — the
 	# full line costs 1087 of the 3000 start, which covers the signatures.
 	for offer in JSON.parse_string(_main.sim.economy_snapshot_json()).get("board", []):
 		if not bool(offer.get("active", false)):
@@ -2572,7 +2580,10 @@ func _frame_health() -> String:
 		return "the economy/production snapshot did not parse"
 	var active := 0
 	var lost := 0
-	for offer in economy.get("contracts", []):
+	# `board`, not `contracts`: only a board entry carries `active` and
+	# `times_lost`, so reading them off `contracts` counted 0 and 0 for every
+	# frame and the lost-contract refusal below could never fire.
+	for offer in economy.get("board", []):
 		if bool(offer.get("active", false)):
 			active += 1
 		lost += int(offer.get("times_lost", 0))

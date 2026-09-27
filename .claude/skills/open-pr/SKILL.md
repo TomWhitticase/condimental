@@ -1,6 +1,6 @@
 ---
 name: open-pr
-description: Ship finished work through GitHub — branch, push, screenshot the change, open a pull request with gh, watch its checks, and merge it once another session has posted VERDICT: APPROVED. Use when a change is complete and needs to reach main, or when you are about to commit and find yourself on main, or when you catch yourself about to merge or push main locally.
+description: Ship finished work through GitHub — branch, push, screenshot the change, open a pull request with gh, watch its checks, and merge it once a context-free reviewer (a fresh subagent given only the PR number) has posted VERDICT: APPROVED. Use when a change is complete and needs to reach main, or when you are about to commit and find yourself on main, or when you catch yourself about to merge or push main locally.
 ---
 
 # Getting work onto `main`
@@ -91,52 +91,38 @@ just fixed it instead.
 
 **Every PR is reviewed before it merges** (the owner's rule, 2026-09-25).
 Green CI is not a review, and a review after the merge does not count. The
-verdict comes from a session that did not write the branch (the `review`
-skill), posted as a comment review (`gh pr review <N> --comment`) whose first
-line is `VERDICT: APPROVED`. `gh` returns that under `reviews`, not
+verdict comes from a reviewer that does not share your context. Launch a fresh
+subagent (Agent tool, `general-purpose`) whose entire prompt is:
+
+```
+Review PR #<N> adversarially, following .claude/skills/review/SKILL.md, and
+post the verdict with `gh pr review <N> --comment`.
+```
+
+Add nothing to it: no summary of the change, no account of what you verified
+or why it is right, no hint at what to skip. A reviewer given your reasoning
+checks your argument rather than the code (`docs/WORKFLOW.md`). A separate
+session that did not write the branch is equally fine. The verdict is a
+comment review (`gh pr review <N> --comment`) whose first line is
+`VERDICT: APPROVED`. `gh` returns that under `reviews`, not
 `comments`, so check both, and read the **latest** verdict: an approval
 followed by a later `CHANGES REQUESTED` is not an approval. Being told to
-"make a PR and merge it" does not change this.
-
-**No verdict yet? Get one — do not stop.** Launch a subagent to review the
-PR: the Agent tool with `subagent_type: general-purpose`, **never `fork`**.
-A fork inherits your context, so it would be the author marking their own
-work. A fresh agent starts cold, and that is the point. Its prompt should:
-
-- tell it to follow `.claude/skills/review/SKILL.md` in its own worktree;
-- give the PR number, the `export PATH=…rustup…` line from the `review`
-  skill's §0, and the rule never to `pkill godot` by name (other worktrees
-  run headless Godot);
-- say it must post the verdict itself with `gh pr review <N> --comment`,
-  and must not edit, push to or merge the branch.
-
-Say what the PR claims, but not why you think it is right. The reviewer is
-there to check the claims, not to be talked into them. Keep working while it
-runs. **Do not end the session until it returns.** The subagent belongs to
-your session: end it early, and either the review dies with it or its
-verdict arrives with nobody left to act on it. Then read the verdict with the
-query below:
-
-- **`APPROVED`**: merge, unless a rule below holds the merge.
-- **`CHANGES REQUESTED`**: fix the findings on the branch, push, and launch a
-  *fresh* subagent to re-review. A re-review by the agent that asked for the
-  changes is not independent of them either. The new reviewer re-reviews the
-  rework (the `review` skill's "Re-reviewing a rework"). It is not a second
-  opinion on the old code: relaunching reviewers until one approves is
-  shopping for a verdict, not a review.
+"make a PR and merge it" means launch that reviewer, then merge on its
+verdict. On `CHANGES REQUESTED`, fix the branch and launch a fresh reviewer
+with the same bare prompt. If no reviewer can be launched, give the URL, say
+the PR is waiting on review, and stop.
 
 **The review always runs; some cases hold only the merge.** Launch the
-reviewer even when:
-
-- the task told you not to merge (an Orca worker's coordinator merges); or
-- a rule below says the owner decides too.
-
-In those cases, get the verdict. If it is `APPROVED`, leave the PR open with
-the URL, the verdict, and what the merge is still waiting on. If it is
-`CHANGES REQUESTED`, the work is still in hand: fix it and get a fresh
-re-review, or hand the PR over explicitly, naming the latest verdict. The one
-case with no review at all is that no subagent can be launched. Then say so,
-give the URL, and stop.
+reviewer even when the task told you not to merge (an Orca worker's
+coordinator merges), and even when a rule below says the owner decides too.
+Wait for its verdict before you finish: the subagent belongs to your session,
+so ending early either kills the review or lands the verdict with nobody left
+to act on it. On `APPROVED`, merge unless one of those holds applies — if one
+does, leave the PR open with its URL, its verdict, and what the merge is still
+waiting on. `CHANGES REQUESTED` is work still in hand, not a reason to leave:
+do the rework and the re-review above, or hand the PR over explicitly, naming
+the latest verdict. Relaunching reviewers on unchanged code until one approves
+is shopping for a verdict, not a review.
 
 ```
 gh pr checks <N> --watch
@@ -150,12 +136,11 @@ the change, so it must pass the same lint (`scripts/lint-commit-msg.sh`). Keep
 a real merge commit only when each commit is a reviewed unit in its own right,
 as in a ticketed epic.
 
-**Do not merge** a PR with no `VERDICT: APPROVED`, one whose checks are red
-or still running, one the owner
-asked to review, or one that deviates from a design doc, bumps `gdext`, or
-changes the save format. Leave an approved one open with the URL and say
-what it waits on. With no verdict at all, the step above is not done yet:
-launch the reviewer.
+**Do not merge** a PR with no `VERDICT: APPROVED`, one whose checks are red or
+still running, one the owner asked to review, or one that deviates from a
+design doc, bumps `gdext`, or changes the save format. Leave it open, give the
+URL, and say what it waits on — and if what it lacks is the verdict, step 5 is
+not finished yet: launch the reviewer.
 
 ## Afterwards
 

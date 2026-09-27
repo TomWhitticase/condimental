@@ -451,6 +451,25 @@ func _run_checks() -> void:
 			_fail("the stock plate is capped below one row's height at %s" % str(window))
 			return
 
+	# --- The mode tab stands on the hotbar's top rule, not above it -------
+	# A plated tab with its own rule reads as a separate chip hovering over
+	# the strip if even a few pixels of floor show between them (the first
+	# cut floated 11px up). The flyout, bare text, keeps its clearance.
+	for window in [BIG, SMALL]:
+		_resize(window)
+		var tab: Rect2 = main._mode_indicator.get_global_rect()
+		var plate: Rect2 = main._hotbar_panel.get_global_rect()
+		if absf(tab.end.y - plate.position.y) > 1.0:
+			_fail("the mode tab's bottom (%.1f) should sit on the hotbar plate's top (%.1f) at %s" % [
+				tab.end.y, plate.position.y, str(window)
+			])
+			return
+		if tab.position.x < plate.position.x - 1.0 or tab.end.x > plate.end.x + 1.0:
+			_fail("the mode tab overhangs the hotbar plate at %s (tab %s, plate %s)" % [
+				str(window), str(tab), str(plate)
+			])
+			return
+
 	# --- The CREW plate: the staffing readout that needs no key pressed ----
 	# It is the bottom tenant of the right-hand column, so the order of
 	# yielding it completes is: the clipboard scrolls its dockets, the stock

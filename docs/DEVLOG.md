@@ -174,7 +174,7 @@ below is history and should only ever be appended to.)*
 
 - **Conveyor splitters (DONE, both halves):** a line can fork. A `splitter` is a 1x1 buildable kind that carries product exactly like a belt tile and deals it alternately between two outputs — the tile it faces, and the tile one quarter turn clockwise from it — so one `rotate` turns both outputs together and no new command was needed. If the side that is due is blocked (or was never built) the item goes down the other one in the same tick, so a full branch never stalls the whole line and "only one output connected" needs no special case. It reaches every sink a belt's hand-off does: another belt, another splitter, a machine's inlet face, a dock. It is **drawn** as a machined diverter table set into the belt run — a bright steel plate where the rest of the line is rubber, with three open lanes and one closed rail — carrying a **next-output arrow inlaid flush in the deck**: both directions are cut into the table as grooves and one of them lights up, so which way the next item goes is a pair of positions rather than a colour, and nothing stands proud of the surface the product slides over. The arrow shows where the item will **actually** go, not the raw `next_output`: a splitter whose branch was never built reports "branch" forever while everything goes straight, and an arrow driven off that field alone would point at bare floor. Items cross a splitter drawn exactly as they cross a belt, and hover names both outputs and says "not connected" about one that was never laid.
 - **Contracts (done, both halves):** contracts are `data/contracts.ron` content and three run concurrently, each with its own mix/cadence/payout, all drawing from one shared pool of delivered stock (a box pays one contract, never two). The clipboard panel shows all of them — one paper docket card per contract on the one board, each with its own checklist, payout, countdown and delivered/missed tally, above a single shared money figure and a single "on the dock" line naming the pool they compete for.
-- **Contract board (DONE, both halves, 2026-09-10):** contracts are **signed and can be lost**. A new game runs one basic contract; the rest of `data/contracts.ron` (schema 2, nine offers since the 2026-09-11 growth tier — a starter tier one line can serve, then six larger, slower orders for every line after it — with `price`, `strikes` and `starter`) is a board the player buys from on **C**, one of each contract only. A contract that misses its strikes in a row is lost — it leaves the clipboard, is announced, and goes back on the board to be signed again at its price. Each docket now says how it is doing and whether it is in danger: a status line (✔ READY / ⚠ AT RISK / ⚠ LAST CHANCE), strike pips and a state border beside the countdown bar. The top offer exceeds one line's throughput beside the others, by design. Built on branch `TomWhitticase/contract-board`.
+- **Contract board (DONE, both halves, 2026-09-10):** contracts are **signed and can be lost**. A new game runs no contract (since 2026-09-26, #194: every offer is signed from the board); all of `data/contracts.ron` (schema 2, nine offers since the 2026-09-11 growth tier — a starter tier one line can serve, then six larger, slower orders for every line after it — with `price`, `strikes` and `starter`) is a board the player buys from on **C**, one of each contract only. A contract that misses its strikes in a row is lost — it leaves the clipboard, is announced, and goes back on the board to be signed again at its price. Each docket now says how it is doing and whether it is in danger: a status line (✔ READY / ⚠ AT RISK / ⚠ LAST CHANCE), strike pips and a state border beside the countdown bar. The top offer exceeds one line's throughput beside the others, by design. Built on branch `TomWhitticase/contract-board`.
 - **Chain rework (DONE, both halves):** the middle of the production line is **piped, not belted**, which is what a real sauce plant looks like. The mixer's output and the cooking vat's output are fluids (`recipes.ron` schema_version 3 gained `fluid_outputs`), so mix flows from the mixer to the vat and cooked ketchup from the vat to the bottler through pipe runs with no tank behind them; the bottler is where the product becomes a solid again, and the cooking vat is now the one machine on the line **no belt touches at all**. The mixer gained **sugar** as a second solid ingredient and grew to **1x2** for it — a machine accepts solid input on every tile of the edge opposite the way it points, so N solid ingredients need N tiles of inlet face or the two lanes merge onto one belt and deadlock. The aging rack is gone. **Raw ingredients cost money**: `data/ingredients.ron` prices tomato, sugar and vinegar, a `BuyIngredient` command buys them, and a hopper or a tank is loaded from that bought stock *(originally with the global `SPACE`/`V` keys; since the configuration panel below, from the building's own panel)* — so overproduction is a real loss rather than free accumulation. On the presentation side: a hopper's contents are chosen **when it is placed** (the ghost carries a tinted product body and the prompt names them in words; the **Q** key that cycled them is gone, replaced by the placed hopper's own picker), because with two raw solids the simulation can no longer infer which bin the player meant — until that landed, placing a hopper from the UI did nothing at all, silently. Buying stock has its own panel on **M** (the build menu was already as tall as the space above the hotbar allows), and a permanent larder strip above the hotbar shows what is carried so an unloadable hopper explains itself. The mixer, the cooking vat and the bottler were re-modelled with pipe nozzles where belts no longer meet them.
 - **Hopper/tank configuration (DONE, both halves):** nothing about feeding a factory is on the keyboard any more. A placed hopper or tank is **clicked**, and a panel beside it shows its level, a **FILL** button (disabled with its reason in words when the larder is empty, the bin is full, or the tank is plumbed to nothing), an **AUTO-FILL** switch that keeps the bin topped up from bought stock every tick — spending stock, never money, and simply pausing while the larder is dry — and, for a hopper, an item picker that retargets it in place. The click is a toggle, only one panel ever exists, ESC closes it first, and it closes itself under any menu or mode. The global **SPACE**/**V**/**Q** keys and `CycleHopperItem` are deleted. Pinned by `test_config_panel.gd`; `scripts/screenshot-scene.sh --config TX,TY` photographs it.
 - **Machine animations (done):** every processing machine has a visible moving mechanism — the crusher's toothed rolls and flywheels, the mixer's ribbon, the cooking vat's agitator spider, the bottler's plunging nozzles and capping chuck, the packer's taping carriage, and a drive spider on the generic housing for any kind without a model of its own. Drawn as a four-frame motion overlay on the machine's own footprint (the moving parts are cut out of the bodies, not duplicated, so nothing z-fights), advanced from the tick beside the belt animation so the pause menu freezes it. **It runs only while the machine is actually working**: `Machine::tick` keeps the process of a machine that has finished but is blocked on a full output, so the gate is `elapsed < required` rather than `process != null` — which makes a lit status lamp over a still machine mean "the thing downstream is full". One pace for every kind (a cycle per 30 ticks); the belt carries speed.
@@ -245,16 +245,61 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
-### 2026-09-26 — A PR with no verdict gets a subagent reviewer
+### 2026-09-26 — The review always runs; only the merge is ever held
 
-A PR with green checks and no `VERDICT:` no longer ends its author's session
-with "waiting on review". The author now launches a fresh `general-purpose`
-subagent, never a `fork`. It runs the `review` skill in its own worktree and
-posts the verdict itself. The author waits for that verdict before closing.
-The review runs even when the task or the owner holds the merge; only the
-merge waits. PR #193 is the one that sat waiting. The rule is in
-`CLAUDE.md`, `docs/WORKFLOW.md` and the `open-pr`, `wrap-it-up` and `review`
-skills. Decision record: 2026-09-26 in `docs/DECISIONS.md`.
+An amendment to the entry below, from the PR that prompted it: #193 ended its
+session open and "waiting on review" when nobody had been asked to review it.
+So an author with no verdict commissions one rather than stopping, and waits
+for it before closing — the reviewer subagent does not outlive the session.
+The review is commissioned even when the merge cannot happen, because the task
+reserves the merge for a coordinator or the change also needs the owner; the
+PR then ends up open *with* its verdict, naming what the merge waits on. Those
+holds, an explicit handover naming the latest verdict, and "no subagent could
+be launched" are the only ways a PR may end a session open; a `CHANGES
+REQUESTED` verdict is work still in hand. `CLAUDE.md`, `docs/WORKFLOW.md` and
+the `open-pr` and `wrap-it-up` skills say this too.
+
+### 2026-09-26 — A reviewer needs a clean context, not a different session
+
+The owner amended the review rule. A PR still needs a `VERDICT: APPROVED`
+before it merges. The reviewer no longer has to be another session, but it
+must not share the author's context. The usual reviewer is now a fresh
+subagent the author launches with only the PR number and the `review` skill,
+never the author's reasoning. That lets an author finish "make a PR and merge
+it" without waiting on someone else, while keeping the review independent.
+CLAUDE.md, CONTRIBUTING.md, WORKFLOW.md, the pre-push hook and the `open-pr`,
+`review` and `wrap-it-up` skills say this now. Recorded in DECISIONS_LOG.md
+and DECISIONS.md.
+
+### 2026-09-26 — Seven owner patches: an empty start, a split board, a searchable shop
+
+One batch of small owner requests, each its own reviewed PR. A new game now
+signs no contract: every offer is bought from the board, like every tile
+(#194, reversing the 2026-09-10 starter rule). **C** opens a two-column
+board, the running dockets on the left and the offers on the right (#195).
+The build menu is sectioned by category with a search box, and is the one
+panel allowed to scroll at 1600x900 (#196). A tab beside the hotbar names
+the current build mode (#190). A machine the staff pools refused its crew
+wears a red person, decided in the sim as `understaffed` and gated on a real
+recent refusal so it does not blink (#192). The P screen's pay-cycle block
+is below (#193), and both crusher rolls are grey (#189). #192's saved
+`refusal_hold` rides #193's schema 4 bump. GitHub Actions was blocked by
+account billing for the whole batch, so each PR merged by admin override at
+its reviewed tip, after `verify-core-loop.sh` passed locally for the author,
+the reviewer, and once more on the combined `main`.
+
+### 2026-09-26 — The P screen weighs output against the pay cycle's orders
+
+The production screen (P) opens on a pay-cycle block: one row per product an
+active contract orders, with REQUIRED per payday period (each mix scaled by
+period over cadence), THIS CYCLE and LAST CYCLE. A finished cycle that
+fell short of the orders running now takes the staff panel's short border
+and prints `▲ short` in the warning colour. The cycle is the staff payday,
+not a new clock; `ProductionLedger` rolls this cycle into last on the payday
+tick. **Save schema 4:** those counts cannot be re-derived, so a v3 save is
+refused by number rather than migrated (re-run `make-demo-saves.sh`). Review
+caught two Godot checks that could never fail and a test loop that hung
+instead of failing; both now go red under the mutation they guard (PR #193).
 
 ### 2026-09-26 — Open-source licence and alpha-release groundwork
 

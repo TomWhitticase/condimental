@@ -33,16 +33,15 @@ empty, and the player buys and places every tile.
 - **Never commit or push to `main`.** Work on a branch and merge it through a
   pull request (`gh pr create`); a `pre-push` hook refuses the alternative.
 - **No PR merges before it is reviewed.** It needs green checks AND a
-  `VERDICT: APPROVED` from a session that did not write it (the `review`
-  skill). "Make a PR and merge it" means merge after that verdict. **With no
-  verdict yet, do not stop and wait: launch a fresh subagent** (the Agent
-  tool, `general-purpose`, never a `fork`) to review it with the `review`
-  skill, wait for its verdict, and act on it (`open-pr` step 5). The review
-  always runs. Only the *merge* is held when the task forbids merging (an Orca
-  worker's coordinator merges) or the owner must also sign off (a PR the owner
-  asked to review, a design-doc deviation, a `gdext` bump, a save-format
-  change). Only if no subagent can be launched does the PR sit open with no
-  review.
+  `VERDICT: APPROVED` from a reviewer that does not share the author's
+  context: launch a fresh subagent given only the PR number and the `review`
+  skill, never your reasoning or a summary of the change (a session that did
+  not write the branch also qualifies). "Make a PR and merge it" means run
+  that review, then merge on its verdict. The review always runs: a task that
+  forbids you merging (an Orca worker's coordinator merges) or a change that
+  also waits on the owner holds only the *merge*. On `CHANGES REQUESTED`, fix
+  and send a fresh reviewer; if none can be launched, leave the PR open and
+  say it is waiting on review.
 - **Every PR body shows the change in a screenshot** — render with
   `scripts/screenshot-scene.sh`, read it, publish with
   `scripts/pr-screenshot.sh`, paste its markdown. A hook and CI both refuse a

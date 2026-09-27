@@ -84,7 +84,7 @@ fn run_until_delivered(world: &mut World, target: u32) {
 #[test]
 fn the_counter_advances_once_per_satisfied_window_and_not_at_all_without_one() {
     // An unstocked world: the factory is fully built and running, and has
-    // nothing to run *on*. `corner_shop` is active from tick 0 and its
+    // nothing to run *on*. The fixture signs `corner_shop` on tick 0 and its
     // windows come round every 1 000 ticks, so this passes several of them.
     let mut starving = reference_chain_with_budget(recipes(), BUDGET);
     assert_eq!(

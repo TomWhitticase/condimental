@@ -65,20 +65,19 @@ it. The wrap-up-specific parts:
   the session ends.** An open PR is unfinished work; an open PR whose worktree
   has been deleted is unfinished work nobody can finish.
 - **A PR merges on a review verdict, and you cannot write your own.** A PR is
-  reviewed adversarially by someone who did not write it (`docs/WORKFLOW.md`,
-  and the `review` skill), the verdict posted as a comment whose first line is
-  `VERDICT: APPROVED`. A session that wrote the branch cannot supply that,
-  however carefully it re-runs its own tests. So **a PR of yours ends the
-  session open only if it is approved and its merge is held (by checks not yet
-  green, by the task, or by the owner), or it is explicitly handed over with
-  its latest verdict named, or no reviewer subagent could be launched.** With
-  no verdict, launch the review yourself as a fresh subagent (`open-pr` step
-  5: `general-purpose`, never `fork`) rather than ending on "waiting for
-  someone", and **wait for its verdict before you close**: the subagent dies
-  with the session. A `CHANGES REQUESTED` verdict is work still in hand: fix
-  it and get a fresh re-review, or hand the PR over saying so. For an approved
-  PR left open, say which hold applies. Do not merge it to tidy the session
-  up.
+  reviewed adversarially by a reviewer that does not share your context
+  (`docs/WORKFLOW.md`, and the `review` skill): launch a fresh subagent given
+  only the PR number and the `review` skill, and merge on its
+  `VERDICT: APPROVED`. You cannot supply that verdict yourself, however
+  carefully you re-run your own tests, and neither can a subagent you briefed
+  with your reasoning. **Wait for that verdict before you close**: the subagent
+  dies with the session. So **a PR of yours ends the session open only if it is
+  approved and its merge is held (by checks not yet green, by the task, or by
+  the owner), or it is explicitly handed over with its latest verdict named, or
+  no reviewer could be launched at all.** A `CHANGES REQUESTED` verdict is work
+  still in hand: fix it and get a fresh re-review, or hand the PR over saying
+  so. For an approved PR left open, say which hold applies. Do not merge it to
+  tidy the session up.
 - **Check mergeability before waiting on checks.** A PR with conflicts gets no
   CI run at all, so `--watch` waits forever on nothing:
 

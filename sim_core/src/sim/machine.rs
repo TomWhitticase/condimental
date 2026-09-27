@@ -261,6 +261,17 @@ pub struct Machine {
     /// `staff` stall kind, after the six older kinds have found nothing.
     /// Saved (`save.rs`), since it shows in snapshots.
     pub refused_by: Option<String>,
+    /// Ticks left in which this machine still counts as **recently refused
+    /// its crew**: set to [`LOAD_WINDOW_TICKS`] on every refusal, counted
+    /// down by every other tick. `refused_by` is one tick's fact and blinks
+    /// (the pools reset every tick, so a short machine is handed its crew
+    /// whenever an upstream one claims nothing); this holds across the
+    /// blinks, and reaches zero only once a whole load window has passed
+    /// without a refusal. `World::machine_load_snapshots` reads it for
+    /// `MachineLoadEntry::understaffed`, so the red person is over a machine
+    /// that is actually being turned away, not merely one short on paper.
+    /// Saved (`save.rs`), since it shows in snapshots.
+    pub refusal_hold: u32,
     /// **Switched off deliberately by the player** (`PlayerCommand::
     /// SetMothballed`, issue #19's escape hatch from the unpaid spiral).
     /// A mothballed machine asks for no crew, so it drops out of the
@@ -284,6 +295,7 @@ impl Machine {
             process: None,
             load: LoadWindow::new(),
             refused_by: None,
+            refusal_hold: 0,
             mothballed: false,
         }
     }
@@ -382,6 +394,7 @@ impl Machine {
     ) -> bool {
         let mut changed = false;
         self.refused_by = None;
+        self.refusal_hold = self.refusal_hold.saturating_sub(1);
         if self.mothballed {
             // Switched off: no crew is asked for (which is the whole point —
             // `recompute_establishment` has already dropped this machine's
@@ -487,6 +500,7 @@ impl Machine {
         };
         if let Some(category) = refused {
             self.refused_by = Some(category);
+            self.refusal_hold = LOAD_WINDOW_TICKS;
             if let Some(process) = self.process.as_mut() {
                 // Paused, not lost: elapsed stands still.
                 process.start_tick += 1;

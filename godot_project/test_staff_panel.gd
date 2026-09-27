@@ -868,8 +868,8 @@ func _run_checks() -> void:
 	main._set_staff_open(false)
 
 	# --- 8. a dock refused its logistics head --------------------------------------
-	# The shipped line, so the dock holds boxed ketchup the starter order
-	# wants: a dock asks for its logistics crew only while it holds
+	# The shipped line, so the dock holds boxed ketchup the signed
+	# corner-shop order wants: a dock asks for its logistics crew only while it holds
 	# something a contract orders (`World::tick` step 6), and a dock of
 	# goods nobody ordered asks for nobody and is never "held".
 	main.sim.new_game()
