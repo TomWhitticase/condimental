@@ -3842,7 +3842,8 @@ matches what code comments and data files cite.
 
   The restructure, following the video's own prescriptions:
 
-  - **`CLAUDE.md` is 72 lines / ~950 tokens** (a 97% cut). It holds the
+  - **`CLAUDE.md` was cut to 72 lines / ~950 tokens** (a 97% cut; it grows a
+    little as rules are added — 98 lines on 2026-09-27). It holds the
     project in a sentence, the rules that genuinely always apply — Rust owns
     gameplay logic, content is data, no floats in sim state, follow the
     design docs, small increments, plan mode, text scenes, Conventional

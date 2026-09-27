@@ -238,9 +238,12 @@ See [WORKFLOW.md](WORKFLOW.md).
   review. This replaces the old WORKFLOW.md wording that let authors merge
   their own routine work unreviewed. Binds `CLAUDE.md`, `docs/WORKFLOW.md`,
   `.githooks/pre-push` and the `open-pr` and `wrap-it-up` skills. Full record in `docs/DECISIONS.md`.
-  **Amended 2026-09-26:** the reviewer need not be another session, only one
-  that does not share the author's context — typically a fresh subagent given
-  just the PR number (see that entry above).
+  **Amended 2026-09-26** (see that entry above), in both halves: the reviewer
+  need not be another session, only one that does not share the author's
+  context — typically a fresh subagent given just the PR number — and with
+  no verdict the author commissions that review rather than stopping.
+  Stopping with the PR open is now the fallback for when no reviewer can be
+  launched at all, not the answer to a missing verdict.
 - 2026-09-25 **The review render's clock is PINNED, so the same command twice
   is the same picture.** `scripts/screenshot-scene.sh` passes Godot's own
   `--fixed-fps 60`; `_advance_simulation` is untouched, so the tick loop a
@@ -1067,7 +1070,7 @@ See [WORKFLOW.md](WORKFLOW.md).
   `@`-included the three design docs and carried this log plus a per-file
   project structure, so every single request paid for ~2,000 lines
   (~34,500 tokens) whether or not any of it applied. An `@`-include is
-  inlining. The root file is now 72 lines: the project in a sentence, the
+  inlining. The root file was cut to 72 lines: the project in a sentence, the
   rules that genuinely always apply, a directory-level layout, and a table
   from "what you are working on" to "which doc to read". This log, the
   workflow material and the design docs are **linked, not included**;
