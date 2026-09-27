@@ -61,9 +61,10 @@ Run the full gate once, here, rather than repeatedly during the session.
 Follow the `open-pr` skill — it is the authority, and the hooks and CI enforce
 it. The wrap-up-specific parts:
 
-- **Every PR opened in this session is merged or explicitly handed over before
-  the session ends.** An open PR is unfinished work; an open PR whose worktree
-  has been deleted is unfinished work nobody can finish.
+- **Every PR opened in this session is merged, explicitly handed over, or left
+  open for one of the reasons below, before the session ends.** An open PR is
+  unfinished work; an open PR whose worktree has been deleted is unfinished
+  work nobody can finish.
 - **A PR merges on a review verdict, and you cannot write your own.** A PR is
   reviewed adversarially by a reviewer that does not share your context
   (`docs/WORKFLOW.md`, and the `review` skill): launch a fresh subagent given

@@ -75,7 +75,7 @@ matches what code comments and data files cite.
   verdict before ending the session, because the subagent is part of that
   session and does not outlive it. A `CHANGES REQUESTED` verdict is work still
   in hand, not a way to end one: fix it and get a fresh re-review, or hand the
-  PR over explicitly, naming the verdict.
+  PR over explicitly, naming that latest verdict.
 
   **What was rejected.** Letting the author review its own work "carefully"
   was rejected for the same reason the routine-change exemption was: the

@@ -402,10 +402,10 @@ issue is the right home only for work that is not being done yet.
 ### Closing out a session
 
 A session ends when its worktree could be deleted without losing anything —
-not when the last edit is made. Every branch has reached `main` through a
-merged pull request, nothing is uncommitted, unpushed or left in the shared
-stash, and every pull request this session opened is merged, or open for one
-of the reasons below.
+not when the last edit is made. Nothing is uncommitted, unpushed or left in
+the shared stash, and every branch has reached `main` through a merged pull
+request — or is pushed, with its pull request open for one of the reasons
+below.
 
 The `wrap-it-up` skill is the procedure, including the sweep that proves it
 and the banner that reports it. Three rules it exists to enforce:
