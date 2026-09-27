@@ -245,6 +245,18 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-26 — A reviewer needs a clean context, not a different session
+
+The owner amended the review rule. A PR still needs a `VERDICT: APPROVED`
+before it merges. The reviewer no longer has to be another session, but it
+must not share the author's context. The usual reviewer is now a fresh
+subagent the author launches with only the PR number and the `review` skill,
+never the author's reasoning. That lets an author finish "make a PR and merge
+it" without waiting on someone else, while keeping the review independent.
+CLAUDE.md, CONTRIBUTING.md, WORKFLOW.md, the pre-push hook and the `open-pr`,
+`review` and `wrap-it-up` skills say this now. Recorded in DECISIONS_LOG.md
+and DECISIONS.md.
+
 ### 2026-09-26 — Seven owner patches: an empty start, a split board, a searchable shop
 
 One batch of small owner requests, each its own reviewed PR. A new game now

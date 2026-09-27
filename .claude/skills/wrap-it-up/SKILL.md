@@ -65,12 +65,15 @@ it. The wrap-up-specific parts:
   the session ends.** An open PR is unfinished work; an open PR whose worktree
   has been deleted is unfinished work nobody can finish.
 - **A PR merges on a review verdict, and you cannot write your own.** A PR is
-  reviewed adversarially by someone who did not write it (`docs/WORKFLOW.md`,
-  and the `review` skill), the verdict posted as a comment whose first line is
-  `VERDICT: APPROVED`. A session that wrote the branch cannot supply that,
-  however carefully it re-runs its own tests — so **a PR of yours awaiting
-  review is the one legitimate way to end with a PR still open**. Push it,
-  say it is waiting and on what, and do not merge it to tidy the session up.
+  reviewed adversarially by a reviewer that does not share your context
+  (`docs/WORKFLOW.md`, and the `review` skill): launch a fresh subagent given
+  only the PR number and the `review` skill, and merge on its
+  `VERDICT: APPROVED`. You cannot supply that verdict yourself, however
+  carefully you re-run your own tests, and neither can a subagent you briefed
+  with your reasoning. If no reviewer can be launched, **a PR of yours
+  awaiting review is the one legitimate way to end with a PR still open**.
+  Push it, say what it is waiting on, and do not merge it to tidy the session
+  up.
 - **Check mergeability before waiting on checks.** A PR with conflicts gets no
   CI run at all, so `--watch` waits forever on nothing:
 
