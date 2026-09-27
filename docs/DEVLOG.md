@@ -100,13 +100,13 @@ below is history and should only ever be appended to.)*
   below and `docs/DECISIONS.md`.
 - **Agent context restructured (2026-09-16).** `CLAUDE.md` was cut to 72 lines
   (98 on 2026-09-27, as rules have been added) and `@`-includes nothing; it
-  maps a task to the doc that covers it. The
-  condensed decisions log lives in `docs/DECISIONS_LOG.md`, workflow in
-  `docs/WORKFLOW.md`, and `sim_core/`, `godot_project/` and `assets/voxels/`
-  each carry their own `CLAUDE.md` of local invariants with `AGENTS.md`
-  symlinked beside it. Four skills under `.claude/skills/`. Always-loaded
-  context went from ~34,500 tokens to ~950. See the log entry below for the
-  five doc defects the move turned up, including the tick rate.
+  maps a task to the doc that covers it. The condensed decisions log lives in
+  `docs/DECISIONS_LOG.md`, workflow in `docs/WORKFLOW.md`, and `sim_core/`,
+  `godot_project/` and `assets/voxels/` each carry their own `CLAUDE.md` of
+  local invariants with `AGENTS.md` symlinked beside it. Four skills under
+  `.claude/skills/`. Always-loaded context went from ~34,500 tokens to ~950.
+  See the log entry below for the five doc defects the move turned up,
+  including the tick rate.
 - **The world is indoors (2026-09-16).** The backdrop is a factory-interior
   sky shader, not weather, and the scene's lighting is the hall's rather than
   a sun's. See the log entry below.
@@ -246,6 +246,23 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-09-27 — `--admin` is the owner's override, and now it is written down
+
+GitHub refused to start any job in the repository on an account billing error,
+so every check on every PR failed in seconds with no steps at all. Branch
+protection then makes a merge impossible rather than inadvisable: `gh pr merge`
+refuses on the base-branch policy and nothing on the branch can clear it. Three
+PRs landed on `gh pr merge --admin` on the owner's say-so, and the rule appeared
+in no document, so `docs/WORKFLOW.md` and the `open-pr` skill now say what it is
+for — the owner's waiver of the green-checks half, with the verdict still
+required, a branch's own red check still the branch's to fix, and the reason and
+local evidence written into the squash body that `main` keeps.
+
+Also from the ninth review of #198: the full record's retired "self-merging is
+allowed for routine work" now carries the 2026-09-25 annotation beside its
+2026-09-26 one, and `wrap-it-up`'s banner example stopped naming a PR that had
+in fact merged with no hold and no review.
 
 ### 2026-09-27 — The red person holds over a short vat on a shared pipe
 

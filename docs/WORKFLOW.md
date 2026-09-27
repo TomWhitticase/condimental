@@ -282,6 +282,19 @@ its verdict, naming what the merge is still waiting on — so no PR sits
 waiting on a review nobody was asked for, as #193 did until the owner said so
 (2026-09-26).
 
+**`--admin` is the owner's override, never yours.** `main` is protected, so
+when the required checks have not run `gh pr merge` refuses outright — first
+with "the head branch is not up to date with the base branch", which a real
+`git merge origin/main` and a push do fix, and then with "the base branch
+policy prohibits the merge", which nothing on the branch can fix. Adding
+`--admin` merges past it. Use it **only** when the owner has said to land the
+work anyway, and only with a `VERDICT: APPROVED` in hand: the review gate is
+not what is being waived. Say in the squash body that the checks could not run
+and what was verified locally in their place, because the body is what `main`'s
+history keeps. This came up on 2026-09-27, when GitHub refused every job in
+the repository on a billing error and #198, #201 and #202 landed this way; a
+red check that belongs to the branch is still the branch's to fix.
+
 **A PR is reviewed adversarially, by a reviewer that does not share the
 author's context.** What makes a review independent is not which session runs
 it but what the reviewer knows. It starts from the PR and the repository alone:

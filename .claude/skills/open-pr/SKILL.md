@@ -144,6 +144,16 @@ verdict states is a "leave it open": no verdict means step 5 is not finished —
 launch the reviewer — and `CHANGES REQUESTED` means rework, per the paragraph
 above.
 
+**`gh pr merge --admin` is the owner's call, not a retry.** Branch protection
+means a PR whose required checks never ran cannot merge at all: `gh` answers
+"the head branch is not up to date with the base branch" (merge `origin/main`
+and push — that one is yours to fix), then "the base branch policy prohibits
+the merge" (nothing on the branch fixes that). `--admin` goes past it, and it
+is for the case where the owner has said to land the work with CI dead — never
+for a check that is red because of your change, and never instead of the
+verdict. Put the reason and the local evidence in the squash body; see
+`docs/WORKFLOW.md`.
+
 ## Afterwards
 
 ```

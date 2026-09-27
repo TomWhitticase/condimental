@@ -71,12 +71,12 @@ matches what code comments and data files cite.
   bump, a save-format change. The review happens anyway, and the PR then stays
   open *with* its verdict, naming the hold. #193 was an example of two of them
   at once — an Orca ticket and a save-schema bump — and still needed
-  reviewing. The one case with no review
-  at all is that no subagent can be launched. The author also waits for the
-  verdict before ending the session, because the subagent is part of that
-  session and does not outlive it. A `CHANGES REQUESTED` verdict is work still
-  in hand, not a way to end one: fix it and get a fresh re-review, or hand the
-  PR over explicitly, naming that latest verdict.
+  reviewing. The one case with no review at all is that no subagent can be
+  launched. The author also waits for the verdict before ending the session,
+  because the subagent is part of that session and does not outlive it. A
+  `CHANGES REQUESTED` verdict is work still in hand, not a way to end one: fix
+  it and get a fresh re-review, or hand the PR over explicitly, naming that
+  latest verdict.
 
   **What was rejected.** Letting the author review its own work "carefully"
   was rejected for the same reason the routine-change exemption was: the
@@ -750,6 +750,14 @@ matches what code comments and data files cite.
   the review rather than stopping, so an open PR must be approved with its
   merge held, handed over with its latest verdict named, or unreviewable for
   want of a subagent.)*
+
+  *(Amended 2026-09-27, the green-checks half only: when GitHub refuses to run
+  the checks at all — a billing stop, not a failure — branch protection makes
+  the merge impossible rather than inadvisable, and `gh pr merge
+  --admin` is how the owner lands work anyway. The verdict is not waived with
+  it, a check that is red because of the change is still the change's to fix,
+  and the squash body carries the reason plus the local evidence, because that
+  body is what `main` keeps. #198, #201 and #202 landed under it.)*
 
   **What was rejected.** Keeping the routine-change exemption was rejected.
   Whether a change counts as "routine" is judged by its author, which is
@@ -3761,8 +3769,11 @@ matches what code comments and data files cite.
   cases**: red or still-running checks, a PR the owner asked to review,
   anything the design docs call a deviation, and a `gdext` bump or save-format
   change. The agent says it is ready, gives the URL, and stops. *(Amended
-  2026-09-26: the review itself never stops — a PR with no verdict gets a
-  subagent reviewer, and only the merge waits. See the top of Part A.)*
+  twice, and the bolded rule above is retired: from 2026-09-25 no PR
+  self-merges — every one of them needs a `VERDICT: APPROVED` first, routine
+  or not — and from 2026-09-26 the review itself never stops, so a PR with no
+  verdict gets a subagent reviewer and only the merge waits. Both are at the
+  top of Part A.)*
 
   `.github/pull_request_template.md` asks for what a review here actually
   needs, which is not "what changed" — the diff says that — but **what was run

@@ -188,10 +188,12 @@ Under either banner, list: the PR URLs and whether each merged, any issue
 numbers filed and why they were not fixed, and the exact worktree-removal
 command. Under the red one, add what is unfinished, where it is (branch,
 file, PR), the next concrete step, and — separately and in as many words —
-**whether the tree can still be deleted safely**. "PR #162 is pushed and
+**whether the tree can still be deleted safely**. "PR #N is pushed and
 approved, its merge held for the owner; the worktree can go, the work cannot
 be lost" is a red banner with a clean tree, and saying only one half of that
-misleads.
+misleads. Name the PR you actually held: this example used to cite #162, which
+had in fact merged with no hold and no review at all, and a reader who checks
+the number learns to trust the rest of the banner less.
 
 **Never print the green banner with work outstanding.** The banner is a
 promise; a wrong one costs someone their work, or merges something nobody
