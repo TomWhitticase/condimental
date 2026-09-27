@@ -298,10 +298,23 @@ refused with a sentence saying what changed. The first cut of this branch
 tried one `#[serde(default)]` instead, and review found what that costs: gate
 state is derived from the ledger on every load, so an old save came back with
 both tiers re-locked, its gated raws unbuyable and a signed BBQ contract
-stranded mid-run. A delivery window never recorded what was in it, so nothing
-in a v4 file can be turned into a boxes-sold ledger without inventing it.
-No release has ever written a save; the local demo saves are rebuilt by
-`scripts/make-demo-saves.sh`, as after any version move.
+stranded mid-run. No release has ever written a save; the local demo saves
+are rebuilt by `scripts/make-demo-saves.sh`, as after any version move.
+
+**A v4 save can be carried over, just not by the loader.** A delivery window
+never recorded what was in it, so the ledger is not in a v4 file — but it can
+be *reconstructed* from one, and `scripts/migrate-save-v4-to-v5.py` does:
+every contract still on the books records how many windows it satisfied,
+`data/contracts.ron` records what a window ships, and the single entry in
+`contracts_lost` takes the windows `lifetime_deliveries` leaves unaccounted.
+The answer is then checked against a figure the save holds independently —
+each dock's `shipped_total` counts boxes that came off its belt, so boxes
+shipped must equal boxes sold plus boxes still standing on the docks. On a
+real 37 000-tick save that identity came out exact (193 = 158 + 35), which is
+what distinguishes a reconstruction from a grandfather clause. It stays a tool
+and does not become a loader path: it reads `data/contracts.ron` to do its job,
+so a rebalance changes its answer, and it degrades to a floor when more than
+one contract has been struck off. The loader still refuses, by number.
 
 **The gates are much later, and that is a flag rather than a tuning
 decision.** The numbers are the owner's. Measured headless at 30 ticks/sec:
