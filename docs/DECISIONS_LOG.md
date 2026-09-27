@@ -18,6 +18,20 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-27 **`gh pr merge --admin` is the owner's override of the
+  green-checks half, never the review half.** `main` is protected, so a PR
+  whose required checks never ran cannot merge at all — `gh` refuses with "the
+  base branch policy prohibits the merge", and no change on the branch can
+  clear it. `--admin` goes past that, and it is for the owner saying to land
+  the work with CI dead: a `VERDICT: APPROVED` is still required, and a check
+  that is red because of the change is still the change's to fix. The squash
+  body says the checks could not run and what was verified locally instead,
+  since that body is what `main`'s history keeps. Stated when GitHub refused
+  every job in the repository on a billing error and eleven PRs — #192–#196
+  and #198–#203 — landed this way. Binds `CLAUDE.md`, `docs/WORKFLOW.md` and
+  the `open-pr` skill; recorded as an amendment inside the 2026-09-25 review
+  record in `docs/DECISIONS.md`.
+
 - 2026-09-26 **The review always runs; only the merge is ever held.** An
   amendment to the entry below, stated after PR #193 ended a session open
   and "waiting on review" that nobody had been asked for. An author with no
@@ -28,12 +42,12 @@ See [WORKFLOW.md](WORKFLOW.md).
   worker's coordinator merges), or when the change also needs the owner (a PR
   the owner asked to review, a design-doc deviation, a `gdext` bump, a
   save-format change), the PR ends up open *with* its verdict, naming the
-  hold. Those held PRs, one handed over
-  with its latest verdict named, and one for which no subagent could be
-  launched are the only PRs that may end a session open — a `CHANGES
-  REQUESTED` verdict is work still in hand, not a way to close. Binds
-  `CLAUDE.md`, `docs/WORKFLOW.md` and the `open-pr` and `wrap-it-up` skills.
-  Recorded in the same `docs/DECISIONS.md` record as the entry below.
+  hold. Those held PRs, one handed over with its latest verdict named, and one
+  for which no subagent could be launched are the only PRs that may end a
+  session open — a `CHANGES REQUESTED` verdict is work still in hand, not a
+  way to close. Binds `CLAUDE.md`, `docs/WORKFLOW.md` and the `open-pr` and
+  `wrap-it-up` skills. Recorded in the same `docs/DECISIONS.md` record as the
+  entry below.
 
 - 2026-09-26 **A PR's reviewer must not share its author's context; it need
   not be another session.** The merge still gates on green checks plus a

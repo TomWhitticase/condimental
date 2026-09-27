@@ -41,7 +41,9 @@ empty, and the player buys and places every tile.
   forbids you merging (an Orca worker's coordinator merges) or a change that
   also waits on the owner holds only the *merge*. On `CHANGES REQUESTED`, fix
   and send a fresh reviewer; if none can be launched, leave the PR open and
-  say it is waiting on review.
+  say it is waiting on review. Only the owner waives the green half, and only
+  when the checks could not run at all (`gh pr merge --admin`, WORKFLOW.md) —
+  never the verdict.
 - **Every PR body shows the change in a screenshot** — render with
   `scripts/screenshot-scene.sh`, read it, publish with
   `scripts/pr-screenshot.sh`, paste its markdown. A hook and CI both refuse a
