@@ -185,6 +185,9 @@ See [WORKFLOW.md](WORKFLOW.md).
   review. This replaces the old WORKFLOW.md wording that let authors merge
   their own routine work unreviewed. Binds `CLAUDE.md`, `docs/WORKFLOW.md`,
   `.githooks/pre-push` and the `open-pr` and `wrap-it-up` skills. Full record in `docs/DECISIONS.md`.
+  **Amended 2026-09-26:** the reviewer need not be another session, only one
+  that does not share the author's context — typically a fresh subagent given
+  just the PR number (see that entry above).
 - 2026-09-25 **The review render's clock is PINNED, so the same command twice
   is the same picture.** `scripts/screenshot-scene.sh` passes Godot's own
   `--fixed-fps 60`; `_advance_simulation` is untouched, so the tick loop a

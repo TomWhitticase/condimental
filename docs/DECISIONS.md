@@ -510,6 +510,11 @@ matches what code comments and data files cite.
 - 2026-09-25: **Every PR is reviewed before it merges, with no exceptions.**
   (Owner's rule, stated after PR #163.)
 
+  *(Amended 2026-09-26 by "A PR's reviewer must not share its author's
+  context" above: the reviewer need not be another session, only one without
+  the author's context, typically a fresh subagent given just the PR number.
+  The "session that did not write the branch" wording below is superseded.)*
+
   **What happened.** A session was told to "pick an issue, fix it, make a PR
   and merge it". It fixed #99, opened PR #163 and merged it on green CI. That
   was allowed at the time: WORKFLOW.md said "merging your own work

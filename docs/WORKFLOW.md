@@ -266,7 +266,8 @@ and no reviewing after the merge** (the owner's rule, 2026-09-25). A PR
 merges only once it has a `VERDICT: APPROVED` comment from a reviewer that
 does not share the author's context (below), and its checks are green. An
 instruction to "open a PR and merge it" means that: get the review, then
-merge on its verdict. PR #163 is why this is spelled out. It merged on green CI under the
+merge on its verdict. PR #163 is why this is spelled out. It merged on green
+CI under the
 old wording ("merging your own work unreviewed is fine for routine
 changes"), and its review could only happen afterwards, with the code
 already on `main`. A deviation from the design docs, a `gdext` bump, a
@@ -295,8 +296,8 @@ reasoning. On `CHANGES REQUESTED`, fix the branch and send a fresh subagent
 the same bare prompt for the re-review.
 
 The reviewer builds the branch in its own worktree, re-runs the reproduction
-of every issue the PR claims to close, and reverts each fix in turn to prove the new
-test actually fails without it. GitHub refuses `--approve` and
+of every issue the PR claims to close, and reverts each fix in turn to prove
+the new test actually fails without it. GitHub refuses `--approve` and
 `--request-changes` on a PR owned by the same account — which is every PR here
 — so the verdict is posted with `gh pr review N --comment`, opening with a line
 that is exactly `VERDICT: APPROVED` or `VERDICT: CHANGES REQUESTED`, and the
