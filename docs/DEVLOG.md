@@ -293,7 +293,8 @@ state is derived from the ledger on every load, so an old save came back with
 both tiers re-locked, its gated raws unbuyable and a signed BBQ contract
 stranded mid-run. A delivery window never recorded what was in it, so nothing
 in a v4 file can be turned into a boxes-sold ledger without inventing it.
-No release has ever written a save.
+No release has ever written a save; the local demo saves are rebuilt by
+`scripts/make-demo-saves.sh`, as after any version move.
 
 **The gates are much later, and that is a flag rather than a tuning
 decision.** The numbers are the owner's. Measured headless at 30 ticks/sec:

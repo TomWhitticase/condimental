@@ -139,6 +139,12 @@
 # an id the book does not hold is refused in words that list the ones it
 # does, rather than photographing the wrong page.
 #
+# `--cookbook-basics ID` opens that topic's page instead, for the same reason
+# and with the same refusal: "the first BASICS page" can only ever be the
+# first topic in `data/guide.ron`, so a change to any page below it — the
+# contracts page, the growing page — has no frame at all otherwise. An id the
+# guide does not ship is refused with the list it does.
+#
 # `--full-dock` builds the FULL-DOCK LINE (test_layouts.gd's
 # `build_full_dock_line`: the reference line on auto-fill, run until the
 # dock has every one of its 32 places taken) and freezes the frame
@@ -481,6 +487,11 @@ var _cookbook_page := false
 ## the argument exists and why the default is still the default.
 var _cookbook_page_id := ""
 var _cookbook_basics := false
+## `--cookbook-basics ID`'s argument, or "" for the flag's wire-driven default
+## (the first topic `data/guide.ron` lists). It exists for `--cookbook-page`'s
+## reason: "the first page" can only ever be the first topic in the file, and a
+## change to any page below it has no frame otherwise.
+var _cookbook_basics_id := ""
 var _understaffed := false
 ## `--staff-shortfall` opens the staff panel over a line funded to less than
 ## its next payday's bill (the quality pass, ticket 4's BEFORE warning) —
@@ -695,7 +706,14 @@ func _initialize() -> void:
 	_cookbook_page_id = _string_arg(args, "--cookbook-page")
 	if _cookbook_page_id.begins_with("--"):
 		_cookbook_page_id = ""
-	_cookbook_basics = args.has("--cookbook-basics")
+	_cookbook_basics = (
+		args.has("--cookbook-basics") or _string_arg(args, "--cookbook-basics") != ""
+	)
+	# Same trap as `--cookbook-page` above: a bare `--cookbook-basics --populate`
+	# would otherwise ask the guide for a topic called "--populate".
+	_cookbook_basics_id = _string_arg(args, "--cookbook-basics")
+	if _cookbook_basics_id.begins_with("--"):
+		_cookbook_basics_id = ""
 	_cookbook = _cookbook_page or _cookbook_basics or args.has("--cookbook")
 	if _cookbook:
 		var flag := "--cookbook"
@@ -1415,13 +1433,25 @@ func _open_first_basics_topic() -> bool:
 		printerr("SCREENSHOT_FAIL: --cookbook-basics could not read cookbook_json")
 		_refuse()
 		return false
+	var known: Array[String] = []
 	for topic in (book as Dictionary).get("guide", []):
 		var id := String(topic.get("id", ""))
 		if id == "":
 			continue
+		known.append(id)
+		if _cookbook_basics_id != "" and id != _cookbook_basics_id:
+			continue
 		_main._cookbook.open("topic", id)
 		_main._position_cookbook_panel()
 		return true
+	if _cookbook_basics_id != "":
+		printerr(
+			"SCREENSHOT_FAIL: --cookbook-basics %s — data/guide.ron has no topic with \
+that id. It ships: %s"
+			% [_cookbook_basics_id, ", ".join(known)]
+		)
+		_refuse()
+		return false
 	printerr(
 		"SCREENSHOT_FAIL: --cookbook-basics found no topics in cookbook_json, so there \
 is no page to open. data/guide.ron ships the BASICS pages — check it loaded."
