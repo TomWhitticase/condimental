@@ -153,21 +153,46 @@
 //! and are not the same shape, which is the exact ambiguity the version
 //! number exists to prevent.
 //!
-//! **What a pre-gate save loads as, and why that is right.**
-//! `lifetime_deliveries` defaults to zero, so a save written before
-//! progression gates existed loads as a factory that has delivered nothing
-//! and finds the BBQ tier locked again — however many deliveries it
-//! actually made. That is deliberate, and it is the *kinder* of the two
-//! options: the alternative (assume an old save has earned every gate) hands
-//! a returning player an unlocked tier with no announcement, which is
-//! exactly the silent gate `data/unlocks.ron` exists to avoid. Re-earning it
-//! costs ten delivery windows on a line that is already built and running —
-//! a couple of minutes — and it ends with the toast they would otherwise
-//! never have seen. Nothing else about the save is affected: no ingredient
-//! is taken away, no signed contract is cancelled, and a contract signed
-//! before the gate existed keeps running (the active list is restored
-//! verbatim, and `try_sign` is the only thing a gate refuses).
-
+//! # Version 5: a gate counts boxes, not delivery windows
+//!
+//! [`SaveData::lifetime_boxes_sold`] is why version 4 became version 5
+//! (2026-09-26, the owner's change): the progression gates stopped keying
+//! off satisfied delivery windows and started keying off boxes of a named
+//! product sold. A file from before that has no such ledger, and this loader
+//! will not write one for it: reconstructing the ledger means reading
+//! `data/contracts.ron` to find out what a delivery window shipped, so the
+//! answer moves with a rebalance, which is not something a load may depend
+//! on. Outside the loader it is a different question, and
+//! `scripts/migrate-save-v4-to-v5.py` answers it — it replays this crate's
+//! own arithmetic over each contract's `deliveries_made` and checks the
+//! result against the docks' `shipped_total`. A v4 file is still refused
+//! here, by number.
+//!
+//! The tempting alternative was one `#[serde(default)]` and no bump, and it
+//! was tried before it was rejected. It loads, but it loses a tier the
+//! player paid for: gate state is *derived* from the ledger on every load,
+//! so an older save with BBQ open comes back with both gates shut, the gated
+//! raws unbuyable, the gated pages re-drawn as silhouettes, and any BBQ
+//! contract already signed still active but impossible to restock — it
+//! stands there striking out. Seeding the ledger from `lifetime_deliveries`
+//! instead is no better: a delivery window says nothing about which product
+//! was in it, so the seed would invent boxes of a sauce the factory may
+//! never have made, and the two errors point in opposite directions.
+//!
+//! Refusing is the honest third answer and the one this crate's every other
+//! loader already gives: the file is from before the rule changed, this
+//! build cannot know what it sold, and it says so instead of guessing. No
+//! release has ever written a save file, so every file in existence is a
+//! development one.
+//!
+//! [`SaveError::UnsupportedSchemaVersion`] carries that reason in words for
+//! the version it knows about, so the refusal reads as "this save predates
+//! a change, and here is the change" rather than as a bare number mismatch.
+//!
+//! Nothing else about the change touches the file: `lifetime_deliveries` is
+//! still written and still restored, because it still drives the HUD's
+//! delivery count — it simply no longer opens anything.
+//!
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -192,7 +217,7 @@ use super::world::{BELT_KIND, PIPE_KIND, PlayerCommand, World};
 /// The save format's version. Bumped whenever the shape below changes;
 /// a file naming any other version is rejected, never migrated — see the
 /// module doc, and every other loader in this crate.
-pub const SAVE_SCHEMA_VERSION: u32 = 4;
+pub const SAVE_SCHEMA_VERSION: u32 = 5;
 
 /// A fixed-point value as its raw `I16F16` bits — see the module doc for why
 /// a save never stores one as decimal text.
@@ -277,6 +302,33 @@ pub struct SaveData {
     /// therefore loads as, and why that is the right call.
     #[serde(default)]
     pub lifetime_deliveries: u32,
+    /// **Lifetime boxes sold, per item id**
+    /// ([`super::economy::Economy::lifetime_boxes_sold`]) — what every
+    /// progression gate in `data/unlocks.ron` is keyed off since 2026-09-26.
+    ///
+    /// The ledger and not the gates, for `lifetime_deliveries`' reason: which
+    /// tiers are open is derived from this against the *current* data file
+    /// every time it is asked, so a balance pass on `unlocks.ron` — or a
+    /// change of which product a tier waits on — re-reads correctly for every
+    /// existing save.
+    ///
+    /// Sorted by item id, because it is a `BTreeMap` and the save text is
+    /// part of the determinism contract.
+    ///
+    /// No `#[serde(default)]`: this field is why the format is at version 5,
+    /// and a file that does not carry it is refused rather than read as a
+    /// factory that has sold nothing — see "Version 5: a gate counts boxes,
+    /// not delivery windows" in the module doc.
+    ///
+    /// **The guard is [`SAVE_SCHEMA_VERSION`], not the missing attribute.**
+    /// A version-4 file is refused by number before serde ever looks at its
+    /// fields, so putting `#[serde(default)]` back here breaks nothing and no
+    /// test goes red for it (a reviewer tried, 2026-09-27). It stays off
+    /// anyway: a default here would mean "this save sold nothing", and gate
+    /// state is derived from this map on every load, so the day someone bumps
+    /// the version for an unrelated reason the attribute would quietly start
+    /// re-locking earned tiers again.
+    pub lifetime_boxes_sold: BTreeMap<String, u32>,
     /// The production ledger (`sim::stats::ProductionLedger`), rings
     /// verbatim, so a loaded factory's P screen reads exactly what the
     /// saved one did. `#[serde(default)]` for the same reason as
@@ -749,6 +801,26 @@ pub enum SaveError {
     },
 }
 
+/// The one-sentence reason a *named* older version stopped loading, appended
+/// to [`SaveError::UnsupportedSchemaVersion`] so the refusal tells a player
+/// what changed rather than only that a number differs.
+///
+/// A version this build has no story for adds nothing — the bare number
+/// mismatch is already the whole truth for a file from the future, or from a
+/// development build whose change nobody has to explain any more.
+fn why_the_version_moved(found: u32) -> &'static str {
+    match found {
+        4 => {
+            ". Version 5 changed what unlocks a sauce: a tier used to open after a \
+             number of delivery windows, and now opens after a number of boxes of a \
+             named product sold. A version 4 save never recorded which products its \
+             deliveries contained, so this build cannot tell what it had sold, and it \
+             will not guess — start a new factory"
+        }
+        _ => "",
+    }
+}
+
 impl std::fmt::Display for SaveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -764,7 +836,9 @@ impl std::fmt::Display for SaveError {
             SaveError::UnsupportedSchemaVersion { found, supported } => write!(
                 f,
                 "save schema_version {found} is not supported by this build (supports \
-                 {supported}) — this save was written by a different version of the game"
+                 {supported}) — this save was written by a different version of the \
+                 game{}",
+                why_the_version_moved(*found)
             ),
             SaveError::UnknownKind { kind, tile } => write!(
                 f,
@@ -1051,6 +1125,7 @@ impl World {
                 .map(|(id, count)| (id.clone(), *count))
                 .collect(),
             lifetime_deliveries: self.economy().lifetime_deliveries,
+            lifetime_boxes_sold: self.economy().lifetime_boxes_sold.clone(),
             production: saved_production(self.production()),
             staff: Some(SavedStaff {
                 headcount: self.staff().headcounts().into_iter().collect(),
@@ -1840,6 +1915,7 @@ fn restore_ledgers(world: &mut World, data: &SaveData) {
     // that was written before this field existed — would quietly re-lock a
     // tier the player had earned. It is its own number for that reason.
     economy.lifetime_deliveries = data.lifetime_deliveries;
+    economy.lifetime_boxes_sold = data.lifetime_boxes_sold.clone();
 }
 
 #[cfg(test)]
@@ -1898,16 +1974,20 @@ mod tests {
         }
     }
 
-    /// The v1 refusal issue #43 created and the v2 refusal per-dock stock
-    /// created, said out loud. A v1 file predates a tank declaring what it
-    /// holds, a v2 file predates stock standing on its own dock; this build
-    /// will load neither, and the thing that matters is that it says *why*
-    /// — both version numbers, so the message reads as "this save predates
-    /// a change" rather than as a corrupt file. Migration is deliberately
-    /// not on the table (ARCHITECTURE.md §4, and this module's doc).
+    /// The v1 refusal issue #43 created, the v2 refusal per-dock stock
+    /// created, the v3 refusal the pay cycle created and the v4 refusal the
+    /// boxes-sold gates created, said out
+    /// loud. A v1 file predates a tank declaring what it holds, a v2 file
+    /// predates stock standing on its own dock, a v3 file predates the pay
+    /// cycle, a v4 file predates a gate counting boxes of a named product;
+    /// this build will load none of them,
+    /// and the thing that matters is that it says *why* — both version
+    /// numbers, so the message reads as "this save predates a change" rather
+    /// than as a corrupt file. Migration is deliberately not on the table
+    /// (ARCHITECTURE.md §4, and this module's doc).
     #[test]
     fn an_older_save_is_refused_with_both_numbers_in_the_message() {
-        for old in [1, 2, 3] {
+        for old in [1, 2, 3, 4] {
             let text = a_save().to_ron().replace(
                 &format!("schema_version: {SAVE_SCHEMA_VERSION}"),
                 &format!("schema_version: {old}"),
@@ -1917,18 +1997,49 @@ mod tests {
             assert!(
                 matches!(
                     error,
-                    SaveError::UnsupportedSchemaVersion { found, supported: 4 } if found == old
+                    SaveError::UnsupportedSchemaVersion { found, supported }
+                        if found == old && supported == SAVE_SCHEMA_VERSION
                 ),
-                "expected a version refusal naming {old} and 4, got {error:?}"
+                "expected a version refusal naming {old} and {SAVE_SCHEMA_VERSION}, got {error:?}"
             );
             let message = error.to_string();
             assert!(
                 message.contains(&format!("schema_version {old}"))
-                    && message.contains("supports 4"),
+                    && message.contains(&format!("supports {SAVE_SCHEMA_VERSION}")),
                 "the refusal must name both versions so it does not read as a parse failure: \
                  {message}"
             );
         }
+    }
+
+    /// The version this build *just* moved past is the one a developer is
+    /// most likely to meet, so its refusal explains the change in words
+    /// instead of leaving two numbers to be interpreted. A version with no
+    /// story attached stays bare — the helper must not pad every message.
+    #[test]
+    fn the_version_that_just_moved_explains_itself_and_no_other_does() {
+        let message = SaveError::UnsupportedSchemaVersion {
+            found: 4,
+            supported: SAVE_SCHEMA_VERSION,
+        }
+        .to_string();
+        for phrase in ["delivery windows", "boxes of a", "will not guess"] {
+            assert!(
+                message.contains(phrase),
+                "a v4 save is refused because the gate trigger changed, and the message \
+                 has to say so — `{phrase}` missing from: {message}"
+            );
+        }
+
+        let bare = SaveError::UnsupportedSchemaVersion {
+            found: SAVE_SCHEMA_VERSION + 1,
+            supported: SAVE_SCHEMA_VERSION,
+        }
+        .to_string();
+        assert!(
+            !bare.contains("delivery windows"),
+            "a version this build has no story for gets the numbers and nothing else: {bare}"
+        );
     }
 
     #[test]

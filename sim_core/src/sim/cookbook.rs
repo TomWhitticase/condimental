@@ -30,10 +30,10 @@
 //! changed with the factory would be a HUD panel, and the game already has
 //! five of those.
 //!
-//! The one exception is the padlock. Lifetime deliveries decide what the
-//! market will sell (`super::unlocks`), so they decide which pages are
-//! readable, and they are the only piece of world state that reaches this
-//! file. They arrive as a plain `u32` argument rather than as a `&World`
+//! The one exception is the padlock. Boxes sold decide what the market will
+//! sell (`super::unlocks`), so they decide which pages are readable, and
+//! that ledger is the only piece of world state that reaches this file. It
+//! arrives as a plain `&BoxesSold` argument rather than as a `&World`
 //! precisely so that nothing else can.
 //!
 //! # Four derivations, and where each one comes from
@@ -96,7 +96,7 @@ use super::recipe::RecipeRegistry;
 use super::shop::ShopCatalog;
 use super::staff::StaffCatalog;
 use super::types::{Fx, Money};
-use super::unlocks::UnlockRegistry;
+use super::unlocks::{BoxesSold, Unlock, UnlockRegistry};
 
 /// The whole book, as one value. Serialized to JSON by `lib.rs` and read by
 /// `godot_project/cookbook_panel.gd`.
@@ -107,9 +107,6 @@ use super::unlocks::UnlockRegistry;
 /// of it does arithmetic that has to agree with the sim's.
 #[derive(Debug, Clone, Serialize)]
 pub struct CookbookSnapshot {
-    /// Lifetime successful deliveries — what every gate below is measured
-    /// against, carried once rather than repeated on each padlock.
-    pub deliveries: u32,
     /// Every sauce, ordered by tier and then by the contract order that
     /// rooted it, which is the order the tree draws them in.
     pub sauces: Vec<SaucePage>,
@@ -294,8 +291,16 @@ pub struct GateLine {
     pub id: String,
     /// The unlock's authored name, e.g. "BBQ Sauce".
     pub name: String,
-    pub after_deliveries: u32,
-    pub deliveries: u32,
+    /// The product whose boxes the gate counts, as an **id**
+    /// (`boxed_ketchup`) — `cookbook_panel.gd` titles it through
+    /// `_item_display_name`, the one display-name map.
+    pub item: String,
+    /// Boxes of `item` the gate opens at.
+    pub required: u32,
+    /// Boxes of `item` sold so far. Carried per padlock rather than once
+    /// for the book, because since 2026-09-26 two gates no longer count the
+    /// same thing.
+    pub sold: u32,
 }
 
 /// Everything the book is built out of. A struct rather than nine arguments
@@ -310,7 +315,8 @@ pub struct CookbookInput<'a> {
     pub staff: &'a StaffCatalog,
     pub unlocks: &'a UnlockRegistry,
     pub guide: &'a GuideRegistry,
-    pub deliveries: u32,
+    /// Boxes sold per product — [`super::economy::Economy::lifetime_boxes_sold`].
+    pub sold: &'a BoxesSold,
 }
 
 /// Reads the content files into [`CookbookSnapshot`].
@@ -535,8 +541,7 @@ pub fn build(input: &CookbookInput<'_>) -> CookbookSnapshot {
                     }),
                 quantity: quantity.to_num::<f64>(),
                 fluid: fluids.contains(id.as_str()),
-                locked: from_sauce.is_none()
-                    && !input.unlocks.ingredient_available(id, input.deliveries),
+                locked: from_sauce.is_none() && !input.unlocks.ingredient_available(id, input.sold),
                 from_sauce,
                 id: id.clone(),
             });
@@ -545,17 +550,19 @@ pub fn build(input: &CookbookInput<'_>) -> CookbookSnapshot {
         // The gate the player is actually waiting on: the last one of the
         // ones still shut. Raws only — a sauce arriving from another sauce
         // carries its own gate on its own page.
+        //
+        // "Last" is `data/unlocks.ron`'s file order, which that file's header
+        // states IS the tier order. It used to be the largest
+        // `after_deliveries`, and that stopped being an answer when each gate
+        // started counting boxes of a different product: 100 boxes of ketchup
+        // and 100 boxes of BBQ are not two numbers you can compare.
         let gate = wants
             .keys()
-            .filter(|id| !input.unlocks.ingredient_available(id, input.deliveries))
-            .filter_map(|id| input.unlocks.gate_for_ingredient(id))
-            .max_by_key(|unlock| unlock.after_deliveries)
-            .map(|unlock| GateLine {
-                id: unlock.id.clone(),
-                name: unlock.name.clone(),
-                after_deliveries: unlock.after_deliveries,
-                deliveries: input.deliveries,
-            });
+            .filter(|id| !input.unlocks.ingredient_available(id, input.sold))
+            .filter_map(|id| input.unlocks.gate_index_for_ingredient(id))
+            .max()
+            .and_then(|index| input.unlocks.at(index))
+            .map(|unlock| gate_line(unlock, input.sold));
 
         let mut contracts: Vec<String> = Vec::new();
         let mut pay_low: Option<Money> = None;
@@ -671,18 +678,11 @@ pub fn build(input: &CookbookInput<'_>) -> CookbookSnapshot {
             price: entry.price_money().to_num::<f64>(),
             fluid: fluids.contains(entry.id.as_str()),
             used_in: used_in.get(entry.id.as_str()).cloned().unwrap_or_default(),
-            locked: !input
-                .unlocks
-                .ingredient_available(&entry.id, input.deliveries),
+            locked: !input.unlocks.ingredient_available(&entry.id, input.sold),
             gate: input
                 .unlocks
                 .gate_for_ingredient(&entry.id)
-                .map(|unlock| GateLine {
-                    id: unlock.id.clone(),
-                    name: unlock.name.clone(),
-                    after_deliveries: unlock.after_deliveries,
-                    deliveries: input.deliveries,
-                }),
+                .map(|unlock| gate_line(unlock, input.sold)),
         })
         .collect();
 
@@ -692,13 +692,27 @@ pub fn build(input: &CookbookInput<'_>) -> CookbookSnapshot {
     let facts = guide_facts(input, sauces.len(), ingredients.len(), open_raws);
 
     CookbookSnapshot {
-        deliveries: input.deliveries,
         guide: input.guide.ordered().to_vec(),
         facts,
         sauces,
         edges,
         machines,
         ingredients,
+    }
+}
+
+/// One padlock, read off the gate and the ledger. Two call sites build the
+/// same line — a sauce page's deepest shut gate and a raw ingredient's own —
+/// and a `GateLine` assembled twice is a `GateLine` that can disagree with
+/// itself.
+fn gate_line(unlock: &Unlock, sold: &BoxesSold) -> GateLine {
+    let progress = unlock.progress(sold);
+    GateLine {
+        id: unlock.id.clone(),
+        name: progress.name,
+        item: progress.item,
+        required: progress.required,
+        sold: progress.sold,
     }
 }
 
@@ -735,28 +749,21 @@ fn guide_facts(
         .min_by_key(|entry| entry.price_money());
 
     // The earliest gate, which is the one a new game is walking towards.
-    // Ties go to file order for `data/unlocks.ron`'s own reason: the
-    // announcement is the point of a gate, and the file decides who
-    // announces first.
-    let first_gate = input
-        .unlocks
-        .ordered()
-        .iter()
-        .min_by_key(|unlock| unlock.after_deliveries);
+    // File order, for the same reason the sauce page's deepest gate uses it:
+    // two gates' thresholds count different products and cannot be ordered
+    // against each other, and `data/unlocks.ron` orders itself by tier.
+    let first_gate = input.unlocks.ordered().first();
 
     // Orders the board is showing right now: no gate, or a gate that has
     // opened. This is what "open to a brand-new factory" means in the
     // guide's prose, and it is not `starters()` — a starter is one the game
-    // signs for you, and there is exactly one of those.
+    // signs for you, and since 2026-09-26 `data/contracts.ron` marks none,
+    // so `starters()` is empty while this list is not.
     let open_contracts = input
         .contracts
         .ordered()
         .iter()
-        .filter(|contract| {
-            input
-                .unlocks
-                .contract_available(&contract.id, input.deliveries)
-        })
+        .filter(|contract| input.unlocks.contract_available(&contract.id, input.sold))
         .count();
 
     let starting_crew: u32 = input
@@ -808,11 +815,17 @@ fn guide_facts(
                 GuideFact::FirstGateName => {
                     (0.0, first_gate.map(|u| u.name.clone()).unwrap_or_default())
                 }
-                GuideFact::FirstGateDeliveries => (
+                GuideFact::FirstGateBoxes => (
                     first_gate
-                        .map(|u| f64::from(u.after_deliveries))
+                        .map(|u| f64::from(u.after_sold.boxes))
                         .unwrap_or(0.0),
                     String::new(),
+                ),
+                GuideFact::FirstGateProduct => (
+                    0.0,
+                    first_gate
+                        .map(|u| u.after_sold.item.clone())
+                        .unwrap_or_default(),
                 ),
             };
             GuideFactLine {

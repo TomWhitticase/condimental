@@ -55,6 +55,43 @@ See [WORKFLOW.md](WORKFLOW.md).
   (`sim::reference_chain`, `test_layouts.gd`'s `build_reference_line`).
   Full record in `docs/DECISIONS.md`.
 
+- 2026-09-26 **A tier is earned by selling the tier below it: a gate counts
+  boxes of a named product SOLD, not delivery windows.** `data/unlocks.ron`
+  (schema 1) replaces each gate's `after_deliveries: N` with
+  `after_sold: (item: "<item id>", boxes: N)`. "Sold" is a box delivered into
+  a **satisfied** contract window — the dock being paid — counted per item id
+  in `Economy::lifetime_boxes_sold` (`sim::unlocks::BoxesSold`, a
+  `BTreeMap<String, u32>`, never decreasing) and saved. Shipped:
+  `bbq_sauce` at 100 `boxed_ketchup`, `mustard_sauce` at 100 `boxed_bbq`.
+  `Unlock::is_open`/`progress` resolve against that ledger; `Economy::
+  lifetime_deliveries` still counts and is still displayed, but **no gate
+  reads it**. Five refusals guard an unopenable gate: a zero `boxes` at
+  load (`from_ron_str`, a startup panic), and — from `validate_covers`, which
+  the test suite runs against the shipped files, as
+  `IngredientCatalog::validate_covers` already did — an unknown `item`, an
+  item no recipe in `recipes.ron` produces, an item **no contract's `mix`
+  ever orders** (only a paid window feeds the ledger, so produced is not
+  ordered), and two gates on one product whose thresholds fall rather than
+  climb. So a bad gate in the shipped files fails `cargo test`; only the
+  zero-boxes case refuses to boot. Tier order is
+  **file order** in `unlocks.ron` — two gates counting different products have
+  no comparable thresholds — and `gate_index_for_ingredient`/`at`/
+  `ordered().first()` are the only ways to ask which gate is deepest.
+  The wire carries `item`, `required` and `sold` (`UnlockSnapshot`,
+  `CookbookSnapshot`'s `GateLine`, `ContentsChoice`'s `unlock_item`/
+  `unlock_boxes`/`unlock_sold`) so Godot builds "34 of 100 boxes of Boxed
+  Ketchup" from the display-name map without knowing the rule; the padlock
+  caption (`main.gd::_with_gate_note`) and the cookbook
+  (`cookbook_panel.gd::_gate_progress`) say boxes, never deliveries.
+  `SaveData` gains `lifetime_boxes_sold` and `SAVE_SCHEMA_VERSION` goes to
+  **5**: a pre-5 save is refused, not defaulted. Gate state is derived from
+  the ledger on every load, so a default does not merely lose a counter — it
+  re-locks a tier the player earned and strands the contracts already signed
+  behind it. `SaveError::UnsupportedSchemaVersion` carries a per-version
+  sentence (`save.rs::why_the_version_moved`) saying what changed. **Every
+  existing save stops loading**; no release has ever written one. Supersedes the trigger half of 2026-09-19
+  "BBQ arrives behind a gate"; the two lists, the no-locked-recipe rule and
+  the named announcement are unchanged. Full record in `docs/DECISIONS.md`.
 - 2026-09-26 **CONDIMENTAL is GPL-3.0-only; the name and brand are
   reserved.** The code is licensed `GPL-3.0-only` (`LICENSE`, and `license =`
   in every workspace `Cargo.toml`) **with a GPLv3 §7 additional permission**
@@ -440,7 +477,9 @@ See [WORKFLOW.md](WORKFLOW.md).
   drawn. The trigger is lifetime **successful** deliveries
   (`Economy::lifetime_deliveries`, satisfied windows only, never decreasing);
   the **counter** is saved and every gate's state is derived from it against
-  the file, so a balance pass re-reads correctly for every existing save. The
+  the file, so a balance pass re-reads correctly for every existing save.
+  **Superseded 2026-09-26:** the trigger is boxes of a named product sold, not
+  delivery windows — see that date's entry. Everything else here stands. The
   group is named because the toast needs a subject — a gate that opens
   silently is one the player never experiences. Partly answers GAMEPLAY §11's
   contract-gating question: a delivery count, no reputation meter. Landed

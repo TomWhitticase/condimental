@@ -1368,9 +1368,10 @@ var _hopper_items: Array = [] # item ids a hopper may legally hold, from the sim
 ## Content again, not a Godot table: a fourth raw fluid appears in the
 ## picker with no edit here.
 var _tank_fluids: Array = [] # fluid ids a tank may be declared to hold
-## The gates still standing over those two lists: id -> `{"name", "after"}`,
-## carrying only the LOCKED ids, from `ingredients_snapshot_json`'s per-choice
-## `locked`/`unlock_name`/`after_deliveries`.
+## The gates still standing over those two lists: id ->
+## `{"name", "item", "required", "sold"}`, carrying only the LOCKED ids, from
+## `ingredients_snapshot_json`'s per-choice `locked`/`unlock_name`/
+## `unlock_item`/`unlock_boxes`/`unlock_sold`.
 ##
 ## Issue #90. A gated ingredient is hidden from the market, and was hidden
 ## from nothing else — so the contents picker still offered liquid smoke and
@@ -1381,10 +1382,6 @@ var _tank_fluids: Array = [] # fluid ids a tank may be declared to hold
 ## is the simulation's (`try_set_hopper_item`/`try_set_tank_fluid`), not this
 ## table's: this is the label on the door, not the lock.
 var _ingredient_gates: Dictionary = {}
-## Lifetime satisfied deliveries, straight off the same snapshot — the number
-## every gate in `data/unlocks.ron` is measured against, and the "4 of 10" in
-## the picker's note. Counted by the sim; never incremented here.
-var _lifetime_deliveries: int = 0
 ## The ghost's product body — a `hopper_fill` slab tinted with the chosen
 ## item, so the ghost previews WHAT the hopper will hold as well as where it
 ## goes. Colour alone would not be enough (UI_UX.md §7); the prompt names the
@@ -7721,7 +7718,6 @@ func _owned_ingredient_counts() -> Dictionary:
 func _refresh_hopper_items() -> void:
 	var snapshot := _ingredients_snapshot()
 	var items: Array = snapshot.get("hopper_items", [])
-	_lifetime_deliveries = int(snapshot.get("deliveries", 0))
 	_hopper_items = _record_choices(items)
 
 
@@ -7730,7 +7726,6 @@ func _refresh_hopper_items() -> void:
 func _refresh_tank_fluids() -> void:
 	var snapshot := _ingredients_snapshot()
 	var fluids: Array = snapshot.get("tank_fluids", [])
-	_lifetime_deliveries = int(snapshot.get("deliveries", 0))
 	_tank_fluids = _record_choices(fluids)
 
 
@@ -7749,7 +7744,9 @@ func _record_choices(choices: Array) -> Array:
 		if bool(choice.get("locked", false)):
 			_ingredient_gates[id] = {
 				"name": String(choice.get("unlock_name", "")),
-				"after": int(choice.get("after_deliveries", 0)),
+				"item": String(choice.get("unlock_item", "")),
+				"required": int(choice.get("unlock_boxes", 0)),
+				"sold": int(choice.get("unlock_sold", 0)),
 			}
 		else:
 			_ingredient_gates.erase(id)
@@ -13172,20 +13169,24 @@ func _tank_picker_note(declared: String, carried: String, doomed: float) -> Stri
 ##
 ## A glyph says a slot is shut; only words say when it opens. The line names
 ## the ingredients, the unlock standing over them and the distance left to
-## it — "4 of 10 deliveries" rather than a bare "locked", because the number
-## is the part the player can act on, and it is the sim's own count.
+## it — "34 of 100 boxes of Boxed Ketchup" rather than a bare "locked",
+## because the number is the part the player can act on, and it is the sim's
+## own count.
 ##
 ## Grouped by gate rather than one line per ingredient: `data/unlocks.ron`
 ## opens a tier at a time, so the common case is two ids and one sentence.
-## Sorting and formatting only — the gate, its name and its threshold are all
-## the simulation's.
+## Sorted by gate name, since two gates counting different products have no
+## comparable thresholds to order by. Sorting and formatting only — the gate,
+## its name, its product and both counts are all the simulation's.
 func _with_gate_note(note: String, choices: Array) -> String:
 	var by_gate := {}
 	for item in choices:
 		var gate: Dictionary = _ingredient_gates.get(String(item), {})
 		if gate.is_empty():
 			continue
-		var key := "%d\t%s" % [int(gate["after"]), String(gate["name"])]
+		var key := "%s\t%s\t%d\t%d" % [
+			String(gate["name"]), String(gate["item"]), int(gate["sold"]), int(gate["required"])
+		]
 		if not by_gate.has(key):
 			by_gate[key] = []
 		by_gate[key].append(_item_display_name(String(item)))
@@ -13196,11 +13197,12 @@ func _with_gate_note(note: String, choices: Array) -> String:
 	keys.sort()
 	for key in keys:
 		var parts: PackedStringArray = String(key).split("\t")
-		lines.append("🔒 %s — %s, %d of %d deliveries" % [
+		lines.append("🔒 %s — %s, %d of %d boxes of %s" % [
 			", ".join(PackedStringArray(by_gate[key])),
-			parts[1],
-			_lifetime_deliveries,
-			int(parts[0]),
+			parts[0],
+			int(parts[2]),
+			int(parts[3]),
+			_item_display_name(parts[1]),
 		])
 	return "\n".join(PackedStringArray([note] + lines))
 
@@ -16624,7 +16626,7 @@ func _advance_simulation(delta: float) -> void:
 	if _production_open and _production_poll_due():
 		_poll_production()
 	# THE COOKBOOK is content, and content does not move — except for the one
-	# thing that does: a gate counts down with `lifetime_deliveries`, so a
+	# thing that does: a gate counts up with the boxes-sold ledger, so a
 	# padlock opens while the player is reading the page behind it.
 	if _cookbook_open and _cookbook_poll_due():
 		_poll_cookbook()

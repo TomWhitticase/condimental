@@ -22,7 +22,7 @@
 
 mod common;
 
-use sim_core::sim::save::{SaveData, SavedBody};
+use sim_core::sim::save::{SAVE_SCHEMA_VERSION, SaveData, SavedBody};
 use sim_core::sim::types::Money;
 use sim_core::sim::{
     PlayerCommand, RecipeRegistry, SavedProduction, World, reference_chain_with_budget,
@@ -536,23 +536,29 @@ fn a_save_from_another_build_and_a_file_that_is_not_a_save_are_both_refused() {
     let world = World::new(recipes());
     let text = world.to_save_ron();
 
-    let from_the_future = text.replace("schema_version: 4", "schema_version: 5");
+    let current = format!("schema_version: {SAVE_SCHEMA_VERSION}");
+    let ahead = SAVE_SCHEMA_VERSION + 1;
+    let from_the_future = text.replace(&current, &format!("schema_version: {ahead}"));
     let Err(error) = World::from_save_ron(&from_the_future, recipes()) else {
         panic!("a different schema version must be refused, never migrated");
     };
     let error = error.to_string();
-    assert!(error.contains("schema_version 5"), "unhelpful: {error}");
+    assert!(
+        error.contains(&format!("schema_version {ahead}")),
+        "unhelpful: {error}"
+    );
 
-    // ...and the same in the other direction: a v3 file is every save
-    // written before the production ledger kept a pay cycle, and it is
+    // ...and the same in the other direction: a v4 file is every save
+    // written before a gate counted boxes of a named product, and it is
     // refused with both numbers rather than migrated.
-    let from_the_past = text.replace("schema_version: 4", "schema_version: 3");
+    let from_the_past = text.replace(&current, "schema_version: 4");
     let Err(error) = World::from_save_ron(&from_the_past, recipes()) else {
-        panic!("a save predating the pay cycle must be refused, never migrated");
+        panic!("a save predating the boxes-sold ledger must be refused, never migrated");
     };
     let error = error.to_string();
     assert!(
-        error.contains("schema_version 3") && error.contains("supports 4"),
+        error.contains("schema_version 4")
+            && error.contains(&format!("supports {SAVE_SCHEMA_VERSION}")),
         "unhelpful: {error}"
     );
 

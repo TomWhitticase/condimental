@@ -55,6 +55,7 @@ use serde::Deserialize;
 
 use super::recipe::RecipeRegistry;
 use super::types::Money;
+use super::unlocks::GateProgress;
 
 /// The schema version this build understands. Rejected (not migrated) on
 /// mismatch, for the reason [`super::shop::CURRENT_SCHEMA_VERSION`] gives:
@@ -472,7 +473,7 @@ impl Ingredients {
     /// definition of that set.
     ///
     /// `gate` is passed in for the same kind of reason — a progression
-    /// gate is keyed off the economy's lifetime delivery count
+    /// gate is keyed off the economy's boxes-sold ledger
     /// ([`super::unlocks`]), which is not this module's to know — and
     /// mirrors [`super::shop::Shop::snapshot`]'s `crew_of`. An entry it
     /// says no to is **omitted from `entries`**, not flagged: the market
@@ -483,34 +484,36 @@ impl Ingredients {
     /// The two CONTENTS lists take the opposite course and keep a locked
     /// id, flagged — see [`ContentsChoice`] for why a picker shows what the
     /// market hides. One closure answers both questions, so "locked" means
-    /// one thing across the whole snapshot: `Some((name, after))` is a gate
-    /// that has not opened yet, `None` is available now.
+    /// one thing across the whole snapshot: `Some(progress)` is a gate that
+    /// has not opened yet, `None` is available now.
     pub fn snapshot(
         &self,
         money: Money,
         hopper_items: &[String],
         tank_fluids: Vec<String>,
-        deliveries: u32,
         capacity: impl Fn(&str) -> u32,
-        gate: impl Fn(&str) -> Option<(String, u32)>,
+        gate: impl Fn(&str) -> Option<GateProgress>,
     ) -> IngredientsSnapshot {
         let choice = |id: &String| match gate(id) {
-            Some((name, after_deliveries)) => ContentsChoice {
+            Some(progress) => ContentsChoice {
                 id: id.clone(),
                 locked: true,
-                unlock_name: name,
-                after_deliveries,
+                unlock_name: progress.name,
+                unlock_item: progress.item,
+                unlock_boxes: progress.required,
+                unlock_sold: progress.sold,
             },
             None => ContentsChoice {
                 id: id.clone(),
                 locked: false,
                 unlock_name: String::new(),
-                after_deliveries: 0,
+                unlock_item: String::new(),
+                unlock_boxes: 0,
+                unlock_sold: 0,
             },
         };
         IngredientsSnapshot {
             money: money.to_num::<f64>(),
-            deliveries,
             hopper_items: hopper_items.iter().map(&choice).collect(),
             tank_fluids: tank_fluids.iter().map(&choice).collect(),
             entries: self
@@ -541,13 +544,15 @@ impl Ingredients {
 ///
 /// ```json
 /// {"money": 2913.0,
-///  "deliveries": 4,
 ///  "hopper_items": [
-///    {"id": "tomato", "locked": false, "unlock_name": "", "after_deliveries": 0},
-///    {"id": "spice_mix", "locked": true, "unlock_name": "BBQ Sauce", "after_deliveries": 10}
+///    {"id": "tomato", "locked": false, "unlock_name": "", "unlock_item": "",
+///     "unlock_boxes": 0, "unlock_sold": 0},
+///    {"id": "spice_mix", "locked": true, "unlock_name": "BBQ Sauce",
+///     "unlock_item": "boxed_ketchup", "unlock_boxes": 100, "unlock_sold": 34}
 ///  ],
 ///  "tank_fluids": [
-///    {"id": "vinegar", "locked": false, "unlock_name": "", "after_deliveries": 0}
+///    {"id": "vinegar", "locked": false, "unlock_name": "", "unlock_item": "",
+///     "unlock_boxes": 0, "unlock_sold": 0}
 ///  ],
 ///  "entries": [
 ///    {"id": "tomato", "price": 1.0, "owned": 40, "affordable": true},
@@ -555,12 +560,11 @@ impl Ingredients {
 ///  ]}
 /// ```
 ///
-/// `deliveries` is the economy's lifetime successful delivery count — the
-/// one number every progression gate is measured against
-/// ([`super::unlocks`]). It is here so a panel that draws a locked
-/// [`ContentsChoice`] can say how far off the gate is ("4 of 10") without
-/// reaching for a second snapshot, and it is carried ONCE rather than on
-/// every choice because it is a property of the economy, not of an id.
+/// A locked [`ContentsChoice`] carries its own progress rather than this
+/// object carrying one shared count. It used to be one `deliveries` field,
+/// which worked while every gate was measured against the same number; since
+/// 2026-09-26 each gate counts boxes of a product OF ITS OWN, so "34 of 100"
+/// is a fact about the gate and not about the economy.
 ///
 /// `hopper_items` is the raw solids a hopper can hold — every one of them,
 /// including the ids a gate is still holding back, each carrying that
@@ -573,7 +577,6 @@ impl Ingredients {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct IngredientsSnapshot {
     pub money: f64,
-    pub deliveries: u32,
     pub hopper_items: Vec<ContentsChoice>,
     /// `hopper_items`' fluid twin: the ids a tank may be **declared** to
     /// hold (`world::PlayerCommand::SetTankFluid`, issue #43), which is
@@ -616,9 +619,17 @@ pub struct ContentsChoice {
     /// ("BBQ Sauce") — prose for a panel to put in a sentence, never an id.
     /// Empty when `locked` is false.
     pub unlock_name: String,
-    /// Lifetime deliveries the gate opens at, to read against
-    /// [`IngredientsSnapshot::deliveries`]. 0 when `locked` is false.
-    pub after_deliveries: u32,
+    /// The item id whose boxes the gate counts (`boxed_ketchup`). An **id**:
+    /// the panel titles it with `_item_display_name`, because display names
+    /// reach Godot once through `display_names_json` and a second title-caser
+    /// in Rust would be a second thing to keep in step. Empty when `locked`
+    /// is false.
+    pub unlock_item: String,
+    /// Boxes of `unlock_item` the gate opens at. 0 when `locked` is false.
+    pub unlock_boxes: u32,
+    /// Boxes of `unlock_item` sold so far — the first number in the panel's
+    /// "34 of 100 boxes of Boxed Ketchup". 0 when `locked` is false.
+    pub unlock_sold: u32,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -923,7 +934,6 @@ mod tests {
             Money::from_num(2),
             &hopper_items,
             vec!["vinegar".to_string()],
-            0,
             |_| u32::MAX,
             |_| None,
         );
@@ -966,9 +976,15 @@ mod tests {
             Money::from_num(50),
             &hopper_items,
             vec!["vinegar".to_string()],
-            4,
             |_| u32::MAX,
-            |id| (id == "sugar").then(|| ("Sweet Tier".to_string(), 10)),
+            |id| {
+                (id == "sugar").then(|| GateProgress {
+                    name: "Sweet Tier".to_string(),
+                    item: "boxed_ketchup".to_string(),
+                    required: 100,
+                    sold: 34,
+                })
+            },
         );
         assert_eq!(
             snapshot
@@ -988,16 +1004,27 @@ mod tests {
         let sugar = &snapshot.hopper_items[1];
         assert!(sugar.locked);
         assert_eq!(sugar.unlock_name, "Sweet Tier");
-        assert_eq!(sugar.after_deliveries, 10);
         assert_eq!(
-            snapshot.deliveries, 4,
-            "and the count to read that against rides along, once"
+            (
+                sugar.unlock_item.as_str(),
+                sugar.unlock_boxes,
+                sugar.unlock_sold
+            ),
+            ("boxed_ketchup", 100, 34),
+            "a locked choice carries its own progress — the product it counts, the \
+             boxes it wants and the boxes sold — so a panel can say \"34 of 100 \
+             boxes of Boxed Ketchup\" from this row alone"
         );
         let tomato = &snapshot.hopper_items[0];
         assert!(!tomato.locked);
         assert_eq!(
-            (tomato.unlock_name.as_str(), tomato.after_deliveries),
-            ("", 0),
+            (
+                tomato.unlock_name.as_str(),
+                tomato.unlock_item.as_str(),
+                tomato.unlock_boxes,
+                tomato.unlock_sold
+            ),
+            ("", "", 0, 0),
             "an ungated choice carries no gate to describe"
         );
     }
