@@ -18,6 +18,20 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-26 **A PR's reviewer must not share its author's context; it need
+  not be another session.** The merge still gates on green checks plus a
+  `VERDICT: APPROVED` review, but the reviewer is now typically a fresh
+  subagent the author launches. Its whole prompt is the PR number and the
+  instruction to follow the `review` skill, with none of the author's
+  reasoning, summary, list of what was verified or hints at what is fine. A
+  separate session that did not write the branch also qualifies. The author
+  reviewing its own work, or a subagent briefed with the author's reasoning,
+  never does. "Make a PR and merge it" now means: launch that reviewer, then
+  merge on its verdict. This amends the 2026-09-25 rule below. Binds
+  `CLAUDE.md`, `CONTRIBUTING.md`, `docs/WORKFLOW.md`, `.githooks/pre-push` and
+  the `open-pr`, `review` and `wrap-it-up` skills. Full record in
+  `docs/DECISIONS.md`.
+
 - 2026-09-26 **The build menu is sectioned by category, has a search box,
   and may scroll at 1600x900.** The owner asked for categories plus a search
   box. Categories are content (`data/shop.ron` `categories`), three sections
@@ -208,6 +222,9 @@ See [WORKFLOW.md](WORKFLOW.md).
   review. This replaces the old WORKFLOW.md wording that let authors merge
   their own routine work unreviewed. Binds `CLAUDE.md`, `docs/WORKFLOW.md`,
   `.githooks/pre-push` and the `open-pr` and `wrap-it-up` skills. Full record in `docs/DECISIONS.md`.
+  **Amended 2026-09-26:** the reviewer need not be another session, only one
+  that does not share the author's context — typically a fresh subagent given
+  just the PR number (see that entry above).
 - 2026-09-25 **The review render's clock is PINNED, so the same command twice
   is the same picture.** `scripts/screenshot-scene.sh` passes Godot's own
   `--fixed-fps 60`; `_advance_simulation` is untouched, so the tick loop a

@@ -32,10 +32,17 @@
 #     turns its bar amber even on the frames it has no live stall, a
 #     MOTHBALLED machine reads "switched off" with a fourth glyph and an
 #     unlit bar rather than as a fault, and both really arrive over the
-#     wire for every machine on the line.
+#     wire for every machine on the line,
+#   * a machine the sim reports `understaffed` floats the red person over
+#     its roof, and no other machine does — not a staffed one, not one
+#     waiting on input, not one switched off — and it holds, poll after
+#     poll, while the vat's per-tick `staff` stall blinks under it.
 extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
+## How long the understaffed fixture is run on to prove its marker holds:
+## the review's probe length, some 200 load polls.
+const STEADY_TICKS := 6000
 
 var main
 var _ran := false
@@ -84,6 +91,16 @@ func _shown_status(key: String) -> String:
 	if not main._machine_load.has(key):
 		return ""
 	return String(main._machine_load[key].get("status", ""))
+
+
+## The keys of every raised understaffed marker, sorted.
+func _machine_markers() -> Array:
+	var keys: Array = []
+	for key in main._world_warnings.keys():
+		if String(key).begins_with("machine:"):
+			keys.append(key)
+	keys.sort()
+	return keys
 
 
 ## "x,y" back to a tile.
@@ -407,12 +424,73 @@ func _run_checks() -> void:
 	if uncrewed_keys != [vat_key]:
 		_fail("the sim says exactly the vat goes without its crew; the panel says %s" % str(uncrewed_keys))
 
+	# The red person over it, and over nothing else on the line: every
+	# other machine there is crewed, whatever else it is waiting for.
+	var marked := _machine_markers()
+	if marked != ["machine:" + vat_key]:
+		_fail("only the vat refused its crew should carry the understaffed marker, got %s" % str(marked))
+	else:
+		var person: Node3D = main._world_warnings["machine:" + vat_key]
+		if not String(person.name).begins_with(main.UNDERSTAFFED_MARKER_ASSET):
+			_fail("the vat's marker is '%s', not the red person" % person.name)
+		if person.get_parent() != main._world_root:
+			_fail("the understaffed marker is not in the world")
+		var roof: float = main.FLOOR_Y + main._mesh_for("machine_cooking_vat").get_aabb().end.y
+		if person.position.y <= roof:
+			_fail("the vat's marker stands at %.2f, inside a roof at %.2f" % [person.position.y, roof])
+
+	# ...and it HOLDS. The vat is handed its crew on any tick the crusher or
+	# the mixer claims nothing, so its `staff` stall blinks off about a
+	# quarter of the time while it stays short; a marker read off that
+	# stall toggled 43 times in 201 polls here (the PR #192 review). Run
+	# the fixture on through the real tick path, which polls on its own
+	# cadence, and fail on any poll the person is missing while the sim
+	# still says the vat is short.
+	var person_node = main._world_warnings.get("machine:" + vat_key)
+	var marker_polled_at: int = main._load_polled_tick
+	var polls := 0
+	var stall_flips := 0
+	var last_staff := Layouts.understaffed_stall(main.sim, Layouts.UNDERSTAFFED_VAT) != ""
+	for i in range(STEADY_TICKS):
+		if i % Layouts.RESTOCK_EVERY == 0:
+			Layouts.restock(main.sim)
+		main._advance_simulation(1.0 / main.TICK_HZ)
+		var staff := Layouts.understaffed_stall(main.sim, Layouts.UNDERSTAFFED_VAT) != ""
+		if staff != last_staff:
+			stall_flips += 1
+		last_staff = staff
+		if main._load_polled_tick == marker_polled_at:
+			continue
+		marker_polled_at = main._load_polled_tick
+		polls += 1
+		if bool(main._machine_load[vat_key].get("crewed", true)):
+			_fail("the vat was crewed by tick %d; the steady-marker check proves nothing" % marker_polled_at)
+			break
+		if _machine_markers() != ["machine:" + vat_key]:
+			_fail("poll at tick %d: the vat is still short but the markers are %s"
+				% [marker_polled_at, str(_machine_markers())])
+			break
+		if main._world_warnings["machine:" + vat_key] != person_node:
+			_fail("poll at tick %d: the vat's person was freed and re-made" % marker_polled_at)
+			break
+	if polls < STEADY_TICKS / main.LOAD_POLL_TICKS / 2:
+		_fail("only %d polls in %d ticks: the tick path did not poll" % [polls, STEADY_TICKS])
+	# The reason the check exists: the stall under it really did blink.
+	if stall_flips < 10:
+		_fail("the vat's staff stall flipped only %d times; the fixture no longer blinks" % stall_flips)
+
 	# And the same for the switch, thrown by a real command rather than
-	# written into a dictionary here.
-	main.sim.issue_command_json(JSON.stringify({
-		"type": "set_mothballed", "tile": [Layouts.UNDERSTAFFED_VAT.x, Layouts.UNDERSTAFFED_VAT.y],
-		"enabled": true,
-	}))
+	# written into a dictionary here — through the config panel's own path,
+	# checked straight after the click with no tick or rebuild between, so
+	# it is that path's own re-poll that clears the person, not the next.
+	var vat_tile := [Layouts.UNDERSTAFFED_VAT.x, Layouts.UNDERSTAFFED_VAT.y]
+	main._issue_config_command({"type": "set_mothballed", "tile": vat_tile, "enabled": true})
+	if not _machine_markers().is_empty():
+		_fail("switching the vat off must clear its person with the click, got %s" % str(_machine_markers()))
+	main._issue_config_command({"type": "set_mothballed", "tile": vat_tile, "enabled": false})
+	if _machine_markers() != ["machine:" + vat_key]:
+		_fail("switching the vat back on must restore its person with the click, got %s" % str(_machine_markers()))
+	main._issue_config_command({"type": "set_mothballed", "tile": vat_tile, "enabled": true})
 	main._rebuild_world()
 	if not bool(main._machine_load.get(vat_key, {}).get("mothballed", false)):
 		_fail("a machine switched off by command must poll back as mothballed")
@@ -422,6 +500,9 @@ func _run_checks() -> void:
 			still_uncrewed.append(key)
 	if not still_uncrewed.is_empty():
 		_fail("with the vat switched off nothing goes without a crew, but %s does" % str(still_uncrewed))
+	# Off is idle for a reason of the player's own: no person over it.
+	if not _machine_markers().is_empty():
+		_fail("a switched-off machine still floats the understaffed marker: %s" % str(_machine_markers()))
 
 	if _failed:
 		quit(1)

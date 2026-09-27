@@ -263,20 +263,43 @@ commit is a reviewed unit.
 
 **Every PR is reviewed before it merges. No exceptions for routine changes,
 and no reviewing after the merge** (the owner's rule, 2026-09-25). A PR
-merges only once it has a `VERDICT: APPROVED` comment from a session that did
-not write it, and its checks are green. Otherwise say it is ready for review
-and stop. An instruction to "open a PR and merge it" means that, after
-review. PR #163 is why this is spelled out. It merged on green CI under the
+merges only once it has a `VERDICT: APPROVED` comment from a reviewer that
+does not share the author's context (below), and its checks are green. An
+instruction to "open a PR and merge it" means that: get the review, then
+merge on its verdict. PR #163 is why this is spelled out. It merged on green
+CI under the
 old wording ("merging your own work unreviewed is fine for routine
 changes"), and its review could only happen afterwards, with the code
 already on `main`. A deviation from the design docs, a `gdext` bump, a
 save-format change, or anything the owner flagged also waits for the owner,
 on top of the review.
 
-**A PR is reviewed adversarially**, by someone who did not
-write it: they build the branch in their own worktree, re-run the reproduction
-of every issue it claims to close, and revert each fix in turn to prove the new
-test actually fails without it. GitHub refuses `--approve` and
+**A PR is reviewed adversarially, by a reviewer that does not share the
+author's context.** What makes a review independent is not which session runs
+it but what the reviewer knows. It starts from the PR and the repository alone:
+no transcript, none of the author's reasoning, no account of what was decided,
+what was tried or why something is fine. A reviewer who has been told why the
+code is right checks the author's argument instead of the code, and passes the
+same blind spots.
+
+The usual way to get one is for the author to **launch a fresh subagent** (the
+Agent tool, `general-purpose`) whose whole prompt is the PR number and the
+instruction to follow the `review` skill and post its verdict, e.g. *"Review
+PR #N adversarially, following `.claude/skills/review/SKILL.md`, and post the
+verdict with `gh pr review N --comment`."* Add nothing: no description of the
+change, no list of what was verified, no hint at what to skip or what is known
+to be acceptable. The PR body is already there, and the skill tells the
+reviewer to distrust it. A separate session that did not write the branch is
+just as good. What never counts is the author reviewing its own work, however
+carefully it re-runs its tests, or a subagent briefed with the author's
+reasoning. On `CHANGES REQUESTED`, fix the branch and send a fresh subagent
+the same bare prompt for the re-review. A subagent also loads the auto-memory
+index, so do not write memory about the PR under review before its verdict
+is in; that briefs the reviewer by the back door.
+
+The reviewer builds the branch in its own worktree, re-runs the reproduction
+of every issue the PR claims to close, and reverts each fix in turn to prove
+the new test actually fails without it. GitHub refuses `--approve` and
 `--request-changes` on a PR owned by the same account — which is every PR here
 — so the verdict is posted with `gh pr review N --comment`, opening with a line
 that is exactly `VERDICT: APPROVED` or `VERDICT: CHANGES REQUESTED`, and the
@@ -385,9 +408,10 @@ and the banner that reports it. Two rules it exists to enforce:
   If it genuinely cannot land, say so plainly and leave the worktree in place;
   do not report a clean close over the top of it.
 - **A PR of your own waiting on its review verdict is the one legitimate way
-  to end with a PR open.** You cannot review what you wrote, so pushing it and
-  naming what it waits on is finishing your half; merging it to tidy up is
-  not.
+  to end with a PR open.** You cannot review what you wrote, but you can
+  launch a context-free reviewer subagent for it (above). If that is not
+  possible, pushing it and naming what it waits on is finishing your half;
+  merging it unreviewed to tidy up is not.
 
 ## Orchestration (Orca)
 

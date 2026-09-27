@@ -9,7 +9,8 @@
 #      human) actually LOOKS at the asset it just generated without opening a
 #      GUI voxel editor — UI_UX.md §2a point 3.
 #   3. `cargo run -p voxgen --bin voxicons` renders a second, different kind
-#      of PNG per combined model into assets/voxels/icons/: a small (64px),
+#      of PNG per combined model into assets/voxels/icons/ (plus a 512px
+#      app_icon.png, the window/dock icon): a small (64px),
 #      transparent-background, tightly-cropped UI icon (UI_UX.md §5 — "icons
 #      are rendered from the real assets ... not separately-drawn 2D icon
 #      art"), NOT a copy of step 2's review preview. See

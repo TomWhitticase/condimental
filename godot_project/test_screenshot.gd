@@ -580,7 +580,7 @@ const CRUSHING_REVIEW_HOLD_TICKS := 6
 ## photographed on demand: `--bottleneck` leaves the dock part-filled.
 ##
 ## `Layouts.build_full_dock_line` does the waiting (some 25 000 ticks against
-## the starter contract's appetite); what is left here is the same freeze
+## the signed corner-shop order's appetite); what is left here is the same freeze
 ## `--payout` and `--crushing` need, plus which HALF of the blink to stop on.
 ## A pulse is a rhythm rather than a state, so a single frame can land on the
 ## dark half and photograph a dock that looks like it holds nothing — this

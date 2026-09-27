@@ -1500,8 +1500,32 @@ Four consequences worth knowing before changing it:
   `at_capacity`. The marker says WHERE to look. The hover says what is wrong
   (`⚠ FULL`, the places grid), and the lamp still pulses, so it is never the
   only signal. It is built to be reused: `_set_world_warning(key, anchor,
-  on)` in `main.gd` takes any placement, so a rack out of bays or a stuck
-  machine raises the same marker under a key of its own.
+  on, asset)` in `main.gd` takes any placement and any marker asset (the
+  "!" by default), under a key of its own per kind (`"dock:5,0"`), so a
+  rack out of bays can raise the "!" through the same door.
+- **A red person marks a machine held back for want of a crew**
+  (2026-09-26, PR #192). The same door's second asset
+  (`understaffed_marker`): a lit head over shoulders, the user pictogram, in
+  `status_red`. Red, not amber, because the machine is being turned away
+  for a reason only the player can fix, and it is throttled or stopped by
+  it: a short machine is refused on some ticks and handed its crew on
+  others, whenever an upstream machine claims nothing, so it may still run
+  part of the time. A person, not a "!", because the fix is a hire. It
+  stands `MACHINE_MARKER_CLEARANCE` above the tallest voxel the kind draws,
+  read off its meshes, under `"machine:x,y"`. It reads the sim's
+  `understaffed` off the polled machine-load entry: short on the
+  establishment, AND actually refused its crew within the last load window
+  (ten seconds), AND nothing on its own supply side holding it up. It never
+  reads the per-tick `staff` stall, which blinks. Being short on paper is
+  not enough: a spare, unfed machine early in the order can leave the last
+  one short on the books while that one runs on every tick, and a hire
+  there would buy nothing. So a machine that is running, unfed, backed up
+  or switched off never shows it. A short one shows it steadily until a
+  hire or the mothball switch clears it (both re-poll at once), or until a
+  whole window passes without a refusal. The hover names the shortfall in
+  words ("short of <category> staff") on the ticks the machine is refused,
+  so the colour is not the only signal; on the ticks between refusals it
+  shows whatever else the machine is doing.
 
 ## 8. What this doc does not cover
 
