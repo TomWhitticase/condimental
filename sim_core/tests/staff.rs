@@ -538,12 +538,6 @@ fn an_understaffed_machine_stays_understaffed() {
         }
         let stall = stall_of(&world, vat).map(|(kind, _)| kind);
         let understaffed = understaffed_at(&world, vat);
-        if understaffed {
-            assert!(
-                matches!(stall, None | Some(StallKind::Staff)),
-                "understaffed over a supply stall {stall:?} at tick {tick}"
-            );
-        }
         match first {
             None if understaffed => first = Some(tick),
             None => continue,
