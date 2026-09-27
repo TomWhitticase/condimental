@@ -331,13 +331,14 @@ so at 44-50 it mostly does not fire any more — by side
 effect, not by design, and #92/#93 are still the right fixes. Full record:
 `docs/DECISIONS.md`, 2026-09-26.
 
-**One thing is left for the owner.** GAMEPLAY §2's tier table now has the
-mustard row it never got, with every cell filled from the content or the
-measurement — except the tier *number*, which reads `?`. Mustard is a
-recipe-complexity peer of BBQ (no new machine, no new handling axis, one more
-recipe on the line that exists), so it is either a second tier 3 beside BBQ or
-a renumber that pushes mayonnaise, hot sauce and the aged sauces down one. No
-code reads the column.
+**GAMEPLAY §2 gained the mustard row it never got**, every cell filled from
+the content or the measurement, and the tier number is **3 — a second one,
+beside BBQ**. By that table's own definition mustard is a recipe-complexity
+gate (no new machine, no new handling axis, one more recipe on a line that
+already exists), and renumbering it to 4 would have pushed mayonnaise, hot
+sauce and the aged sauces to 5/6/7 to record a sauce that introduces nothing
+new. A tier is a class of obstacle, so two sauces can share one. No code reads
+the column.
 
 ### 2026-09-26 — Open-source licence and alpha-release groundwork
 
