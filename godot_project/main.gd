@@ -3453,6 +3453,7 @@ func _rebuild_world() -> void:
 	_pipe_fluid_nodes.clear()
 	_pipe_fault_nodes.clear()
 	_world_warnings.clear()
+	_machine_marker_anchors.clear()
 	# The instanced tiles and item pools are children of "World" and went
 	# with it; their bookkeeping goes too, so a stale slot index can never
 	# point into a MultiMesh that no longer exists.
@@ -3654,6 +3655,7 @@ func _build_placement(placement: Dictionary) -> void:
 				_world_root.add_child(gauge)
 				_machine_gauges[key] = gauge
 			_build_machine_motion(key, kind, centre, yaw)
+			_machine_marker_anchors[key] = _machine_marker_anchor(kind, placement, origin, size)
 			if kind == CRUSH_KIND:
 				# Where the pulp comes out. Recorded with the placement rather
 				# than looked up per frame, and taken from the footprint centre
@@ -4676,14 +4678,30 @@ const WARNING_MARKER_SCALE := 0.75
 ## side (`a_warning_marker_is_unchanged_by_a_quarter_turn`).
 const WARNING_MARKER_BOB_TICKS := 48
 const WARNING_MARKER_BOB := 0.08 * TILE
-var _world_warnings: Dictionary = {} # caller's key -> Node3D, one "!" each
+var _world_warnings: Dictionary = {} # caller's key -> Node3D, one marker each
+## The same door's second asset: a red person over a machine standing idle
+## for want of its crew (the sim's `understaffed`), raised from
+## `_poll_machine_load` under `"machine:x,y"`. Red, not amber, because the
+## machine has STOPPED; a person, not a "!", because the fix is a hire. Its
+## hover says "short of <category> staff" in words (UI_UX §7).
+const UNDERSTAFFED_MARKER_ASSET := "understaffed_marker"
+## How far above a machine's own highest voxel its marker's feet float. A
+## dock's anchor is its deck and WARNING_MARKER_LIFT clears its roof; a
+## machine's height ranges from the crusher's 25 voxels to the vat's 51, so
+## its anchor is taken off its meshes instead (`_machine_marker_anchor`).
+const MACHINE_MARKER_CLEARANCE := 0.4 * TILE
+## Machine origin key -> the anchor its understaffed marker stands over.
+var _machine_marker_anchors: Dictionary = {}
 
 
-## Raises (`on`) or clears the floating "!" for `key`, standing over
-## `anchor`. Idempotent both ways, so a caller can hand it its state every
-## frame. The key is the caller's, namespaced by what raised it
-## (`"dock:5,0"`), so two kinds on one tile never share a marker.
-func _set_world_warning(key: String, anchor: Vector3, on: bool) -> void:
+## Raises (`on`) or clears the floating marker for `key`, standing over
+## `anchor` — the "!" unless `asset` names another. Idempotent both ways, so
+## a caller can hand it its state every frame. The key is the caller's,
+## namespaced by what raised it (`"dock:5,0"`, `"machine:4,0"`), so two
+## kinds on one tile never share a marker, and one key keeps one asset.
+func _set_world_warning(
+	key: String, anchor: Vector3, on: bool, asset := WARNING_MARKER_ASSET
+) -> void:
 	if not on:
 		if _world_warnings.has(key):
 			var stale: Node3D = _world_warnings[key]
@@ -4697,13 +4715,35 @@ func _set_world_warning(key: String, anchor: Vector3, on: bool) -> void:
 	if node == null or not is_instance_valid(node):
 		if _world_root == null:
 			return
-		node = _asset_node(WARNING_MARKER_ASSET)
-		node.name = "%s_%s" % [WARNING_MARKER_ASSET, key.replace(":", "_").replace(",", "_")]
+		node = _asset_node(asset)
+		node.name = "%s_%s" % [asset, key.replace(":", "_").replace(",", "_")]
 		node.scale = Vector3.ONE * WARNING_MARKER_SCALE
 		_world_root.add_child(node)
 		_world_warnings[key] = node
 	node.set_meta("anchor", anchor)
 	node.position = _world_warning_position(anchor, sim.current_tick() if sim != null else 0)
+
+
+## The anchor a machine's understaffed marker stands over: its footprint
+## centre, at a height that puts the marker's feet MACHINE_MARKER_CLEARANCE
+## above the tallest thing the kind draws — its body or any motion frame,
+## read off the meshes so a new kind needs no entry here. The shared
+## WARNING_MARKER_LIFT is taken back off, since `_world_warning_position`
+## adds it to every anchor.
+func _machine_marker_anchor(kind: String, placement: Dictionary, origin: Vector2i,
+		size: Vector2i) -> Vector3:
+	var assets: Array = [_asset_for_placement(placement)]
+	var family := String(MACHINE_MOTION_MODELS.get(kind, MACHINE_MOTION_FALLBACK))
+	for k in range(MACHINE_FRAMES):
+		assets.append("%s_f%d" % [family, k])
+	var top := TILE
+	for asset in assets:
+		var mesh := _mesh_for(String(asset))
+		if mesh != null:
+			top = maxf(top, mesh.get_aabb().end.y)
+	return _footprint_centre(
+		origin, size, FLOOR_Y + top + MACHINE_MARKER_CLEARANCE - WARNING_MARKER_LIFT
+	)
 
 
 ## Where a marker over `anchor` stands on `tick`: lifted clear, plus the bob.
@@ -4936,7 +4976,20 @@ func _poll_machine_load() -> void:
 		# `mothballed` is a switch the player threw.
 		record["crewed"] = bool(entry.get("crewed", true))
 		record["mothballed"] = bool(entry.get("mothballed", false))
+		record["understaffed"] = bool(entry.get("understaffed", false))
 		_machine_load[key] = record
+		# The red person over a machine held back for want of a crew: the sim's
+		# `understaffed`, never this poll's `staff` stall. The pools reset
+		# every tick, so a short machine is handed its crew on any tick an
+		# upstream one claims nothing, and the stall blinks while the
+		# machine stays short; `understaffed` holds (short on the
+		# establishment, refused its crew within the last load window, and
+		# nothing on its own supply side holding it up).
+		if _machine_marker_anchors.has(key):
+			_set_world_warning(
+				"machine:" + key, _machine_marker_anchors[key],
+				record["understaffed"], UNDERSTAFFED_MARKER_ASSET
+			)
 
 
 ## The stall reason in words. Item ids go through `_item_display_name` like
@@ -10199,6 +10252,10 @@ func _staff_move_head(index: int, verb: String) -> void:
 		"category": id,
 	}))
 	_poll_staff()
+	# A hire or a fire moves `understaffed` with no tick: re-read now, so
+	# the red person over a machine goes (or comes) with the click, not up
+	# to LOAD_POLL_TICKS later.
+	_poll_machine_load()
 	_update_staff_panel()
 	var after := _headcount_of(id)
 	if after == before:
@@ -13646,6 +13703,9 @@ func _issue_config_command(command: Dictionary) -> void:
 	sim.issue_command_json(JSON.stringify(command))
 	_apply_dirty_chunks()
 	_refresh_buffers()
+	# The mothball switch clears (or restores) a red person over the
+	# machine; read it now rather than at the next load poll.
+	_poll_machine_load()
 	_update_config_panel()
 
 

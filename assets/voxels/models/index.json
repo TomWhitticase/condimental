@@ -315,6 +315,9 @@
   "staff_packaging": [
     "matte"
   ],
+  "understaffed_marker": [
+    "emissive"
+  ],
   "warehouse_pallet": [
     "matte",
     "metal"
