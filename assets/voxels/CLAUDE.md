@@ -70,7 +70,9 @@ Reasoning lives in `docs/UI_UX.md` §2a/§2b and `docs/DECISIONS.md` Part B —
 - **A second render pass** (`generators/icons.rs`, §2b point 7): 256px
   render, flood-filled transparent from the border pixels, cropped tight,
   downscaled to 64px — not a shrunk preview (`vengi-thumbnailer` has no
-  alpha cvar, so previews are always opaque and padded).
+  alpha cvar, so previews are always opaque and padded). The same pass also
+  writes `app_icon.png`, `item_bottle` at 512px from a 1024px render: the
+  window/dock icon `project.godot`'s `config/icon` loads.
 - **A model whose only consumer is the icon pass is authored for vengi's
   camera, the −X/+Y corner, not the game's** (§2b point 35):
   the two cameras see opposite sides of the same model.

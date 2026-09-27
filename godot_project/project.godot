@@ -21,6 +21,9 @@ config/version="0.1.0"
 ; GameSession autoload below is what carries that choice across.
 run/main_scene="res://menu.tscn"
 config/features=PackedStringArray("4.6")
+; The window and dock icon: the ketchup bottle, rendered at 512px by
+; voxicons (assets/voxels/generators/icons.rs) and staged by `cargo xtask`.
+config/icon="res://voxels/icons/app_icon.png"
 
 [display]
 

@@ -8,7 +8,7 @@ plus the UI-icon extension of it described in §5.
 | `palette.ron` | **Source.** The single source of truth for every colour *and* every material class (matte / metal / emissive) in the game's art. Every generator references it; none invent their own colours. |
 | `generators/` | **Source.** The `voxgen` crate — one small Rust function per asset, built from composable primitives, plus the `voxicons` binary (`generators/icons.rs`) that turns a model into a UI icon. This, not the `.vox`/icon `.png` files, is what an asset actually *is*. |
 | `models/` | **Build output, committed.** Regenerate with `cargo run -p voxgen --bin voxgen`. Never hand-edit a `.vox` here: the next regeneration will silently wipe the change. |
-| `icons/` | **Build output, committed.** Small (64px), transparent-background, tightly-cropped PNG icons — one per combined model, for UI use (UI_UX.md §5). Regenerate with `cargo run -p voxgen --bin voxicons` (needs `vengi`, see below). Committed like `models/`, not gitignored like `previews/`, because `godot_project/main.gd` loads these at runtime. |
+| `icons/` | **Build output, committed.** Small (64px), transparent-background, tightly-cropped PNG icons — one per combined model, for UI use (UI_UX.md §5) — plus `app_icon.png`, the ketchup bottle at 512px, which `project.godot` uses as the window/dock icon. Regenerate with `cargo run -p voxgen --bin voxicons` (needs `vengi`, see below). Committed like `models/`, not gitignored like `previews/`, because `godot_project/main.gd` loads these at runtime. |
 | `previews/` | **Build output, gitignored.** Isometric PNGs for visual review, plus `scene.png`, a full render of the game scene. **Not the same thing as `icons/`** — see "Icons vs. previews" below. |
 
 ## Commands

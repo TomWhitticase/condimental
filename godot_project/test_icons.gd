@@ -14,7 +14,10 @@
 #     call, proving the result is cached rather than re-loaded/re-rendered
 #     every time,
 #   * an unknown item id still returns a non-null Texture2D (the documented
-#     placeholder fallback) instead of crashing or returning null.
+#     placeholder fallback) instead of crashing or returning null,
+#   * project.godot's config/icon (the window/dock icon) loads and is at
+#     least 256px, because a bad path there is silent: the game boots with
+#     Godot's default icon and logs nothing.
 extends SceneTree
 
 
@@ -52,5 +55,14 @@ func _initialize() -> void:
 		_fail("the fallback texture should still have real pixel dimensions")
 		return
 
-	print("ICONS_OK: known item id resolves to a cached, real generated icon; unknown id falls back to a non-null placeholder without crashing")
+	var app_icon_path: String = ProjectSettings.get_setting("application/config/icon", "")
+	if app_icon_path == "" or not ResourceLoader.exists(app_icon_path):
+		_fail("application/config/icon ('%s') does not name a loadable file — the window would show Godot's default icon" % app_icon_path)
+		return
+	var app_icon: Texture2D = load(app_icon_path)
+	if app_icon == null or app_icon.get_width() < 256 or app_icon.get_height() < 256:
+		_fail("application/config/icon ('%s') should be a texture of at least 256x256" % app_icon_path)
+		return
+
+	print("ICONS_OK: known item id resolves to a cached, real generated icon; unknown id falls back to a non-null placeholder without crashing; the app icon loads at %dx%d" % [app_icon.get_width(), app_icon.get_height()])
 	quit(0)
