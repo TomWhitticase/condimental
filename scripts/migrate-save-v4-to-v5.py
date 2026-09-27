@@ -27,7 +27,15 @@ board leaves its id there and nowhere else.
 The reconstruction is then CHECKED against an independent number the save
 also holds: every dock's `shipped_total` counts boxes that came off its belt,
 so boxes shipped to docks must equal boxes sold plus boxes still standing on
-them. When those agree the reconstruction is exact rather than a floor.
+them. When those agree the reconstruction is confirmed by a figure it was not
+derived from.
+
+Read a failure narrowly, because the check is weaker than the ledger: it
+compares totals and not items, and a dock that has since been demolished took
+its `shipped_total` away with it, so a rebuilt factory can fail while its
+ledger is perfectly right. A failure means "not confirmed here", never
+"wrong" — which is why it stops the write and asks for `--force` rather than
+deciding for you.
 """
 
 import argparse
@@ -55,7 +63,7 @@ def contract_mixes(path):
     return mixes
 
 
-def migrate(save_path, mixes, apply):
+def migrate(save_path, mixes, apply, force=False):
     text = save_path.read_text()
     report = [f"{save_path.name}:"]
 
@@ -83,6 +91,8 @@ def migrate(save_path, mixes, apply):
     )
 
     sold = {}
+    floor = False  # windows nobody can attribute: the ledger is an under-count
+    confirmed = False  # the docks' own total agrees with it
     for cid, made in signed:
         for item, per in mixes.get(cid, []):
             sold[item] = sold.get(item, 0) + made * per
@@ -90,7 +100,6 @@ def migrate(save_path, mixes, apply):
 
     attributed = sum(made for _, made in signed)
     unattributed = windows - attributed
-    exact = True
     if unattributed > 0:
         if len(lost) == 1:
             for item, per in mixes.get(lost[0], []):
@@ -100,7 +109,7 @@ def migrate(save_path, mixes, apply):
                 f"the only contract the save's own lists leave unaccounted"
             )
         else:
-            exact = False
+            floor = True
             report.append(
                 f"  WARNING: {unattributed} of {windows} windows cannot be "
                 f"attributed ({len(lost)} contracts struck off) — the figure "
@@ -115,19 +124,24 @@ def migrate(save_path, mixes, apply):
     )
     total_sold = sum(sold.values())
     if shipped == total_sold + standing:
+        confirmed = True
         report.append(
             f"  CHECK PASSED: {shipped} boxes reached the docks = "
             f"{total_sold} sold + {standing} still standing"
         )
     else:
-        exact = False
         report.append(
-            f"  CHECK FAILED: {shipped} boxes reached the docks but "
-            f"{total_sold} sold + {standing} standing = {total_sold + standing}"
+            f"  CHECK NOT CONFIRMED: {shipped} boxes reached the docks but "
+            f"{total_sold} sold + {standing} standing = {total_sold + standing}."
+            f" This compares totals, not items, and a demolished dock takes its "
+            f"shipped_total with it, so the ledger below may still be right — "
+            f"but nothing here proves it"
         )
 
     ledger = ", ".join(f'"{k}": {v}' for k, v in sorted(sold.items()))
-    report.append(f"  lifetime_boxes_sold: {{{ledger}}}{'' if exact else '  (FLOOR)'}")
+    report.append(
+        f"  lifetime_boxes_sold: {{{ledger}}}{'  (A FLOOR)' if floor else ''}"
+    )
 
     out = re.sub(
         r"schema_version:\s*\d+", f"schema_version: {TO_VERSION}", text, count=1
@@ -140,6 +154,12 @@ def migrate(save_path, mixes, apply):
     )
     if out == text:
         return report + ["  REFUSED: nothing was rewritten"], None
+
+    if apply and not confirmed and not force:
+        return report + [
+            "  NOT WRITTEN: the docks did not confirm this ledger, so it is "
+            "unchecked — pass --force to write it anyway"
+        ], None
 
     if apply:
         backup = save_path.with_suffix(f".v{FROM_VERSION}.ron.bak")
@@ -161,11 +181,16 @@ def main():
         help="the content file the mixes come from (default: this repo's)",
     )
     ap.add_argument("--apply", action="store_true")
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="write even when the docks did not confirm the ledger (see above)",
+    )
     args = ap.parse_args()
 
     mixes = contract_mixes(args.contracts)
     for save in args.saves:
-        lines, _ = migrate(save, mixes, args.apply)
+        lines, _ = migrate(save, mixes, args.apply, args.force)
         print("\n".join(lines))
     return 0
 

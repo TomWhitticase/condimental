@@ -158,8 +158,15 @@
 //! [`SaveData::lifetime_boxes_sold`] is why version 4 became version 5
 //! (2026-09-26, the owner's change): the progression gates stopped keying
 //! off satisfied delivery windows and started keying off boxes of a named
-//! product sold. A file from before that has no such ledger, and there is
-//! no honest way to write one from what it does say.
+//! product sold. A file from before that has no such ledger, and this loader
+//! will not write one for it: reconstructing the ledger means reading
+//! `data/contracts.ron` to find out what a delivery window shipped, so the
+//! answer moves with a rebalance, which is not something a load may depend
+//! on. Outside the loader it is a different question, and
+//! `scripts/migrate-save-v4-to-v5.py` answers it — it replays this crate's
+//! own arithmetic over each contract's `deliveries_made` and checks the
+//! result against the docks' `shipped_total`. A v4 file is still refused
+//! here, by number.
 //!
 //! The tempting alternative was one `#[serde(default)]` and no bump, and it
 //! was tried before it was rejected. It loads, but it loses a tier the
