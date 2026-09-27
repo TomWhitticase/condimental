@@ -753,11 +753,11 @@ matches what code comments and data files cite.
 
   *(Amended 2026-09-27, the green-checks half only: when GitHub refuses to run
   the checks at all — a billing stop, not a failure — branch protection makes
-  the merge impossible rather than inadvisable, and `gh pr merge
-  --admin` is how the owner lands work anyway. The verdict is not waived with
-  it, a check that is red because of the change is still the change's to fix,
-  and the squash body carries the reason plus the local evidence, because that
-  body is what `main` keeps. #198, #201 and #202 landed under it.)*
+  the merge impossible rather than inadvisable, and `gh pr merge --admin` is
+  how the owner lands work anyway. The verdict is not waived with it, a check
+  that is red because of the change is still the change's to fix, and the
+  squash body carries the reason plus the local evidence, because that body is
+  what `main` keeps. Eleven PRs landed under it: #192–#196 and #198–#203.)*
 
   **What was rejected.** Keeping the routine-change exemption was rejected.
   Whether a change counts as "routine" is judged by its author, which is
@@ -3855,7 +3855,7 @@ matches what code comments and data files cite.
   The restructure, following the video's own prescriptions:
 
   - **`CLAUDE.md` was cut to 72 lines / ~950 tokens** (a 97% cut; it grows a
-    little as rules are added — 98 lines on 2026-09-27). It holds the
+    little as rules are added — 100 lines on 2026-09-27). It holds the
     project in a sentence, the rules that genuinely always apply — Rust owns
     gameplay logic, content is data, no floats in sim state, follow the
     design docs, small increments, plan mode, text scenes, Conventional

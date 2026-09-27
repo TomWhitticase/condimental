@@ -27,9 +27,11 @@ See [WORKFLOW.md](WORKFLOW.md).
   that is red because of the change is still the change's to fix. The squash
   body says the checks could not run and what was verified locally instead,
   since that body is what `main`'s history keeps. Stated when GitHub refused
-  every job in the repository on a billing error and #198, #201 and #202
-  landed this way. Binds `docs/WORKFLOW.md` and the `open-pr` skill; recorded
-  as an amendment inside the 2026-09-25 review record in `docs/DECISIONS.md`.
+  every job in the repository on a billing error and eleven PRs — #192–#196
+  and #198–#203 — landed this way. Binds `CLAUDE.md`, `docs/WORKFLOW.md` and
+  the `open-pr` skill; recorded as an amendment inside the 2026-09-25 review
+  record in `docs/DECISIONS.md`.
+
 - 2026-09-26 **The review always runs; only the merge is ever held.** An
   amendment to the entry below, stated after PR #193 ended a session open
   and "waiting on review" that nobody had been asked for. An author with no

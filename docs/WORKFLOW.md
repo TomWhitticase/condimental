@@ -292,8 +292,9 @@ work anyway, and only with a `VERDICT: APPROVED` in hand: the review gate is
 not what is being waived. Say in the squash body that the checks could not run
 and what was verified locally in their place, because the body is what `main`'s
 history keeps. This came up on 2026-09-27, when GitHub refused every job in
-the repository on a billing error and #198, #201 and #202 landed this way; a
-red check that belongs to the branch is still the branch's to fix.
+the repository on a billing error and eleven PRs — #192–#196 and #198–#203 —
+landed this way; a red check that belongs to the branch is still the branch's
+to fix.
 
 **A PR is reviewed adversarially, by a reviewer that does not share the
 author's context.** What makes a review independent is not which session runs
