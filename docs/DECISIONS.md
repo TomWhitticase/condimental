@@ -91,26 +91,44 @@ matches what code comments and data files cite.
   is the shape that lets a designer half-author a gate, and the loader would
   then have to invent the missing half or reject a file that *looks* complete.
 
-  **Five refusals at load, because an unopenable gate is worse than a wrong
-  one.** `UnlockRegistry::from_ron_str` already rejected a `schema_version`
-  mismatch, a duplicate id, an unlock releasing nothing (`ReleasesNothing`)
-  and an unknown ingredient; it now also refuses `boxes: 0`
-  (`OpenFromTheStart` — a gate that is open in a new game is not a gate), an
-  `item` no `ingredients.ron`/`recipes.ron` id matches (`UnknownSoldItem`),
-  an item that exists but **no recipe produces** (`SoldItemNothingProduces` —
-  the typo class that ships a tier nobody can ever reach), an item every
-  recipe can make but **no contract ever orders**
-  (`SoldItemNoContractOrders`), and two gates on one product whose thresholds
-  fall rather than climb (`TiersOutOfOrder`). The fourth is the one worth
-  dwelling on: only a **paid window's `mix`** feeds the ledger, so "produced"
-  is not "ordered" — of the fourteen recipe outputs only the three boxed
-  cases are ever ordered, which makes a gate on a bottle or an intermediate
-  the easiest unopenable gate to author, and it looks perfectly correct in
-  the file. The fifth keeps the file-order-is-tier-order claim in this record
-  true in the one case where two thresholds are comparable at all. All are a
-  startup panic, in the house style: content is loaded once, and a game that
-  boots into an impossible progression is worse than one that refuses to
-  boot.
+  **Five refusals, one at load and four from the test suite.** At load,
+  `UnlockRegistry::from_ron_str` — the function `bundled()` panics on —
+  already rejected a `schema_version` mismatch, a duplicate id and an unlock
+  releasing nothing (`ReleasesNothing`); it now also refuses `boxes: 0`
+  (`OpenFromTheStart` — a gate that is open in a new game is not a gate).
+  The other four live in `UnlockRegistry::validate_covers`, which reads
+  `unlocks.ron` against the other content files: an `item` no
+  `ingredients.ron`/`recipes.ron` id matches (`UnknownSoldItem`), an item
+  that exists but **no recipe produces** (`SoldItemNothingProduces` — the
+  typo class that ships a tier nobody can ever reach), an item every recipe
+  can make but **no contract ever orders** (`SoldItemNoContractOrders`), and
+  two gates on one product whose thresholds fall rather than climb
+  (`TiersOutOfOrder`). `UnknownEntry` — a gated ingredient or contract id
+  that does not exist — is in that same function, not in `from_ron_str`.
+  `SoldItemNoContractOrders` is the one worth dwelling on: only a **paid
+  window's `mix`** feeds the ledger, so "produced" is not "ordered" — of the
+  **seven** solid ids `recipes.ron` outputs only the three boxed cases are
+  ever ordered, and the other four (three bottles and `tomato_paste`) are
+  not, which makes a gate on a bottle or an intermediate the easiest
+  unopenable gate to author, and it looks perfectly correct in the file. A
+  recipe's `fluid_outputs` are a separate field the check never reads, and a
+  fluid cannot be boxed and shipped at all. `TiersOutOfOrder` keeps
+  the file-order-is-tier-order claim in this record true in the one case
+  where two thresholds are comparable at all.
+
+  **A cross-file check is a test here, not a construction-time panic**, and
+  this record said the opposite in its first two drafts. `validate_covers` is
+  called only from `mod tests`, which runs it against the shipped files, so a
+  gate nobody could open fails `cargo test` rather than a player's boot —
+  exactly the arrangement the 2026-09-08 chain-rework record set for
+  `IngredientCatalog::validate_covers` ("a **test**, not a construction-time
+  panic") and the 2026-09-08 contracts record set for the contracts-vs-recipes
+  cross-check. The reason is the same one those give: `bundled()` panicking on
+  a cross-file check would take down every test that builds a world from
+  fabricated content, and the shipped files are checked once in CI rather than
+  on every boot. The cost is honest and worth writing down — an
+  `unlocks.ron` edited without running `cargo test` is never checked, and an
+  unopenable gate in it boots and plays, simply never opening.
 
   **Tier order is file order now.** While every gate counted the same unit, the
   deepest gate was `max_by_key(after_deliveries)`. Two gates counting
@@ -146,7 +164,7 @@ matches what code comments and data files cite.
   The sentence that made the exception look affordable was also this PR's own
   casualty: `save.rs` justified re-earning the tier as "ten delivery windows
   … a couple of minutes", which was the price under the trigger this very
-  change removes — the new one is ~29 minutes for the first tier and ~100 for
+  change removes — the new one is ~29 minutes for the first tier and ~78 for
   the second. So the exception's central number was wrong by ~15x, made wrong
   by the paragraph beside it.
 
@@ -177,25 +195,41 @@ matches what code comments and data files cite.
   **Balance: this moves both gates substantially later, and that is flagged
   rather than absorbed.** Measured headless at 30 ticks/sec on the shipped
   starter board: 100 `boxed_ketchup` arrives at **tick 52 000 (~29 min, 50
-  delivery windows)** with the starter order alone, and at **tick 33 000
+  delivery windows)** with `corner_shop` signed alone, and at **tick 33 000
   (~18 min, 44 windows)** with all three starter-era orders signed. The old
   gate was ten windows — minutes, not half an hour. The second gate is worse,
   and it is now measured from zero rather than estimated: a factory that earns
-  the first gate and then builds the BBQ branch crosses the mustard gate at
-  **tick 181 000 — 100 minutes at 30 ticks/sec**, 114 000 ticks (~63 min)
-  after the first. `godot_project/measure_gate_ticks.gd` is that measurement,
-  kept in the tree so the figure can be re-run rather than believed; it earns
-  both gates instead of patching the ledger the way every shipped fixture
-  does. The cause is not the factory: authored BBQ demand (~4.5 boxes per
-  1 000 ticks) runs well ahead of what one branch delivers (~0.8). **The numbers are the owner's and were not changed**, but
-  the consequence is recorded here: the 2026-09-20 measurement behind issue
-  #55 ("the bank at the moment of building decides whether the BBQ branch
-  costs you the board") found the trap stopped biting at about 40 windows, and
-  the new BBQ gate lands at 44. So #55's trap mostly does not fire at the
-  shipped numbers any more — **by side effect, not by design**. Its reasoning
-  is untouched and its fixes (#92, #93) are still the right ones: a balance
-  pass that moved this gate earlier would restore the trap without touching
-  anything that looks related.
+  the first gate, builds the BBQ branch and signs every order the board will
+  take crosses the mustard gate at **tick 141 000 — 78 minutes at 30
+  ticks/sec**, which is **89 000 ticks (~49 min) after the BBQ gate opened at
+  tick 52 000**. The tool's own "74 000 ticks" line counts from where it starts
+  measuring — the fixture's hand-off at tick 67 000, once the BBQ branch is
+  built and settled — so the two figures are the same run seen from two
+  reference points, and the one a player feels is the 89 000.
+  `godot_project/measure_gate_ticks.gd` is that measurement, kept in the tree
+  so the figure can be re-run rather than believed; it earns both gates
+  instead of patching the ledger the way every shipped fixture does. **The
+  first version of it did not measure what it claimed** — it read two wire
+  keys that do not exist (`available_contracts`/`active_contracts` rather than
+  `board`/`contracts`), so its "sign everything" step was a silent no-op, only
+  the two orders the fixture signs for itself were ever running, and it
+  reported 181 000. With the whole board signed the figure is 141 000, and the
+  tool now refuses rather than measuring a world it did not build. The cause
+  is not the factory: with all four BBQ orders signed the board asks ~4.5
+  boxes per 1 000 ticks, and the branch put 90 boxes into paid windows over the
+  74 000 ticks that were measured — about **1.2 per 1 000 ticks**, a quarter of
+  what is asked for. **The numbers are the owner's and were not changed**, but the
+  consequence is recorded here: the 2026-09-20 measurement behind issue #55
+  ("the bank at the moment of building decides whether the BBQ branch costs
+  you the board") found the trap stopped biting at about 40 windows. The BBQ
+  gate now lands at 44 windows if three orders are signed at tick 0 and 50 if
+  only `corner_shop` is — and since 2026-09-26 a new game ships **no** signed
+  contract at all, so a real run is the 50-window row or later. Both rows are
+  past 40, so #55's trap mostly does not fire at the shipped numbers any more
+  — **by side effect, not by design**. Its reasoning is untouched and its
+  fixes (#92, #93) are still the right ones: a balance pass that moved this
+  gate earlier would restore the trap without touching anything that looks
+  related.
 
   **What this does not change.** The two lists and the deliberate absence of a
   third (no recipe is ever locked, so progression stays off the tick path);

@@ -75,11 +75,19 @@
 //                gate, and how many boxes of it. ONE field holding both,
 //                because a count without a product, or a product without a
 //                count, is not a gate. `item` must be an id something in
-//                `data/recipes.ron` PRODUCES — a gate keyed to an item no
-//                recipe outputs could never open — and `boxes` must be at
-//                least 1, since 0 would be a gate that is open in a new game
-//                and therefore not a gate. The loader refuses all three
-//                mistakes.
+//                `data/recipes.ron` PRODUCES *and* that some contract in
+//                `data/contracts.ron` ORDERS — only a paid window's `mix`
+//                feeds the boxes-sold ledger, so a gate keyed to anything
+//                else could never open — and `boxes` must be at least 1,
+//                since 0 would be a gate that is open in a new game and
+//                therefore not a gate. WHERE EACH IS CAUGHT: `boxes: 0` is
+//                refused by the loader itself (`from_ron_str`), so it is a
+//                startup panic. The `item` rules are `validate_covers`,
+//                which `sim_core`'s test suite runs against these shipped
+//                files — a cross-file check is a test here, not a boot-time
+//                panic (docs/DECISIONS.md, 2026-09-08 and 2026-09-26). Edit
+//                `item` wrongly and `cargo test` fails; the game itself
+//                would boot and simply never open the tier.
 //   ingredients  `data/ingredients.ron` ids held back until it opens
 //   contracts    `data/contracts.ron` ids held back until it opens
 //
@@ -116,10 +124,13 @@
         // `sim_core/tests/common`, raws topped back up as a careful player
         // does, at ARCHITECTURE.md §3.9's 30 ticks/sec):
         //
-        //   1 order (corner_shop only,   100th box at tick 52 000 — 29 min,
-        //   as a new game ships)         50 delivery windows
-        //   3 starter orders signed at   100th box at tick 33 000 — 18 min,
-        //   tick 0                       44 windows, 1 630 in the bank
+        //   1 order (corner_shop signed  100th box at tick 52 000 — 29 min,
+        //   by hand — a new game since    50 delivery windows
+        //   2026-09-26 ships NO contract
+        //   signed at all, so this is the
+        //   cheapest a real run can be)
+        //   3 orders signed at tick 0     100th box at tick 33 000 — 18 min,
+        //                                 44 windows, 1 630 in the bank
         //
         // SO THIS GATE IS MUCH LATER THAN IT WAS, and the owner asked for the
         // count knowing the count, not the clock: ten windows was about three
@@ -135,13 +146,15 @@
         // windows against three-strike contracts: the reward for building the
         // thing the game just unlocked is losing the order that paid for it.
         // The sweep's own table says the trap stops biting at about forty
-        // windows, and the measurement above lands the new gate at forty-four
-        // for the player the board is built for — so a gate chosen for a
-        // different reason has largely closed #55's window as a side effect.
-        // #55 STAYS OPEN anyway: forty-four windows is where the intended
-        // player arrives, not where every player does, the one-order player
-        // still arrives with nothing banked, and the real fixes are still its
-        // own (#92, #93). Nothing here was tuned for it.
+        // windows, and BOTH rows above are past it: forty-four windows with
+        // three orders signed at tick 0, fifty with corner_shop alone — and
+        // fifty is the row a real run walks, since a new game signs nothing.
+        // So a gate chosen for a different reason has largely closed #55's
+        // window as a side effect. #55 STAYS OPEN anyway: those rows are where
+        // a fed, staffed line arrives, not where every player does, a player
+        // who reaches the gate slowly still arrives with little banked, and the
+        // real fixes are still its own (#92, #93). Nothing here was tuned for
+        // it.
         //
         // ==== THE 2026-09-20 SWEEP, IN THE OLD UNIT ====
         // Everything below was measured when the trigger was LIFETIME
@@ -245,16 +258,24 @@
         // `godot_project/measure_gate_ticks.gd` (fully staffed, raws topped
         // up and money no object — a floor, not a typical run):
         //
-        //   100th box of boxed_ketchup at tick ~52 000, and the 100th box of
-        //   boxed_bbq at tick 181 000 — 100 minutes at 30 ticks/sec, of which
-        //   114 000 ticks (~63 min) are after the first gate opened
+        //   100th box of boxed_ketchup at tick 52 000, and the 100th box of
+        //   boxed_bbq at tick 141 000 — 78 minutes at 30 ticks/sec, of which
+        //   89 000 ticks (~49 min) are after the first gate opened, with
+        //   every one of the four BBQ orders signed
+        //
+        //   (the tool prints "74 000 ticks" for that gap because it starts
+        //   its clock at the fixture's hand-off at tick 67 000, 15 000 ticks
+        //   of branch-building and settling after the gate itself opened)
         //
         // THAT IS A FLAG, not a measurement in support: it puts mustard about
-        // an hour and three quarters into a session, where the old trigger put
-        // it at eleven minutes. The cause is not the factory — the four BBQ orders
-        // between them ask for only about 4.5 boxes per 1 000 ticks, and the
-        // branch actually delivered about 0.8, so it is the branch's
-        // throughput against the cadences the orders keep. Whoever wants
+        // an hour and twenty minutes into a session, where the old trigger put it
+        // at eleven minutes. The cause is not the factory — with all four BBQ
+        // orders signed the board asks for about 4.5 boxes per 1 000 ticks
+        // (smokehouse_trial 2 boxes / 2 500 ticks = 0.80, grill_pub 2/3 000 =
+        // 0.67, roadhouse_group 4/4 000 = 1.00, bbq_festival 10/5 000 = 2.00)
+        // and the branch put about 1.2 of them into paid windows (90 boxes in
+        // the 74 000 ticks measured), so it is the branch's throughput against the cadences
+        // the orders keep, not a shortage of demand. Whoever wants
         // mustard sooner has three content-side levers and no Rust to write:
         // a smaller `boxes` here, more BBQ demand in `data/contracts.ron`, or
         // a faster BBQ recipe.

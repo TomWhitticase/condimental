@@ -701,6 +701,21 @@ pub fn build(input: &CookbookInput<'_>) -> CookbookSnapshot {
     }
 }
 
+/// One padlock, read off the gate and the ledger. Two call sites build the
+/// same line — a sauce page's deepest shut gate and a raw ingredient's own —
+/// and a `GateLine` assembled twice is a `GateLine` that can disagree with
+/// itself.
+fn gate_line(unlock: &Unlock, sold: &BoxesSold) -> GateLine {
+    let progress = unlock.progress(sold);
+    GateLine {
+        id: unlock.id.clone(),
+        name: progress.name,
+        item: progress.item,
+        required: progress.required,
+        sold: progress.sold,
+    }
+}
+
 /// Every fact in [`GuideFact::ALL`], in that order.
 ///
 /// **All of them, every time, whether the shipped prose uses them or not.**
@@ -717,21 +732,6 @@ pub fn build(input: &CookbookInput<'_>) -> CookbookSnapshot {
 /// registry, and re-deriving it here would be a second definition of "a
 /// sauce" — or, for the open count, a second reading of the same gate the
 /// ingredient pages already resolved.
-/// One padlock, read off the gate and the ledger. Two call sites build the
-/// same line — a sauce page's deepest shut gate and a raw ingredient's own —
-/// and a `GateLine` assembled twice is a `GateLine` that can disagree with
-/// itself.
-fn gate_line(unlock: &Unlock, sold: &BoxesSold) -> GateLine {
-    let progress = unlock.progress(sold);
-    GateLine {
-        id: unlock.id.clone(),
-        name: progress.name,
-        item: progress.item,
-        required: progress.required,
-        sold: progress.sold,
-    }
-}
-
 fn guide_facts(
     input: &CookbookInput<'_>,
     sauce_count: usize,
@@ -757,7 +757,8 @@ fn guide_facts(
     // Orders the board is showing right now: no gate, or a gate that has
     // opened. This is what "open to a brand-new factory" means in the
     // guide's prose, and it is not `starters()` — a starter is one the game
-    // signs for you, and there is exactly one of those.
+    // signs for you, and since 2026-09-26 `data/contracts.ron` marks none,
+    // so `starters()` is empty while this list is not.
     let open_contracts = input
         .contracts
         .ordered()

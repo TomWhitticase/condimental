@@ -6,7 +6,7 @@
 #   godot --headless --path godot_project --script measure_gate_ticks.gd
 #
 # WHY IT EXISTS. The gates' cost is the one thing about the 2026-09-26 trigger
-# change that no test can pin: a test asserting "the mustard gate takes 181 000
+# change that no test can pin: a test asserting "the mustard gate takes 141 000
 # ticks" would fail on every balance pass, which is the opposite of useful. But
 # an unmeasured claim in a PR body is worse — the first review of this change
 # reproduced the ketchup figure and could not reproduce the mustard one,
@@ -19,11 +19,25 @@
 #
 # WHAT IT PRINTED on 2026-09-27, at `data/unlocks.ron`'s shipped 100/100:
 #
-#   BBQ gate crossed at tick 67000 (detected on a 2 000-tick poll, 130 sold;
-#     the hundredth box itself sells at tick ~52 000 — `test_layouts.gd`'s
-#     `build_bbq_running_line` ceiling comment carries that tighter figure)
-#   MUSTARD gate crossed at tick 181000 — 100.6 minutes at 30 ticks/s,
-#     114 000 ticks (~63 min) after the BBQ gate
+#   BBQ gate crossed at tick 67000, 130 boxes sold — that is the tick
+#     `build_bbq_running_line` RETURNS at, not the tick the gate opened: it
+#     spots the open gate on a 250-tick poll at about tick 52 000, then builds
+#     the BBQ branch and runs `BBQ_SETTLE_TICKS` (15 000) more before handing
+#     back, and the ketchup line keeps selling throughout
+#   active contracts after signing 11 of 13 offers: 13
+#   MUSTARD gate crossed at tick 141000 — 78.3 minutes at 30 ticks/s,
+#     74 000 ticks after the line above; the BBQ gate itself opened at tick
+#     52 000, so 89 000 ticks (~49 min) of the run follow it
+#
+# IT PRINTED 181000 UNTIL 2026-09-27, and that number is in no file any more:
+# the signing step read `available_contracts`/`active_contracts`, which are not
+# the wire's keys, so `.get(…, [])` handed it an empty array, nothing was
+# signed and only the two orders `build_bbq_running_line` signs for itself were
+# ever asking for BBQ. It reported "active contracts after signing: 0" while
+# two were running (`smokehouse_trial` and `grill_pub`), which is what gave the
+# mistake away. Hence the two
+# refusals below: a measuring tool that skips a step silently is worse than no
+# tool.
 #
 extends SceneTree
 
@@ -42,18 +56,46 @@ func _init() -> void:
 		quit(1)
 		return
 	var economy = JSON.parse_string(sim.economy_snapshot_json())
-	print("BBQ gate crossed at tick %d (wall %.1fs)" % [int(sim.current_tick()), (Time.get_ticks_msec() - t0) / 1000.0])
+	# NOT the tick the gate opened: the fixture spots it on a 250-tick poll and
+	# then builds the BBQ branch and settles `BBQ_SETTLE_TICKS` more, so this is
+	# the hand-off and the `sold` count below is already past 100.
+	print("BBQ fixture handed back at tick %d, %d ticks after its gate opened (wall %.1fs)" % [
+		int(sim.current_tick()), Layouts.BBQ_SETTLE_TICKS, (Time.get_ticks_msec() - t0) / 1000.0])
 	for gate in economy.get("unlocks", []):
 		print("  gate %s: item=%s sold=%d required=%d open=%s" % [
 			gate.get("id", "?"), gate.get("item", "?"),
 			int(gate.get("sold", 0)), int(gate.get("required", 0)), str(gate.get("open", false))])
 
-	# Sign everything the board will now take, so BBQ demand exists at all.
+	# Sign everything the board will now take, so the whole of the authored BBQ
+	# demand is actually running — not just the two orders the BBQ fixture
+	# signs for itself. The keys are `board` (every offer) and `contracts`
+	# (the active ones), which is what `main.gd` reads; an earlier cut of this
+	# tool asked for `available_contracts`/`active_contracts`, got the `.get`
+	# default `[]` for both, signed nothing and reported "0 active" while two
+	# orders were running. A silently-skipped step in a measuring tool is worse
+	# than no tool, so this one REFUSES rather than measuring the wrong world.
 	Layouts.fund(sim, 200000)
-	for contract in JSON.parse_string(sim.economy_snapshot_json()).get("available_contracts", []):
-		sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": contract.get("id", "")}))
-	var signed: Array = JSON.parse_string(sim.economy_snapshot_json()).get("active_contracts", [])
-	print("active contracts after signing: %d" % signed.size())
+	var board: Array = JSON.parse_string(sim.economy_snapshot_json()).get("board", [])
+	if board.is_empty():
+		print("MEASURE_FAIL: the board is empty, so `board` is not the wire's key for it any more")
+		quit(1)
+		return
+	var asked := 0
+	for offer in board:
+		if bool(offer.get("active", false)):
+			continue
+		asked += 1
+		sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": offer.get("id", "")}))
+	var signed: Array = JSON.parse_string(sim.economy_snapshot_json()).get("contracts", [])
+	var names: Array[String] = []
+	for contract in signed:
+		names.append(String(contract.get("id", "?")))
+	print("active contracts after signing %d of %d offers: %d (%s)" % [
+		asked, board.size(), signed.size(), ", ".join(names)])
+	if signed.is_empty():
+		print("MEASURE_FAIL: nothing is signed, so nothing orders BBQ and the second gate cannot open")
+		quit(1)
+		return
 
 	var start_tick := int(sim.current_tick())
 	var ceiling := 600000
@@ -80,7 +122,7 @@ func _init() -> void:
 			print("MEASURE: ceiling %d ticks reached, boxed_bbq sold %d" % [ceiling, bbq_sold])
 			break
 	if crossed >= 0:
-		print("MUSTARD gate crossed at tick %d (%.1f min at 30 ticks/s); %d ticks after the BBQ gate" % [
+		print("MUSTARD gate crossed at tick %d (%.1f min at 30 ticks/s); %d ticks after this measurement started at the fixture's hand-off" % [
 			crossed, crossed / 30.0 / 60.0, crossed - start_tick])
 	print("MEASURE_DONE")
 	quit(0)

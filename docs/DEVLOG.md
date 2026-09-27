@@ -276,11 +276,18 @@ be satisfied entirely by ketchup. Counting boxes of a named product makes each
 tier depend on the line before it actually running, which is what the tier table
 in GAMEPLAY §2 always claimed.
 
-`lifetime_deliveries` still counts and is still shown; no gate reads it. The
-loader now refuses a zero threshold, an unknown item id and an item that no
-recipe produces, because a gate nobody can ever open is worse than a badly
-tuned one. Tier order is `unlocks.ron`'s file order, since 100 boxes of ketchup
-and 100 boxes of BBQ are not comparable numbers. The wire publishes the
+`lifetime_deliveries` still counts and is still shown; no gate reads it. A
+gate nobody can ever open is worse than a badly tuned one, so five mistakes
+are now refused — but in two different places, deliberately. A zero threshold
+is refused by the loader itself (`UnlockRegistry::from_ron_str`, so it is a
+startup panic); the four cross-file ones — an unknown item id, an item no
+recipe produces, an item no contract's `mix` orders, and two gates on one
+product whose thresholds fall — live in `validate_covers`, which only the test
+suite calls, against the shipped files. That split is the 2026-09-08 rule for
+`IngredientCatalog::validate_covers`, kept: a bad gate in `data/unlocks.ron`
+fails `cargo test`, and a world built from fabricated content in some other
+test is not dragged down with it. Tier order is `unlocks.ron`'s file order,
+since 100 boxes of ketchup and 100 boxes of BBQ are not comparable numbers. The wire publishes the
 product, the requirement and the count, so the padlock and the cookbook read
 "34 of 100 boxes of Boxed Ketchup" with the name resolved by Godot's existing
 display-name map and nothing about the rule written in GDScript.
@@ -298,13 +305,16 @@ No release has ever written a save; the local demo saves are rebuilt by
 
 **The gates are much later, and that is a flag rather than a tuning
 decision.** The numbers are the owner's. Measured headless at 30 ticks/sec:
-the first gate arrives at tick 52 000 (~29 min, 50 delivery windows) with the
-starter order alone, tick 33 000 (~18 min, 44 windows) with all three signed —
-where ten windows used to be a couple of minutes. The second is measured from
-zero by `godot_project/measure_gate_ticks.gd` and lands at tick 181 000 — 100
-minutes, 114 000 ticks (~63 min) past the first — because authored BBQ demand
-outruns one branch's output. The 2026-09-20 measurement behind issue #55 found its trap stopped
-biting around 40 windows, so at 44 it mostly does not fire any more — by side
+the first gate arrives at tick 52 000 (~29 min, 50 delivery windows) with
+`corner_shop` signed alone, tick 33 000 (~18 min, 44 windows) with three orders
+signed at tick 0 — where ten windows used to be a couple of minutes. A new game
+signs nothing for you, so 50 is the floor a real run pays. The second gate is
+measured from zero by `godot_project/measure_gate_ticks.gd` and lands at tick
+141 000 — 78 minutes, and 89 000 ticks (~49 min) after the BBQ gate opened at
+tick 52 000 — because the BBQ branch puts about 1.2 boxes per 1 000 ticks into
+paid windows against the ~4.5 the four BBQ orders ask for. The 2026-09-20
+measurement behind issue #55 found its trap stopped biting around 40 windows,
+so at 44-50 it mostly does not fire any more — by side
 effect, not by design, and #92/#93 are still the right fixes. Full record:
 `docs/DECISIONS.md`, 2026-09-26.
 

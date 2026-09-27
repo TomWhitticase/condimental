@@ -51,12 +51,15 @@ See [WORKFLOW.md](WORKFLOW.md).
   `bbq_sauce` at 100 `boxed_ketchup`, `mustard_sauce` at 100 `boxed_bbq`.
   `Unlock::is_open`/`progress` resolve against that ledger; `Economy::
   lifetime_deliveries` still counts and is still displayed, but **no gate
-  reads it**. The loader refuses a zero `boxes`, an unknown `item`, an
+  reads it**. Five refusals guard an unopenable gate: a zero `boxes` at
+  load (`from_ron_str`, a startup panic), and — from `validate_covers`, which
+  the test suite runs against the shipped files, as
+  `IngredientCatalog::validate_covers` already did — an unknown `item`, an
   item no recipe in `recipes.ron` produces, an item **no contract's `mix`
   ever orders** (only a paid window feeds the ledger, so produced is not
   ordered), and two gates on one product whose thresholds fall rather than
-  climb — so an unreachable gate is a startup panic and never a locked tier
-  nobody can open. Tier order is
+  climb. So a bad gate in the shipped files fails `cargo test`; only the
+  zero-boxes case refuses to boot. Tier order is
   **file order** in `unlocks.ron` — two gates counting different products have
   no comparable thresholds — and `gate_index_for_ingredient`/`at`/
   `ordered().first()` are the only ways to ask which gate is deepest.

@@ -653,7 +653,8 @@ const BBQ_SETTLE_TICKS := 15000
 ## How long the ketchup line is allowed to run on its own before the fixture
 ## gives up waiting for `data/unlocks.ron`'s BBQ gate to open. The shipped
 ## gate (a hundred boxes of ketchup sold) opens at about 52 000 ticks on one
-## line serving the starter order alone — it was 12 000 while the trigger was
+## line serving the single order `build_reference_line` signs — it was 12 000
+## while the trigger was
 ## ten delivery windows, which is why this number moved with that change.
 ## This ceiling is generous enough that a balance pass on that file moves the
 ## shot's run length rather than breaking it, and tight enough that a gate
@@ -836,7 +837,8 @@ static func build_bbq_running_line(sim) -> void:
 	hire_until_staffed(sim)
 
 	# 2. Run it until the game offers BBQ. The order `build_reference_line`
-	#    signed is the only one active, exactly as a new game reaches it, so
+	#    signed is the only one active — a new game ships none signed, so one
+	#    is the fewest a player who is selling anything at all has — so
 	#    the boxes that open the gate also bank the stock that pays for the
 	#    transient below.
 	var waited := 0
@@ -1026,8 +1028,8 @@ static func unlock_open(sim, id: String) -> bool:
 ## it.** `build_bbq_running_line` runs a ketchup line until BBQ's hundredth
 ## box of ketchup sells, and that is right for a fixture whose subject IS the
 ## unlock. Mustard then wants a hundred boxes of BBQ on top, which is another
-## 114 000 ticks — measured, by `measure_gate_ticks.gd`, which earns both gates
-## from a new game and reaches mustard at tick 181 000 — and this fixture's
+## 89 000 ticks — measured, by `measure_gate_ticks.gd`, which earns both gates
+## from a new game and reaches mustard at tick 141 000 — and this fixture's
 ## subject is the line, so it uses
 ## `open_every_gate` — the same door `test_ingredient_models.gd` and
 ## `test_screenshot.gd` already cross gates through. What stays real is

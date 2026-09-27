@@ -228,9 +228,10 @@ pub enum UnlockLoadError {
     /// orders**. One step further than [`Self::SoldItemNothingProduces`] and
     /// the same invisible failure: only a paid window's `mix` feeds the
     /// ledger, so a product nobody orders is sold zero times however much of
-    /// it the factory makes, and the tier never opens. 11 of the 14 recipe
-    /// outputs are in this class — everything that is not a boxed case — so
-    /// this is an easy gate to author by accident.
+    /// it the factory makes, and the tier never opens. Four of the seven
+    /// solid ids `recipes.ron` outputs are in this class — the three bottles
+    /// and `tomato_paste`, everything that is not a boxed case — so this is
+    /// an easy gate to author by accident.
     SoldItemNoContractOrders {
         item: String,
         unlock: String,
@@ -738,10 +739,6 @@ mod tests {
         UnlockRegistry::from_ron_str(EXAMPLE).expect("fixture must load")
     }
 
-    /// Two gates whose every released id is real shipped content, so
-    /// `validate_covers` reaches the tier-ordering pass instead of stopping
-    /// at an unknown id. `boxes` is the second gate's threshold on the same
-    /// product as the first.
     /// `EXAMPLE` with its deliberately-unknown contract swapped for a real
     /// one. A test that breaks exactly one thing has to fail *for that thing*:
     /// with `something_else` left in, a test that disables the check it is
@@ -751,6 +748,11 @@ mod tests {
         EXAMPLE.replacen(r#"["something_else"]"#, r#"["bbq_festival"]"#, 1)
     }
 
+    /// Two gates whose every released id is real shipped content, so
+    /// `validate_covers` reaches the tier-ordering pass instead of stopping
+    /// at an unknown id. `first` and `second` are their two thresholds, both
+    /// counting the same product (`boxed_ketchup`), which is the only case
+    /// where two thresholds can be compared at all.
     fn two_gates_on_one_product(first: u32, second: u32) -> UnlockRegistry {
         let text = format!(
             r#"(
@@ -1140,8 +1142,8 @@ mod tests {
                 UnlockLoadError::SoldItemNoContractOrders { ref item, ref unlock, .. }
                     if item == "bottled_ketchup" && unlock == "bbq_sauce"
             ),
-            "a gate on a product nobody orders can never open, and 11 of the 14 recipe \
-             outputs are in that class — got {err}"
+            "a gate on a product nobody orders can never open, and 4 of the 7 solid \
+             recipe outputs are in that class — got {err}"
         );
         // It lists what IS ordered, so the fix is in the message.
         assert!(format!("{err}").contains("boxed_ketchup"), "got {err}");

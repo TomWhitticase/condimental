@@ -401,10 +401,10 @@ fn boxes_of_another_product_never_open_a_gate() {
 ///
 /// Some thresholds have to be reached this way. The BBQ gate's hundred boxes
 /// of ketchup are 52 000 ticks and worth simulating once; the mustard gate's
-/// hundred boxes of BBQ are another 114 000 on top of a branch the player
-/// must first build (tick 181 000 from a new game — `measure_gate_ticks.gd`),
-/// which is over an hour and a half of factory for a claim about a number in
-/// a content file. A played world also never visits an odd
+/// hundred boxes of BBQ are another 89 000 on top of a branch the player
+/// must first build (tick 141 000 from a new game — `measure_gate_ticks.gd`),
+/// which is about eighty minutes of simulated factory for a claim about a
+/// number in a content file. A played world also never visits an odd
 /// ketchup count, the starter order being two boxes wide, so an exact
 /// "one short" is only reachable from here.
 fn world_with_boxes_sold(ledger: &[(&str, u32)]) -> World {

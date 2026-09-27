@@ -310,6 +310,15 @@ pub struct SaveData {
     /// and a file that does not carry it is refused rather than read as a
     /// factory that has sold nothing — see "Version 5: a gate counts boxes,
     /// not delivery windows" in the module doc.
+    ///
+    /// **The guard is [`SAVE_SCHEMA_VERSION`], not the missing attribute.**
+    /// A version-4 file is refused by number before serde ever looks at its
+    /// fields, so putting `#[serde(default)]` back here breaks nothing and no
+    /// test goes red for it (a reviewer tried, 2026-09-27). It stays off
+    /// anyway: a default here would mean "this save sold nothing", and gate
+    /// state is derived from this map on every load, so the day someone bumps
+    /// the version for an unrelated reason the attribute would quietly start
+    /// re-locking earned tiers again.
     pub lifetime_boxes_sold: BTreeMap<String, u32>,
     /// The production ledger (`sim::stats::ProductionLedger`), rings
     /// verbatim, so a loaded factory's P screen reads exactly what the
