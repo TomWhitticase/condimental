@@ -18,6 +18,28 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-28 **A warehouse rack may be reserved for one raw ingredient.**
+  Click a rack and its configuration panel's RESERVED FOR picker sets
+  `SetRackFilter { tile, item }` (`set_rack_filter`, `item` null for "Any").
+  A filtered rack's bays go in a pool only that raw may stand in; an
+  unfiltered rack's stay shared. A holding fills its own reserved bays first
+  and only the overflow draws on the shared pool, so `cap(id) = base_cap +
+  slot_stack × (reserved(id) + shared − shared bays other ids need)` — still a
+  fold over the ledger (`storage::BayPool`, `StorageCatalog::fits`), nothing
+  stored about which bay holds what. The **filter** is stored
+  (`SavedRack::filter`), which makes the save **version 6**: a v5 file is
+  refused, and `scripts/migrate-save-v5-to-v6.py` rewrites one with every rack
+  open, which is exactly what v5 meant. A filter change is **refused when
+  stock would be left with no bay** (the same test as picking a loaded rack
+  up), a gated or non-raw id is refused, and clearing a filter never fails.
+  Godot re-derives none of it: `RackSnapshot` carries `filter`,
+  `blocked_filters` (the picks the sim would refuse now, drawn ✗ and named in
+  words before the click) and `removal_refused` (which the ghost and hover now
+  read instead of doing their own bay sums). `StorageSnapshot::free_bays` is
+  the room ANY raw may still take — an empty reserved bay is not in it — and
+  is what the market calls "free". The picker keeps §5g's padlocks.
+  Full record in `docs/DECISIONS.md`.
+
 - 2026-09-27 **`gh pr merge --admin` is the owner's override of the
   green-checks half, never the review half.** `main` is protected, so a PR
   whose required checks never ran cannot merge at all — `gh` refuses with "the

@@ -31,14 +31,19 @@
 //!    thousands of ticks it never puts anything on it, never takes anything
 //!    off it, and appears in no hand-off link. The rack's absence from the
 //!    tick is the design, so it is asserted rather than assumed.
+//! 9. **A rack can be reserved for one raw** (`set_rack_filter`). Its bays
+//!    are room for that raw and nothing else, filled before the shared pool;
+//!    a reservation that would leave stock with no bay is refused, and the
+//!    snapshot names those refusals before the click. The reservation
+//!    survives a save.
 
 mod common;
 
 use sim_core::sim::save::SaveData;
 use sim_core::sim::types::{Direction, Money};
-use sim_core::sim::world::{LinkKind, TileSnapshot};
+use sim_core::sim::world::{LinkKind, RackSnapshot, TileSnapshot};
 use sim_core::sim::{
-    HOPPER_CAPACITY, PlayerCommand, RecipeRegistry, WAREHOUSE_RACK_KIND, World,
+    HOPPER_CAPACITY, PlayerCommand, RecipeRegistry, WAREHOUSE_RACK_KIND, World, command_from_json,
     reference_chain_with_budget,
 };
 
@@ -518,4 +523,395 @@ fn belt_item_count(world: &World, tile: (i32, i32)) -> usize {
         .find(|belt| belt.tile == tile)
         .map(|belt| belt.items.len())
         .unwrap_or(0)
+}
+
+// =====================================================================
+// 9. A rack reserved for one ingredient
+// =====================================================================
+
+/// Sets `tile`'s filter the way Godot does, through the JSON wire, so the
+/// DTO's shape is exercised by every test below rather than one.
+fn set_filter(world: &mut World, tile: (i32, i32), item: Option<&str>) {
+    let item = match item {
+        Some(id) => format!("\"{id}\""),
+        None => "null".to_string(),
+    };
+    let json = format!(
+        r#"{{"type": "set_rack_filter", "tile": [{}, {}], "item": {item}}}"#,
+        tile.0, tile.1
+    );
+    let command = command_from_json(&json).expect("set_rack_filter must parse");
+    world.issue_command(command);
+}
+
+/// The one rack in the storage snapshot standing at `tile`.
+fn rack_at(world: &World, tile: (i32, i32)) -> RackSnapshot {
+    world
+        .storage_snapshot()
+        .racks
+        .into_iter()
+        .find(|rack| rack.tile == tile)
+        .unwrap_or_else(|| panic!("no rack at {tile:?}"))
+}
+
+/// A reserved rack is room for its ingredient and nothing else: its bays
+/// raise the tomato ceiling and leave sugar exactly where it was with no
+/// rack at all.
+#[test]
+fn a_reserved_rack_raises_only_its_own_ingredients_ceiling() {
+    let mut world = world();
+    let (base_cap, slot_stack, bays) = knobs(&world);
+    build_rack(&mut world, (0, -8));
+    set_filter(&mut world, (0, -8), Some("tomato"));
+
+    assert_eq!(rack_at(&world, (0, -8)).filter.as_deref(), Some("tomato"));
+    assert!(matches!(
+        world.query_tile((0, -8)),
+        Some(TileSnapshot::WarehouseRack { filter: Some(ref id), .. }) if id == "tomato"
+    ));
+    assert_eq!(world.stock_cap_for("tomato"), base_cap + slot_stack * bays);
+    assert_eq!(
+        world.stock_cap_for("sugar"),
+        base_cap,
+        "a rack reserved for tomato is no room for sugar"
+    );
+
+    // Sugar's order is trimmed to the free allowance; tomato's is not.
+    order(&mut world, "sugar", base_cap + slot_stack);
+    assert_eq!(world.owned_ingredient("sugar"), base_cap);
+    order(&mut world, "tomato", base_cap + slot_stack * bays);
+    assert_eq!(
+        world.owned_ingredient("tomato"),
+        base_cap + slot_stack * bays
+    );
+}
+
+/// The `null` item — the picker's "any" slot — clears the filter, and an
+/// omitted item means the same.
+#[test]
+fn clearing_a_filter_opens_the_rack_to_everything_again() {
+    let mut world = world();
+    let (base_cap, slot_stack, bays) = knobs(&world);
+    build_rack(&mut world, (0, -8));
+    set_filter(&mut world, (0, -8), Some("tomato"));
+    order(&mut world, "tomato", base_cap + slot_stack * 2);
+
+    set_filter(&mut world, (0, -8), None);
+    assert_eq!(rack_at(&world, (0, -8)).filter, None);
+    assert_eq!(
+        world.stock_cap_for("sugar"),
+        base_cap + slot_stack * (bays - 2),
+        "an open rack is shared: sugar gets every bay tomato is not standing in"
+    );
+
+    set_filter(&mut world, (0, -8), Some("tomato"));
+    let bare = command_from_json(r#"{"type": "set_rack_filter", "tile": [0, -8]}"#)
+        .expect("an omitted item must parse");
+    world.issue_command(bare);
+    assert_eq!(rack_at(&world, (0, -8)).filter, None);
+}
+
+/// A reserved rack is used before the shared pool, so tomato spills into an
+/// open rack only once its own is full — and the open rack's bays are the
+/// ones sugar still has.
+#[test]
+fn a_reserved_rack_fills_before_the_shared_pool() {
+    let mut world = world();
+    let (base_cap, slot_stack, bays) = knobs(&world);
+    build_rack(&mut world, (0, -8));
+    build_rack(&mut world, (1, -8));
+    set_filter(&mut world, (0, -8), Some("tomato"));
+
+    order(&mut world, "tomato", base_cap + slot_stack * (bays + 1));
+    assert_eq!(
+        world.owned_ingredient("tomato"),
+        base_cap + slot_stack * (bays + 1)
+    );
+    assert_eq!(
+        world.stock_cap_for("sugar"),
+        base_cap + slot_stack * (bays - 1),
+        "tomato stands in all of its own rack and one bay of the open one"
+    );
+
+    let reserved = rack_at(&world, (0, -8));
+    assert_eq!(reserved.contents.len() as u32, bays);
+    assert!(reserved.contents.iter().all(|bay| bay.item == "tomato"));
+    let open = rack_at(&world, (1, -8));
+    assert_eq!(open.contents.len(), 1);
+    assert_eq!(open.contents[0].item, "tomato");
+    assert_eq!(world.storage_snapshot().used_bays, bays + 1);
+}
+
+/// Reserving a rack for sugar while tomato is standing in it would leave
+/// that tomato with no bay. The command is refused, and the snapshot has
+/// already said so — which is what lets the picker dim the slot instead of
+/// offering a click that does nothing.
+#[test]
+fn a_filter_that_would_leave_stock_with_no_bay_is_refused() {
+    let mut world = world();
+    let (base_cap, slot_stack, bays) = knobs(&world);
+    build_rack(&mut world, (0, -8));
+    order(&mut world, "tomato", base_cap + slot_stack * bays);
+
+    let rack = rack_at(&world, (0, -8));
+    assert!(rack.blocked_filters.iter().any(|id| id == "sugar"));
+    assert!(
+        !rack.blocked_filters.iter().any(|id| id == "tomato"),
+        "the ingredient already filling the rack can always have it"
+    );
+
+    let before = world.to_save_ron();
+    set_filter(&mut world, (0, -8), Some("sugar"));
+    assert_eq!(
+        rack_at(&world, (0, -8)).filter,
+        None,
+        "refused, not half-set"
+    );
+    assert_eq!(world.to_save_ron(), before, "a refusal changes nothing");
+    assert_eq!(
+        world.owned_ingredient("tomato"),
+        base_cap + slot_stack * bays
+    );
+
+    set_filter(&mut world, (0, -8), Some("tomato"));
+    assert_eq!(rack_at(&world, (0, -8)).filter.as_deref(), Some("tomato"));
+    assert!(
+        rack_at(&world, (0, -8))
+            .blocked_filters
+            .iter()
+            .any(|id| id == "sugar"),
+        "and switching away from tomato is still refused"
+    );
+}
+
+/// Only a raw the player can buy is a filter: not an unknown id, not a raw
+/// still behind a progression gate, and only on a rack.
+#[test]
+fn a_filter_must_be_an_unlocked_raw_on_a_rack() {
+    let mut world = world();
+    build_rack(&mut world, (0, -8));
+
+    set_filter(&mut world, (0, -8), Some("no_such_ingredient"));
+    assert_eq!(rack_at(&world, (0, -8)).filter, None);
+
+    let locked = world
+        .raw_items()
+        .iter()
+        .find(|id| !world.ingredient_unlocked(id))
+        .cloned()
+        .expect("a new factory has at least one raw still gated");
+    set_filter(&mut world, (0, -8), Some(&locked));
+    assert_eq!(
+        rack_at(&world, (0, -8)).filter,
+        None,
+        "'{locked}' is still locked"
+    );
+
+    // A hopper is not a rack, and an empty tile is nothing: both no-ops.
+    let before = world.to_save_ron();
+    let hopper = hopper_tiles(&world)[0];
+    set_filter(&mut world, hopper, Some("tomato"));
+    set_filter(&mut world, (40, 40), Some("tomato"));
+    assert_eq!(world.to_save_ron(), before);
+}
+
+/// A raw fluid is held in the same larder under the same caps, so a rack
+/// can be reserved for one too.
+#[test]
+fn a_rack_can_be_reserved_for_a_raw_fluid() {
+    let mut world = world();
+    let (base_cap, slot_stack, bays) = knobs(&world);
+    build_rack(&mut world, (0, -8));
+    let fluid = world
+        .raw_fluids()
+        .iter()
+        .find(|id| world.ingredient_unlocked(id))
+        .cloned()
+        .expect("a new factory can buy at least one raw fluid");
+
+    set_filter(&mut world, (0, -8), Some(&fluid));
+    assert_eq!(
+        rack_at(&world, (0, -8)).filter.as_deref(),
+        Some(fluid.as_str())
+    );
+    assert_eq!(world.stock_cap_for(&fluid), base_cap + slot_stack * bays);
+    assert_eq!(world.stock_cap_for("tomato"), base_cap);
+}
+
+/// Picking up a rack follows the reservation. Tomato filling a reserved
+/// rack may still move into open bays, so the reserved rack comes up only
+/// while the open racks have that much room left beside what else stands
+/// in them — and the snapshot's `removal_refused` says which before the
+/// click.
+#[test]
+fn a_reserved_rack_comes_up_only_while_open_bays_can_take_its_stock() {
+    let mut world = world();
+    let (base_cap, slot_stack, bays) = knobs(&world);
+    build_rack(&mut world, (0, -8));
+    build_rack(&mut world, (1, -8));
+    build_rack(&mut world, (2, -8));
+    set_filter(&mut world, (0, -8), Some("tomato"));
+    order(&mut world, "tomato", base_cap + slot_stack * bays);
+    order(&mut world, "sugar", base_cap + slot_stack * 2);
+
+    // Two open racks: the tomato could leave its own for them.
+    assert!(!rack_at(&world, (0, -8)).removal_refused);
+    assert!(!rack_at(&world, (2, -8)).removal_refused);
+
+    let placements = world.placement_count();
+    world.issue_command(PlayerCommand::Remove { tile: (2, -8) });
+    assert_eq!(world.placement_count(), placements - 1);
+
+    // One open rack, two of its bays sugar's: no room for the tomato.
+    assert!(rack_at(&world, (0, -8)).removal_refused);
+    world.issue_command(PlayerCommand::Remove { tile: (0, -8) });
+    assert_eq!(
+        world.placement_count(),
+        placements - 1,
+        "the reserved rack is the only room that tomato has"
+    );
+    // And the open one is sugar's only room past the free allowance.
+    assert!(rack_at(&world, (1, -8)).removal_refused);
+}
+
+/// An EMPTY reserved rack is no room for anything else. Sugar standing in
+/// seven bays across two open racks cannot lose one of them, although the
+/// floor still has more free bays than that rack supplies — they are the
+/// tomato rack's, and sugar may not stand there. Summing bays across the
+/// whole floor, as the warehouse did before racks could be reserved, would
+/// let the rack come up and leave sugar over its own ceiling.
+#[test]
+fn an_empty_reserved_rack_is_no_room_for_other_stock() {
+    let mut world = world();
+    let (base_cap, slot_stack, bays) = knobs(&world);
+    build_rack(&mut world, (0, -8));
+    build_rack(&mut world, (1, -8));
+    build_rack(&mut world, (2, -8));
+    set_filter(&mut world, (0, -8), Some("tomato"));
+    order(&mut world, "sugar", base_cap + slot_stack * (bays + 1));
+    assert_eq!(
+        world.owned_ingredient("sugar"),
+        base_cap + slot_stack * (bays + 1),
+        "two open racks hold sugar's seven bays"
+    );
+
+    assert!(rack_at(&world, (2, -8)).removal_refused);
+    let placements = world.placement_count();
+    world.issue_command(PlayerCommand::Remove { tile: (2, -8) });
+    assert_eq!(
+        world.placement_count(),
+        placements,
+        "the open rack comes up only if sugar can stand somewhere else"
+    );
+    assert!(world.stock_cap_for("sugar") >= world.owned_ingredient("sugar"));
+    // The empty reserved rack itself holds nothing up.
+    assert!(!rack_at(&world, (0, -8)).removal_refused);
+    // And the wire does not call its bays free: only the open racks' five
+    // unused bays are room any ingredient may take.
+    let snapshot = world.storage_snapshot();
+    assert_eq!(snapshot.free_bays, 2 * bays - (bays + 1));
+    assert_eq!(
+        snapshot.total_bays - snapshot.used_bays,
+        3 * bays - (bays + 1)
+    );
+}
+
+/// The capacity invariant survives reservations too: whatever is reserved,
+/// re-reserved and cleared, nothing is ever held above its own ceiling.
+#[test]
+fn no_holding_is_over_its_ceiling_however_racks_are_reserved() {
+    let mut world = world();
+    for x in 0..3 {
+        build_rack(&mut world, (x, -8));
+    }
+    let steps: [(i32, Option<&str>); 6] = [
+        (0, Some("tomato")),
+        (1, Some("sugar")),
+        (2, Some("tomato")),
+        (0, None),
+        (1, Some("tomato")),
+        (2, None),
+    ];
+    for (x, filter) in steps {
+        set_filter(&mut world, (x, -8), filter);
+        order(&mut world, "tomato", 180);
+        order(&mut world, "sugar", 90);
+        for id in ["tomato", "sugar"] {
+            assert!(
+                world.stock_cap_for(id) >= world.owned_ingredient(id),
+                "{id} over its ceiling after reserving rack {x} for {filter:?}"
+            );
+        }
+        let snapshot = world.storage_snapshot();
+        assert!(snapshot.used_bays <= snapshot.total_bays);
+    }
+}
+
+#[test]
+fn a_reserved_rack_survives_a_round_trip() {
+    let mut world = world();
+    build_rack(&mut world, (0, -8));
+    build_rack(&mut world, (1, -8));
+    set_filter(&mut world, (0, -8), Some("tomato"));
+    order(&mut world, "tomato", 400);
+
+    let text = world.to_save_ron();
+    let loaded = World::from_save_ron(&text, recipes()).expect("the save must load");
+
+    assert_eq!(rack_at(&loaded, (0, -8)).filter.as_deref(), Some("tomato"));
+    assert_eq!(rack_at(&loaded, (1, -8)).filter, None);
+    assert_eq!(loaded.stock_cap_for("sugar"), world.stock_cap_for("sugar"));
+    assert_eq!(
+        loaded.to_save_ron(),
+        text,
+        "and it writes back byte for byte"
+    );
+}
+
+/// A save reserving a rack for something that is not a raw is refused at
+/// load and names the rack, rather than loading a rack no stock can use.
+#[test]
+fn a_save_reserving_a_rack_for_a_non_raw_is_refused() {
+    let mut world = world();
+    build_rack(&mut world, (0, -8));
+    set_filter(&mut world, (0, -8), Some("tomato"));
+    let text = world.to_save_ron();
+    assert!(text.contains(r#"filter: Some("tomato")"#), "{text}");
+
+    let edited = text.replace(r#"filter: Some("tomato")"#, r#"filter: Some("gold")"#);
+    let Err(error) = World::from_save_ron(&edited, recipes()) else {
+        panic!("a rack reserved for an unknown raw must be refused");
+    };
+    let error = error.to_string();
+    assert!(
+        error.contains("gold") && error.contains("(0, -8)"),
+        "{error}"
+    );
+}
+
+/// The load path judges stock against the racks' filters, not the floor's
+/// bay total: a save whose reservations leave stock no bay it may stand in
+/// is refused, exactly like one holding more than its racks can. Sugar here
+/// stands in seven bays of two open racks; reserving one of them for tomato
+/// in the text leaves the floor's total unchanged and sugar with six.
+#[test]
+fn a_save_whose_reservations_strand_stock_is_refused() {
+    let mut world = world();
+    let (base_cap, slot_stack, bays) = knobs(&world);
+    build_rack(&mut world, (0, -8));
+    build_rack(&mut world, (1, -8));
+    order(&mut world, "sugar", base_cap + slot_stack * (bays + 1));
+    let text = world.to_save_ron();
+    World::from_save_ron(&text, recipes()).expect("the unedited save must load");
+
+    assert!(text.contains("filter: None"), "{text}");
+    let edited = text.replacen("filter: None", r#"filter: Some("tomato")"#, 1);
+    let Err(error) = World::from_save_ron(&edited, recipes()) else {
+        panic!("a reservation that leaves sugar with no bay must be refused");
+    };
+    let error = error.to_string();
+    assert!(
+        error.contains("'sugar'") && error.contains("will not fit"),
+        "{error}"
+    );
 }

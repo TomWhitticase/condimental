@@ -376,18 +376,23 @@ autosave. A command log can still sit on top of this later.
 **Data-file schema versioning:** every `data/*.ron` carries `schema_version`;
 loaders reject a mismatch. Content changes never bump it.
 
-**Save schema version (4; first bumped 2026-09-20).** `save.rs` once reserved a
+**Save schema version (6; first bumped 2026-09-20).** `save.rs` once reserved a
 window in which an additive `#[serde(default)]` field was not a shape
 change; it closed when that batch shipped. A tank's declared fluid
 (`SavedTank::fluid`, issue #43) is the first real bump: a v1 save is
 **refused**, and the refusal names the file's version and the build's so it
 reads as "this save predates a change" rather than as a parse failure. No
 release has ever written a save, so this is as cheap as a bump will ever
-be; the next one is not, and a migration is still not the answer — see
+be; the next one is not, and a migration inside the game is still not the answer — see
 `docs/DECISIONS.md`. Version 3 (2026-09-26) is per-dock stock; version 4
 (2026-09-26) is the production ledger's pay cycle, plus the understaffed
-marker's `refusal_hold` — `save.rs`'s module doc records why each could not
-be a default.
+marker's `refusal_hold`; version 5 (2026-09-27, #201) is the boxes-sold
+ledger the sauce gates count; version 6 (2026-09-28, #207) is a warehouse
+rack's reservation, `SavedRack::filter` — `save.rs`'s module doc records why
+each could not be a default. **The loader still never migrates.** Since
+version 5 a bump ships a one-off script that runs outside the game,
+`scripts/migrate-save-vN-to-vM.py`, and the refusal names it; the game only
+ever reads the version it writes.
 
 **Interop training-data gap:** `SimBridge` appears in no training corpus.
 Keep worked, runnable examples of every call pattern in-repo (the headless

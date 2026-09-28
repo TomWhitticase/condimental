@@ -1271,11 +1271,12 @@ var _delivery_full := false # is some dock at capacity — the clipboard reads F
 # A rack is the fourth buffer kind (W3 of the warehouse sprint) and is keyed
 # the same way as the three above, but it carries a fifth field the others do
 # not need: `_storage_state`, the whole-warehouse half of
-# `storage_snapshot_json`. Bays are a SHARED pool — how many this rack's stock
-# stands in depends on what every other rack holds — so the questions "is the
-# warehouse full" and "would picking this one up strand stock" are answered
-# from the one object rather than from any rack's own entry.
-var _rack_states: Dictionary = {} # origin key -> rack snapshot (its own bays and contents)
+# `storage_snapshot_json`. Bays are POOLED — how many this rack's stock stands
+# in depends on what every other rack holds and is reserved for — so "is the
+# warehouse full" is answered from the one object, and "would picking this
+# one up strand stock" from the simulation's own answer on each rack's entry
+# (`removal_refused`), never from arithmetic here.
+var _rack_states: Dictionary = {} # origin key -> rack snapshot (bays, contents, filter, refusals)
 var _rack_nodes: Dictionary = {} # origin key -> {"bays": Array of {"pallet", "load", "tint"}}
 var _storage_state: Dictionary = {} # base_cap / slot_stack / total_bays / used_bays
 
@@ -4322,9 +4323,11 @@ func _read_dock_states() -> void:
 ## of pallets that were emptied minutes ago.
 ##
 ## One call for the whole warehouse rather than one per rack, because bays are
-## a shared pool: `used_bays` and `total_bays` are facts about the FLOOR, and
-## which physical bay draws which ingredient is re-derived by the simulation
-## every time a holding changes (`sim::world::RackBay`). So the contents are
+## pooled across the floor — open racks share theirs, a reserved rack's are
+## its one ingredient's wherever that ingredient is held: `used_bays` and
+## `total_bays` are facts about the FLOOR, and which physical bay draws which
+## ingredient is re-derived by the simulation every time a holding changes
+## (`sim::world::RackBay`). So the contents are
 ## re-applied from scratch here rather than diffed — every shelf is hidden and
 ## the occupied ones are put back, which is the only way a caching renderer
 ## stays honest about an assignment that can shuffle under it.
@@ -8283,9 +8286,16 @@ func _update_market_storage() -> void:
 	# "shelving unit", not the kind's own display name: the line already says
 	# Warehouse, and "3 Stock Shelvings" is not English. What the player
 	# counts is units of shelving; the bays beside it are what each supplies.
+	# "free" is the wire's `free_bays` — room ANY ingredient may take. An
+	# empty bay on a reserved rack is not that, so it is counted apart rather
+	# than promised to every crate in the market.
+	var free := int(_storage_state.get("free_bays", 0))
+	var reserved_empty := maxi(0, total - used - free)
 	_market_storage_label.text = "Warehouse: %d shelving unit%s  ·  bays %d / %d  ·  %d free" % [
-		racks, "" if racks == 1 else "s", used, total, maxi(0, total - used)
+		racks, "" if racks == 1 else "s", used, total, free
 	]
+	if reserved_empty > 0:
+		_market_storage_label.text += "  ·  %d empty on reserved shelving" % reserved_empty
 	_set_meter(
 		_market_bays_meter, clampf(float(used) / float(total), 0.0, 1.0),
 		METER_FILL_WARN if used >= total else METER_FILL_LEVEL
@@ -12453,6 +12463,13 @@ var _config_mothballed := false
 ## something a hopper never has to explain: where its fluid came from if
 ## the player never said.
 const HOPPER_PICKER_NOTE := "switching empties the hopper"
+## And under a RACK's. A rack's pick moves no stock — the ledger is the same
+## ledger, only which shelves it may stand on changes — so there is nothing
+## to warn about, only what the pick means.
+const RACK_PICKER_NOTE := "a picked ingredient has these shelves to itself — Any shares them"
+## The rack picker's "any" slot, which is also what an open rack's `filter`
+## (`null` on the wire) reads as here — see `_rack_filter_of`.
+const RACK_ANY_CHOICE := ""
 ## The panel's fixed content width. Fixed rather than derived so the level
 ## bar has a width to scale against on the frame the panel opens, and so a
 ## long note does not decide how wide the panel is.
@@ -12748,20 +12765,23 @@ func _rebuild_config_picker() -> void:
 
 
 ## The list the picker is built from: a hopper's raw SOLIDS, a tank's raw
-## FLUIDS. Both come off `ingredients_snapshot_json` and both are the
-## simulation's own idea of what the building may hold, so neither is a
-## table this file keeps.
+## FLUIDS, and a rack's "any" followed by both, since the larder holds solids
+## and fluids under one rule. All of it comes off `ingredients_snapshot_json`
+## and is the simulation's own idea of what the building may hold, so none
+## of it is a table this file keeps.
 func _config_picker_choices() -> Array:
 	if _config_kind == HOPPER_KIND:
 		return _hopper_items
 	if _config_kind == FLUID_TANK_KIND:
 		return _tank_fluids
+	if _config_kind == WAREHOUSE_RACK_KIND:
+		return [RACK_ANY_CHOICE] + _hopper_items + _tank_fluids
 	return []
 
 
 func _build_config_picker_slot(index: int, item_id: String) -> void:
 	var button := Button.new()
-	button.name = "ConfigPickerSlot_%s" % item_id
+	button.name = "ConfigPickerSlot_%s" % (item_id if item_id != RACK_ANY_CHOICE else "any")
 	button.focus_mode = Control.FOCUS_NONE
 	button.custom_minimum_size = CONFIG_PICKER_SLOT_SIZE
 	button.pressed.connect(_on_config_picker_pressed.bind(index))
@@ -12782,7 +12802,11 @@ func _build_config_picker_slot(index: int, item_id: String) -> void:
 	icon.custom_minimum_size = CONFIG_PICKER_ICON_SIZE
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.texture = _icon_for(item_id)
+	# The "any" slot is the rack itself: open shelving is what it stands for.
+	icon.texture = (
+		_icon_for(item_id) if item_id != RACK_ANY_CHOICE
+		else _icon_for_asset(_shop_asset_for(WAREHOUSE_RACK_KIND))
+	)
 	column.add_child(icon)
 
 	var name_settings := LabelSettings.new()
@@ -12796,7 +12820,7 @@ func _build_config_picker_slot(index: int, item_id: String) -> void:
 	name_label.label_settings = name_settings
 	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	name_label.text = _item_display_name(item_id)
+	name_label.text = _item_display_name(item_id) if item_id != RACK_ANY_CHOICE else "Any"
 	column.add_child(name_label)
 	_fit_config_picker_name(name_label, name_settings)
 	# And the frame is the last word on where the name may be drawn. The
@@ -12845,8 +12869,23 @@ func _build_config_picker_slot(index: int, item_id: String) -> void:
 	lock.visible = false
 	button.add_child(lock)
 
+	# A rack's third state, in the same corner for the same reason: a pick
+	# the simulation would refuse because stock standing on the rack would be
+	# left with nowhere to go (`RackSnapshot::blocked_filters`). Never shown
+	# with the tick — the current pick is never blocked — nor with the
+	# padlock, which is the answer that outranks it.
+	var blocked := Label.new()
+	blocked.name = "Blocked"
+	blocked.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	blocked.label_settings = lock_settings
+	blocked.text = "✗"
+	blocked.position = _ui_v(Vector2(4, 1))
+	blocked.visible = false
+	button.add_child(blocked)
+
 	_config_picker_slots.append({
-		"item": item_id, "button": button, "mark": mark, "lock": lock, "column": column,
+		"item": item_id, "button": button, "mark": mark, "lock": lock,
+		"blocked": blocked, "column": column,
 	})
 
 
@@ -12918,15 +12957,27 @@ func _open_config_panel(origin: Vector2i, kind: String) -> void:
 	#
 	# Both fillable kinds carry a picker: a hopper picks the solid it feeds,
 	# a tank the raw fluid it holds (issue #43).
+	#
+	# A rack is the third shape: a picker (what its shelves are reserved
+	# for) and what is standing on it, with nothing to fill — its stock is
+	# the larder's, bought at the market — so FILL and AUTO-FILL are hidden
+	# and the fill row carries only the contents line.
 	var crewed := _config_can_mothball(origin)
-	_config_picker_box.visible = kind == HOPPER_KIND or kind == FLUID_TANK_KIND
+	var rack := kind == WAREHOUSE_RACK_KIND
+	_config_picker_box.visible = kind == HOPPER_KIND or kind == FLUID_TANK_KIND or rack
+	_config_picker_heading.text = "RESERVED FOR" if rack else "CONTENTS"
 	_config_machine_box.visible = crewed
 	_config_fill_row.visible = not crewed
-	_config_auto_button.visible = not crewed
-	_config_auto_note.visible = not crewed
+	_config_fill_button.visible = not rack
+	_config_fill_reason.visible = false
+	_config_auto_button.visible = not crewed and not rack
+	_config_auto_note.visible = not crewed and not rack
 	if kind == HOPPER_KIND:
 		_refresh_hopper_items()
 	elif kind == FLUID_TANK_KIND:
+		_refresh_tank_fluids()
+	elif rack:
+		_refresh_hopper_items()
 		_refresh_tank_fluids()
 	_rebuild_config_picker()
 	# The panel is driven from the polled snapshots, so make sure they are
@@ -13003,7 +13054,8 @@ func _config_click_at_tile(tile: Vector2i) -> void:
 	var placement := _placement_at_tile(tile)
 	var kind := String(placement.get("kind", ""))
 	var origin := _placement_origin(placement)
-	if not _config_can_mothball(origin) and kind != HOPPER_KIND and kind != FLUID_TANK_KIND:
+	if not _config_can_mothball(origin) and kind != HOPPER_KIND and kind != FLUID_TANK_KIND \
+			and kind != WAREHOUSE_RACK_KIND:
 		_close_config_panel()
 		return
 	if _config_open and _config_tile == origin:
@@ -13057,6 +13109,8 @@ func _update_config_panel() -> void:
 		_update_config_tank(key)
 	elif _config_kind == DOCK_KIND:
 		_update_config_dock(key)
+	elif _config_kind == WAREHOUSE_RACK_KIND:
+		_update_config_rack(key)
 	else:
 		_update_config_machine(key)
 	_position_config_panel()
@@ -13117,6 +13171,64 @@ func _update_config_tank(key: String) -> void:
 	_config_picker_note.text = _with_gate_note(
 		_tank_picker_note(declared, fluid, _tank_doomed_volume(snapshot)), _tank_fluids
 	)
+
+
+## A warehouse rack's panel: what its shelves are reserved for, and what is
+## standing on them. The level bar is BAYS in use of the rack's own bays —
+## the same reading, for the same reason, as the hover meter (see the rack
+## arm of the hover state). Every fact is the storage snapshot's: the filter,
+## the contents, and which picks would be refused, so this panel never works
+## out for itself whether stock would fit.
+func _update_config_rack(key: String) -> void:
+	# Re-read on every update for the padlocks, as the hopper does (#90).
+	_refresh_hopper_items()
+	_refresh_tank_fluids()
+	var snapshot: Dictionary = _rack_states.get(key, {})
+	var filter := _rack_filter_of(snapshot)
+	_config_title.text = "%s — %s" % [
+		_kind_display_name(WAREHOUSE_RACK_KIND),
+		"%s only" % _item_display_name(filter) if filter != RACK_ANY_CHOICE else "any stock",
+	]
+	_config_title_icon.texture = (
+		_icon_for(filter) if filter != RACK_ANY_CHOICE
+		else _icon_for_asset(_shop_asset_for(WAREHOUSE_RACK_KIND))
+	)
+	var bays := int(snapshot.get("bays", 0))
+	var contents: Array = snapshot.get("contents", [])
+	_config_level_label.text = "%d of %d bays in use" % [contents.size(), bays]
+	_set_config_level(0.0 if bays <= 0 else clampf(float(contents.size()) / float(bays), 0.0, 1.0))
+	# One line per ingredient rather than `_rack_contents_text`'s one line of
+	# all of them: this row does not wrap, and an open rack can hold several.
+	_config_stock_label.text = _rack_contents_text(contents).replace("  ·  ", "\n")
+	var blocked: Array = snapshot.get("blocked_filters", [])
+	_update_config_picker(filter, blocked)
+	_config_picker_note.text = _with_gate_note(
+		_rack_picker_note(blocked), _hopper_items + _tank_fluids
+	)
+
+
+## A rack's filter — `null` on the wire for open shelving, and
+## `RACK_ANY_CHOICE` here, which is the id of the picker's "any" slot.
+func _rack_filter_of(snapshot: Dictionary) -> String:
+	var value = snapshot.get("filter")
+	return String(value) if value != null else RACK_ANY_CHOICE
+
+
+## What the picker says under a RACK's slots, with the ✗ slots explained in
+## words when there are any (UI_UX.md §7 — never a glyph alone). The ids and
+## their order are the snapshot's. A gated raw is refused for its gate before
+## it is refused for room, and its 🔒 line already says so, so it is left out
+## of the ✗ line rather than explained twice.
+func _rack_picker_note(blocked: Array) -> String:
+	var names: Array[String] = []
+	for item in blocked:
+		if not _choice_locked(item):
+			names.append(_item_display_name(String(item)))
+	if names.is_empty():
+		return RACK_PICKER_NOTE
+	return "%s\n✗ %s — the stock on these shelves would have nowhere to go" % [
+		RACK_PICKER_NOTE, ", ".join(names),
+	]
 
 
 ## A tank's declared fluid — `null` on the wire, and "" here, for every tank
@@ -13416,18 +13528,22 @@ func _config_toggle_style(state: String, enabled: bool) -> StyleBoxFlat:
 	return style
 
 
-## The three states a picker slot can be in, re-read on every panel update
-## rather than baked in at build time — a gate that opens while the panel is
-## open takes its padlock off there and then, without the player having to
-## close and reopen to find out (issue #90).
-func _update_config_picker(current: String) -> void:
+## The states a picker slot can be in, re-read on every panel update rather
+## than baked in at build time — a gate that opens while the panel is open
+## takes its padlock off there and then, without the player having to close
+## and reopen to find out (issue #90). `blocked` is a rack's
+## `blocked_filters`: picks refused for want of room rather than by a gate.
+func _update_config_picker(current: String, blocked: Array = []) -> void:
 	for slot in _config_picker_slots:
 		var locked: bool = _choice_locked(slot["item"])
-		var selected: bool = not locked and String(slot["item"]) == current
+		var refused: bool = not locked and blocked.has(slot["item"])
+		var selected: bool = not locked and not refused and String(slot["item"]) == current
 		slot["mark"].visible = selected
 		slot["lock"].visible = locked
+		slot["blocked"].visible = refused
 		# Dimmed contents as well as a dim frame: the slot reads as "not yet"
-		# at a glance, and the padlock says which kind of "not yet" it is.
+		# at a glance, and the glyph says which kind of "not yet" it is.
+		locked = locked or refused
 		slot["column"].modulate = Color(1, 1, 1, 0.45 if locked else 1.0)
 		var button: Button = slot["button"]
 		# Literally the hotbar's own selected/stocked socket styles, so "the
@@ -13649,7 +13765,8 @@ func _on_config_mothball_pressed() -> void:
 func _on_config_picker_pressed(index: int) -> void:
 	if not _config_open:
 		return
-	if _config_kind != HOPPER_KIND and _config_kind != FLUID_TANK_KIND:
+	if _config_kind != HOPPER_KIND and _config_kind != FLUID_TANK_KIND \
+			and _config_kind != WAREHOUSE_RACK_KIND:
 		return
 	if index < 0 or index >= _config_picker_slots.size():
 		return
@@ -13672,6 +13789,14 @@ func _on_config_picker_pressed(index: int) -> void:
 			"tile": [_config_tile.x, _config_tile.y],
 			"fluid": chosen,
 		})
+	elif _config_kind == WAREHOUSE_RACK_KIND:
+		# `null` is the "any" slot: the rack goes back to shared shelving.
+		# Whether the pick fits is the simulation's question, not this one's.
+		_issue_config_command({
+			"type": "set_rack_filter",
+			"tile": [_config_tile.x, _config_tile.y],
+			"item": chosen if chosen != RACK_ANY_CHOICE else null,
+		})
 	else:
 		_issue_config_command({
 			"type": "set_hopper_item",
@@ -13683,8 +13808,9 @@ func _on_config_picker_pressed(index: int) -> void:
 
 
 ## What the building the panel is open on actually holds, by the same read
-## the panel itself draws from — a hopper's item, a tank's DECLARED fluid.
-## "" for anything else, and for a tank still taking its name off the run.
+## the panel itself draws from — a hopper's item, a tank's DECLARED fluid, a
+## rack's filter. "" for anything else, for a tank still taking its name off
+## the run, and for an open rack (the "any" slot's id).
 func _config_contents() -> String:
 	var placement := _placement_at_tile(_config_tile)
 	if placement.is_empty():
@@ -13694,6 +13820,8 @@ func _config_contents() -> String:
 		return String(_hopper_states.get(key, {}).get("item", ""))
 	if _config_kind == FLUID_TANK_KIND:
 		return _declared_fluid_of(_fluid_tank_states.get(key, {}))
+	if _config_kind == WAREHOUSE_RACK_KIND:
+		return _rack_filter_of(_rack_states.get(key, {}))
 	return ""
 
 
@@ -14894,13 +15022,10 @@ func _update_ghost() -> void:
 		else:
 			# A warehouse rack whose bays the stock cannot do without will be
 			# refused (W1), and it is the only placed thing in the game that
-			# can be. The ghost says so BEFORE the click, from the same three
-			# wire fields the simulation decides on — see
-			# `_rack_removal_refused`.
+			# can be. The ghost says so BEFORE the click, from the answer the
+			# simulation put on the wire — see `_rack_removal_refused`.
 			var refused := String(placement.get("kind", "")) == WAREHOUSE_RACK_KIND \
-				and _rack_removal_refused(int(
-					_rack_states.get(_tile_key(_placement_origin(placement)), {}).get("bays", 0)
-				))
+				and _rack_removal_refused(_tile_key(_placement_origin(placement)))
 			_ghost_valid = not refused
 			_ghost_reason = "rack_needed" if refused else ""
 			var origin := _placement_origin(placement)
@@ -17841,9 +17966,11 @@ func _rack_hover_text(origin_key: String, direction: String) -> String:
 		return "%s\nfacing %s" % [_kind_display_name(WAREHOUSE_RACK_KIND), direction]
 	var bays := int(snapshot.get("bays", 0))
 	var contents: Array = snapshot.get("contents", [])
-	var text := "%s  ·  facing %s\n%d of %d bays in use\n%s\nwarehouse: %d of %d bays  ·  %d free per item" % [
+	var filter := _rack_filter_of(snapshot)
+	var text := "%s  ·  facing %s\n%s\n%d of %d bays in use\n%s\nwarehouse: %d of %d bays  ·  %d free per item" % [
 		_kind_display_name(WAREHOUSE_RACK_KIND),
 		direction,
+		"reserved for %s" % _item_display_name(filter) if filter != RACK_ANY_CHOICE else "open to any stock",
 		contents.size(),
 		bays,
 		_rack_contents_text(contents),
@@ -17851,7 +17978,7 @@ func _rack_hover_text(origin_key: String, direction: String) -> String:
 		int(_storage_state.get("total_bays", 0)),
 		int(_storage_state.get("base_cap", 0)),
 	]
-	if _rack_removal_refused(bays):
+	if _rack_removal_refused(origin_key):
 		text += "\n⚠ HOLDING  ·  its bays are the only room the stock has\nsell or use some before picking it up"
 	return text
 
@@ -17880,20 +18007,18 @@ func _rack_contents_text(contents: Array) -> String:
 	return "  ·  ".join(parts)
 
 
-## Whether picking up a rack that supplies `bays` would be refused — the one
+## Whether picking up the rack at `origin_key` would be refused — the one
 ## removal in the game that can fail.
 ##
-## **Derived here from the wire, not asked of the simulation.** There is no
-## refusal channel and this does not add one: the sim declines silently and
-## presentation works the reason out from a snapshot field, which is the rule
-## #143 set and which `World::try_remove`'s own comment points at this function
-## to carry out. The arithmetic below is that function's, field for field —
-## the stock has to fit in the bays that would be left.
-func _rack_removal_refused(bays: int) -> bool:
-	if _storage_state.is_empty():
-		return false
-	var remaining := int(_storage_state.get("total_bays", 0)) - bays
-	return int(_storage_state.get("used_bays", 0)) > remaining
+## **Read off the wire, not worked out here.** The sim still declines
+## silently (#143: there is no refusal channel), but the answer is a field on
+## the rack's own snapshot, `removal_refused`. It used to be recomputed here
+## from `used_bays` and `total_bays`, which was right only while every bay
+## was one shared pool: a rack reserved for one ingredient is room for that
+## ingredient alone, and "does the stock still fit" became a question only
+## `StorageCatalog::fits` can answer.
+func _rack_removal_refused(origin_key: String) -> bool:
+	return bool(_rack_states.get(origin_key, {}).get("removal_refused", false))
 
 
 ## The thin, live-state-reading half (deliberately not unit tested, same
