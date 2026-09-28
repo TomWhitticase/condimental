@@ -395,14 +395,20 @@
 # the hotbar cover the top-right and the bottom of the frame — which is where
 # a junction lands about half the time.
 #
-# Pass --config TX,TY to click the hopper or tank on that tile after the
-# fixture is built, so the frame shows its configuration panel (the
-# hopper/tank click-to-configure ticket). With an empty larder FILL is
-# photographed blocked, with its reason; add --stock to see it enabled.
-# --contents N on top presses the open panel's picker slot N, so a placed
-# hopper is photographed retargeted to another raw ingredient, e.g.
+# Pass --config TX,TY to click the building on that tile after the fixture
+# is built — a hopper, a tank, a crewed machine or a warehouse rack — so the
+# frame shows its configuration panel (the hopper/tank click-to-configure
+# ticket). With an empty larder FILL is photographed blocked, with its
+# reason; add --stock to see it enabled. --contents N on top presses the open
+# panel's picker slot N, so a placed hopper is photographed retargeted to
+# another raw ingredient, e.g.
 #
 #   scripts/screenshot-scene.sh out.png 1600x900 --build --config=-1,0 --contents 1
+#
+# On a rack, slot 0 is "Any" and slot 1 the first raw, so the warehouse row's
+# tomato rack is photographed reserved for tomato with
+#
+#   scripts/screenshot-scene.sh out.png 1600x900 --warehouse --config=0,0 --contents 1
 #
 # --contents-refill is only needed when the picker slot *changes* the declared
 # fluid, which is the destructive case: it buys the newly declared fluid and

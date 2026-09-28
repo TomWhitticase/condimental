@@ -25,6 +25,63 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-28: **A warehouse rack may be reserved for one raw ingredient.**
+  (Owner's ask: "click on a warehouse rack and then select one item so that
+  for that specific warehouse rack it will only allow holding of the
+  specified item.")
+
+  **Reservation of room, not binding of stock.** The warehouse was built
+  (2026-09-21) on the rule that bays are *derived* from the ledger — nothing
+  stored says "bay 3 holds tomato" — and that is what let it ship with no
+  allocation state, nothing to migrate and bays that free themselves. The
+  filter keeps that: it moves a rack's bays out of the shared pool into a
+  pool of their own for one id, and the ceiling is the old fold with the
+  shared pool in place of the whole floor. A holding stands in its reserved
+  bays first, so reserving a rack for tomato can only raise tomato's ceiling
+  and lower everyone else's. The alternative — binding each bay to an id and
+  persisting it — was rejected for the reasons it was rejected the first
+  time; only the player's *choice* is stored, because nothing can re-derive
+  it.
+
+  **What is refused, and why the sim answers it ahead of the click.** A
+  change of filter that would leave some holding with no bay to stand in is
+  refused, the same test `World::try_remove` applies to picking up a rack
+  that holds stock; without it, stock could become retroactively illegal and
+  the invariant `cap_for(id) >= count(id)` (asserted after every step of
+  `tests/storage.rs`'s scripted game) would stop being true. Clearing a
+  filter only returns bays to the shared pool, so it never fails. A gated raw
+  and a non-raw id are refused. Because the panel must show a refusal before
+  the click (§7: never colour alone, and a dead click explains nothing),
+  `RackSnapshot::blocked_filters` lists every pick the sim would refuse right
+  now; the panel draws those slots ✗, dimmed, and names them in a line under
+  the picker. The removal test moved onto the wire too
+  (`RackSnapshot::removal_refused`): the ghost used to sum bays in GDScript,
+  which with reserved pools would have become a second copy of the storage
+  rule.
+
+  **Save version 6.** `SavedRack::filter` is new persisted state with no
+  default that is safe to assume silently, so `SAVE_SCHEMA_VERSION` goes to 6
+  and a v5 save is refused by the loader, whose message names
+  `scripts/migrate-save-v5-to-v6.py`. The script is exact rather than a
+  reconstruction: every v5 rack was open to everything, which is
+  `filter: None`, and the stock fits the same racks under the same rule. It
+  dry-runs by default and keeps a `.v5.ron.bak` beside anything it rewrites.
+  A save naming a filter that is not a raw is refused
+  (`SaveError::UnknownRackFilter`), naming the id and the rack's tile.
+
+  **The panel.** The rack reuses §5g's configuration panel with the FILL and
+  AUTO-FILL rows hidden (a rack's stock is bought at the market; there is
+  nothing on it to fill) and the picker headed RESERVED FOR: an "Any" slot
+  drawn with the rack's own icon, then every raw solid and fluid the
+  INGREDIENTS snapshot lists. Gated raws stay in it, padlocked, exactly as
+  in a hopper's picker — §5g's reason (a gate nobody can see coming is a gate
+  nobody plans for) holds for a shelf as well as a bin. Dropping them was
+  tried to shorten the panel and backed out for that reason; a padlocked raw
+  is left out of the ✗ line instead, since its 🔒 line already explains it.
+  At 1600x900 the panel fits; at 1280x720 it runs off the bottom exactly as a
+  hopper's already does, which is filed as its own issue rather than fixed
+  for one kind.
+
 - 2026-09-26: **A PR's reviewer must not share its author's context; it need
   not be another session.** (Owner's rule, amending 2026-09-25.)
 

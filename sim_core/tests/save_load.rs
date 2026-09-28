@@ -562,6 +562,19 @@ fn a_save_from_another_build_and_a_file_that_is_not_a_save_are_both_refused() {
         "unhelpful: {error}"
     );
 
+    // A v5 file is every save written before a rack could be reserved for
+    // one ingredient. It is refused too, but the refusal names the script
+    // that converts it, because nothing in a v5 file is lost by converting.
+    let from_v5 = text.replace(&current, "schema_version: 5");
+    let Err(error) = World::from_save_ron(&from_v5, recipes()) else {
+        panic!("a save predating reserved racks must be refused, never migrated");
+    };
+    let error = error.to_string();
+    assert!(
+        error.contains("schema_version 5") && error.contains("migrate-save-v5-to-v6.py"),
+        "unhelpful: {error}"
+    );
+
     let Err(error) = World::from_save_ron("this is not a save file", recipes()) else {
         panic!("garbage must be refused");
     };

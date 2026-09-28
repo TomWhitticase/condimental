@@ -527,10 +527,10 @@ func _run_checks() -> void:
 		"quantity": slot_stack * int(rack.get("bays", 0)),
 	}))
 	main._refresh_buffers()
-	var bay_count := int(main._rack_states.get(key, {}).get("bays", 0))
-	if not main._rack_removal_refused(bay_count):
-		_fail("a rack whose every bay is holding stock is not reported as refused — used_bays %s of total_bays %s" % [
+	if not main._rack_removal_refused(key):
+		_fail("a rack whose every bay is holding stock is not reported as refused — used_bays %s of total_bays %s, removal_refused %s" % [
 			str(main._storage_state.get("used_bays", "?")), str(main._storage_state.get("total_bays", "?")),
+			str(main._rack_states.get(key, {}).get("removal_refused", "?")),
 		])
 		return
 	main._remove_mode = true
@@ -578,8 +578,8 @@ func _run_checks() -> void:
 	if fresh_bays <= 0:
 		_fail("the second world's rack reports no bays at all")
 		return
-	if fresh._rack_removal_refused(fresh_bays):
-		_fail("a rack in a factory holding nothing is refused — the refusal is not reading `used_bays` at all")
+	if fresh._rack_removal_refused(key):
+		_fail("a rack in a factory holding nothing is refused — the refusal is not reading the rack's `removal_refused` at all")
 		return
 	var layout_before: int = JSON.parse_string(fresh.sim.world_layout_json()).size()
 	fresh.sim.issue_command_json(JSON.stringify({"type": "remove", "tile": [tile.x, tile.y]}))

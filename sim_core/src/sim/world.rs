@@ -235,7 +235,7 @@ use super::staff::{
     CrewEntry, CrewRequest, CrewSource, EstablishmentEntry, StaffPools, StaffSnapshot, crew_entries,
 };
 use super::stats::{CycleSnapshot, ProductionLedger, ProductionSnapshot, StatKind};
-use super::storage::{StorageCatalog, WAREHOUSE_RACK_KIND, WarehouseRack};
+use super::storage::{BayPool, StorageCatalog, WAREHOUSE_RACK_KIND, WarehouseRack};
 use super::types::{ChunkId, Direction, FluidId, Fx, ItemId, Money, RecipeId, TileCoord, chunk_of};
 
 /// The buildable-kind id (`data/shop.ron`) of one tile of conveyor.
@@ -549,6 +549,35 @@ pub enum PlayerCommand {
     /// topology: nothing about what is adjacent to what has changed, only
     /// the establishment, which is recomputed on its own.
     SetMothballed { tile: TileCoord, enabled: bool },
+    /// **Reserves the warehouse rack at `tile` for one raw ingredient**, or
+    /// with `item: None` opens it to every raw again (the owner's request,
+    /// 2026-09-28 — see [`super::storage`]'s "A rack may be told to hold one
+    /// ingredient").
+    ///
+    /// A filtered rack's bays are room for its ingredient and nothing else:
+    /// that ingredient stands in them before it draws on the shared pool,
+    /// and no other ingredient's ceiling counts them.
+    ///
+    /// A silent no-op, the `Purchase` convention, on an empty tile, a tile
+    /// that is not a rack, an `item` that is not a raw solid or fluid
+    /// ([`World::raw_items`], [`World::raw_fluids`] — only raws are held in
+    /// the warehouse), one behind a progression gate that has not opened
+    /// (the rule [`Self::SetHopperItem`] follows, issue #90), and the filter
+    /// the rack already has. **And it is refused when it would strand
+    /// stock** — when the bays it takes out of the shared pool are ones
+    /// stock is standing in — for [`Self::Remove`]'s reason on a rack: the
+    /// ledger may never sit over its own ceiling. The rack's snapshot names
+    /// the ingredients it cannot be switched to (`blocked_filters`), so the
+    /// refusal is presentation's to explain rather than a new channel.
+    /// Clearing a filter is never refused.
+    ///
+    /// Tile-addressed like [`Self::Rotate`]. Dirties the rack's chunk, but
+    /// moves no stock: the ledger is the same ledger, only where it is drawn
+    /// changes.
+    SetRackFilter {
+        tile: TileCoord,
+        item: Option<ItemId>,
+    },
     /// Hires one head into a staff category (the staff pools MVP epic,
     /// GAMEPLAY.md §7). **Free, and never refused for a known category** —
     /// wages are the cost (§5), paid every pay period by `World::tick`, and
@@ -696,6 +725,14 @@ enum PlayerCommandDto {
         #[serde(default = "default_auto_fill_enabled")]
         enabled: bool,
     },
+    /// `{"type": "set_rack_filter", "tile": [-6, 6], "item": "tomato"}` —
+    /// `item` optional: omitted or `null` clears the filter, which is the
+    /// one state a picker's "any" slot asks for.
+    SetRackFilter {
+        tile: TileCoord,
+        #[serde(default)]
+        item: Option<ItemId>,
+    },
     Hire {
         category: String,
     },
@@ -777,6 +814,9 @@ impl From<PlayerCommandDto> for PlayerCommand {
             }
             PlayerCommandDto::SetMothballed { tile, enabled } => {
                 PlayerCommand::SetMothballed { tile, enabled }
+            }
+            PlayerCommandDto::SetRackFilter { tile, item } => {
+                PlayerCommand::SetRackFilter { tile, item }
             }
             PlayerCommandDto::Hire { category } => PlayerCommand::Hire { category },
             PlayerCommandDto::Fire { category } => PlayerCommand::Fire { category },
@@ -1401,7 +1441,9 @@ pub struct RackBay {
 ///   "tile": [4, 2], "kind": "warehouse_rack", "direction": "east",
 ///   "footprint": { "width_tiles": 1, "height_tiles": 2 },
 ///   "bays": 6, "contents": [{ "bay": 0, "item": "tomato", "units": 50,
-///                             "capacity": 50 }]
+///                             "capacity": 50 }],
+///   "filter": "tomato", "blocked_filters": ["sugar"],
+///   "removal_refused": false
 /// }
 /// ```
 ///
@@ -1422,6 +1464,21 @@ pub struct RackSnapshot {
     /// whenever the warehouse is not full, and empty for a rack in a
     /// factory holding nothing above its free allowance.
     pub contents: Vec<RackBay>,
+    /// The one raw this rack is reserved for ([`PlayerCommand::SetRackFilter`]),
+    /// or `null` for a rack any raw may stand in.
+    pub filter: Option<ItemId>,
+    /// The raws [`PlayerCommand::SetRackFilter`] would refuse to reserve
+    /// this rack for **because stock would be left with no bay** — raw
+    /// solids in [`World::raw_items`] order, then raw fluids in
+    /// [`World::raw_fluids`] order. A progression gate is the other refusal
+    /// and is not listed here: the ingredients snapshot already carries it.
+    /// Never contains the current filter, and clearing is never blocked.
+    pub blocked_filters: Vec<ItemId>,
+    /// Whether picking this rack up would be refused because its bays are
+    /// the only room some stock has ([`PlayerCommand::Remove`]). Carried
+    /// on the wire so presentation reads the answer rather than redoing the
+    /// arithmetic, which since filters is more than a subtraction.
+    pub removal_refused: bool,
 }
 
 /// The whole storage picture in one object — what a capacity readout needs
@@ -1691,13 +1748,14 @@ pub enum TileSnapshot {
     /// `contents`, and the bay a given ingredient stands in is assigned by
     /// [`World::storage_snapshot`] rather than stored (see
     /// [`super::storage`]). There is no `fill` and no crew: a rack does no
-    /// work and asks for nobody.
+    /// work and asks for nobody. `filter` is [`RackSnapshot::filter`].
     WarehouseRack {
         direction: Direction,
         footprint: Footprint,
         origin_tile: TileCoord,
         bays: u32,
         contents: Vec<RackBay>,
+        filter: Option<ItemId>,
     },
 }
 
@@ -2438,12 +2496,12 @@ impl World {
     /// the contents picker shows.
     pub fn ingredients_snapshot(&self) -> IngredientsSnapshot {
         let sold = &self.economy.lifetime_boxes_sold;
-        let bays = self.storage_bays();
+        let pool = self.bay_pool();
         self.ingredients.snapshot(
             self.economy.money,
             &self.raw_items,
             self.raw_fluids.iter().cloned().collect(),
-            |id| self.storage.cap_for(id, &self.ingredients.owned, bays),
+            |id| self.storage.cap_for(id, &self.ingredients.owned, &pool),
             |id| {
                 self.economy
                     .unlocks()
@@ -2461,19 +2519,37 @@ impl World {
         &self.storage
     }
 
-    /// How many storage bays the placed racks supply between them —
-    /// `total_bays` everywhere else in this module.
-    ///
-    /// Summed off `topology.racks` rather than kept as a counter, so it
-    /// cannot drift from the floor: `recompute_topology` runs on every
-    /// `Place`, `Remove` and `Rotate`, which is exactly when this answer can
-    /// change.
+    /// How many storage bays the placed racks supply between them, shared
+    /// and reserved alike — `total_bays` everywhere else in this module.
     pub fn storage_bays(&self) -> u32 {
-        self.topology
-            .racks
-            .iter()
-            .map(|&entity| self.storage.bays_of_kind(&self.placement_of(entity).kind))
-            .fold(0, u32::saturating_add)
+        self.bay_pool().total()
+    }
+
+    /// The placed racks' bays, split into the shared pool and the bays each
+    /// filtered rack reserves ([`BayPool`]).
+    ///
+    /// Folded off `topology.racks` rather than kept, so it cannot drift from
+    /// the floor: `recompute_topology` runs on every `Place`, `Remove` and
+    /// `Rotate`, and a filter is read straight off the rack.
+    pub fn bay_pool(&self) -> BayPool {
+        let mut pool = BayPool::default();
+        for &entity in &self.topology.racks {
+            pool.add_rack(self.rack_bays(entity), self.rack_filter(entity).as_deref());
+        }
+        pool
+    }
+
+    /// Bays the rack `entity` supplies, from its kind.
+    fn rack_bays(&self, entity: Entity) -> u32 {
+        self.storage.bays_of_kind(&self.placement_of(entity).kind)
+    }
+
+    /// The raw the rack `entity` is reserved for, if any.
+    fn rack_filter(&self, entity: Entity) -> Option<ItemId> {
+        self.ecs
+            .get::<&WarehouseRack>(entity)
+            .ok()
+            .and_then(|rack| rack.filter.clone())
     }
 
     /// The most of `id` the player may currently hold — the number a market
@@ -2482,70 +2558,126 @@ impl World {
     /// invariant.
     pub fn stock_cap_for(&self, id: &str) -> u32 {
         self.storage
-            .cap_for(id, &self.ingredients.owned, self.storage_bays())
+            .cap_for(id, &self.ingredients.owned, &self.bay_pool())
     }
 
     /// How many more units of `id` will fit right now.
     pub fn stock_room_for(&self, id: &str) -> u32 {
         self.storage
-            .room_for(id, &self.ingredients.owned, self.storage_bays())
+            .room_for(id, &self.ingredients.owned, &self.bay_pool())
     }
 
-    /// The flat run of occupied bays, `(ingredient, units)` in bay order —
-    /// [`StorageCatalog::bay_contents`] against this world's ledger. Sliced
-    /// across the racks by [`World::storage_snapshot`].
-    fn bay_runs(&self) -> Vec<(ItemId, u32)> {
-        self.storage.bay_contents(&self.ingredients.owned)
+    /// Whether the current stock would still fit on `pool` (this world's
+    /// [`World::bay_pool`]) if the rack `entity` gave its bays to `filter`
+    /// instead of what it gives them to now. `pool` is passed in so a
+    /// snapshot asking this of every rack and every raw folds the floor
+    /// once, not once per question.
+    fn rack_could_hold(&self, pool: &BayPool, entity: Entity, filter: Option<&str>) -> bool {
+        let bays = self.rack_bays(entity);
+        let mut pool = pool.clone();
+        pool.remove_rack(bays, self.rack_filter(entity).as_deref());
+        pool.add_rack(bays, filter);
+        self.storage.fits(&self.ingredients.owned, &pool)
     }
 
-    /// One rack's snapshot, given the flat bay run [`World::bay_runs`]
-    /// built.
-    ///
-    /// The slice this rack gets is decided by **how many bays the racks
-    /// before it in tile order supply**, which is why the run is passed in
-    /// rather than recomputed: a rack cannot know its own offset.
-    fn rack_snapshot(&self, entity: Entity, runs: &[(ItemId, u32)]) -> RackSnapshot {
+    /// Whether the rack `entity`'s bays are the only room some stock has,
+    /// so that picking it up would strand it — [`World::try_remove`]'s one
+    /// refusal, and [`RackSnapshot::removal_refused`]. `pool` as above.
+    fn rack_holds_stock_up(&self, pool: &BayPool, entity: Entity) -> bool {
+        let mut pool = pool.clone();
+        pool.remove_rack(self.rack_bays(entity), self.rack_filter(entity).as_deref());
+        !self.storage.fits(&self.ingredients.owned, &pool)
+    }
+
+    /// Every rack's occupied bays, in the order of `topology.racks` —
+    /// [`StorageCatalog::rack_contents`] against this world's ledger, floor
+    /// and filters.
+    fn rack_contents(&self) -> Vec<Vec<(ItemId, u32)>> {
+        let filters: Vec<(u32, Option<ItemId>)> = self
+            .topology
+            .racks
+            .iter()
+            .map(|&entity| (self.rack_bays(entity), self.rack_filter(entity)))
+            .collect();
+        let racks: Vec<(u32, Option<&str>)> = filters
+            .iter()
+            .map(|(bays, filter)| (*bays, filter.as_deref()))
+            .collect();
+        self.storage.rack_contents(&self.ingredients.owned, &racks)
+    }
+
+    /// One rack's snapshot, given the bays [`World::rack_contents`] stood
+    /// in it — passed in rather than recomputed because the assignment is a
+    /// property of the whole floor: a rack cannot know its own share.
+    fn rack_snapshot(
+        &self,
+        pool: &BayPool,
+        entity: Entity,
+        stood: &[(ItemId, u32)],
+    ) -> RackSnapshot {
         let placement = self.placement_of(entity);
-        let bays = self.storage.bays_of_kind(&placement.kind);
-        let mut offset = 0u32;
-        for &other in &self.topology.racks {
-            if other == entity {
-                break;
-            }
-            offset =
-                offset.saturating_add(self.storage.bays_of_kind(&self.placement_of(other).kind));
-        }
         let capacity = self.storage.slot_stack();
-        let contents = (0..bays)
-            .filter_map(|bay| {
-                let (item, units) = runs.get((offset + bay) as usize)?;
-                Some(RackBay {
-                    bay,
-                    item: item.clone(),
-                    units: *units,
-                    capacity,
-                })
+        let contents = stood
+            .iter()
+            .enumerate()
+            .map(|(bay, (item, units))| RackBay {
+                bay: bay as u32,
+                item: item.clone(),
+                units: *units,
+                capacity,
             })
+            .collect();
+        let filter = self.rack_filter(entity);
+        let blocked_filters = self
+            .raw_items
+            .iter()
+            .chain(self.raw_fluids.iter())
+            .filter(|id| filter.as_ref() != Some(*id))
+            .filter(|id| !self.rack_could_hold(pool, entity, Some(id)))
+            .cloned()
             .collect();
         RackSnapshot {
             tile: self.position_of(entity),
             kind: placement.kind.clone(),
             direction: placement.direction,
             footprint: placement.footprint,
-            bays,
+            bays: self.rack_bays(entity),
             contents,
+            filter,
+            blocked_filters,
+            removal_refused: self.rack_holds_stock_up(pool, entity),
         }
+    }
+
+    /// The snapshot of the one rack `entity` — for a tile query, which has
+    /// no reason to build the others' but still needs the whole floor to
+    /// know which bays are this rack's.
+    fn rack_snapshot_of(&self, entity: Entity) -> RackSnapshot {
+        let index = self
+            .topology
+            .racks
+            .iter()
+            .position(|&other| other == entity);
+        let contents = self.rack_contents();
+        let stood = index
+            .and_then(|index| contents.get(index))
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        self.rack_snapshot(&self.bay_pool(), entity, stood)
     }
 
     /// Everything a capacity readout and a warehouse render need: the two
     /// content numbers, the bay totals, and every placed rack with the stock
-    /// standing in it (ARCHITECTURE.md §4/§5).
+    /// standing in it and its filter (ARCHITECTURE.md §4/§5).
     ///
-    /// **Ingredients fill the racks in sorted id order, racks in tile
-    /// order** — the one place the bay assignment is decided, so it is
-    /// deterministic (§3.9) even though nothing stores it.
+    /// **Stock fills its own filtered racks first, then the shared run —
+    /// ingredients in sorted id order — fills the unfiltered racks in tile
+    /// order** ([`StorageCatalog::rack_contents`]): the one place the bay
+    /// assignment is decided, so it is deterministic (§3.9) even though
+    /// nothing stores it.
     pub fn storage_snapshot(&self) -> StorageSnapshot {
-        let runs = self.bay_runs();
+        let contents = self.rack_contents();
+        let pool = self.bay_pool();
         StorageSnapshot {
             base_cap: self.storage.base_cap(),
             slot_stack: self.storage.slot_stack(),
@@ -2555,7 +2687,8 @@ impl World {
                 .topology
                 .racks
                 .iter()
-                .map(|&entity| self.rack_snapshot(entity, &runs))
+                .zip(contents.iter())
+                .map(|(&entity, stood)| self.rack_snapshot(&pool, entity, stood))
                 .collect(),
         }
     }
@@ -2865,14 +2998,17 @@ impl World {
                 BodyKind::Dock,
                 Dock::new(DOCK_CAPACITY),
             )),
-            // A rack's body is a marker and nothing else: the bays it
-            // supplies are a property of its kind (`data/storage.ron`) and
-            // the stock in them stays in the one ingredient ledger. See
+            // A rack's body holds no stock: the bays it supplies are a
+            // property of its kind (`data/storage.ron`) and the stock in
+            // them stays in the one ingredient ledger. It is placed open to
+            // every raw; `SetRackFilter` is how it is reserved for one. See
             // [`WarehouseRack`].
-            WAREHOUSE_RACK_KIND => {
-                self.ecs
-                    .spawn((position, placement, BodyKind::WarehouseRack, WarehouseRack))
-            }
+            WAREHOUSE_RACK_KIND => self.ecs.spawn((
+                position,
+                placement,
+                BodyKind::WarehouseRack,
+                WarehouseRack::default(),
+            )),
             machine_kind => {
                 // A freshly placed machine starts on its kind's first recipe
                 // in file order; from its first idle tick onwards it re-picks
@@ -2921,12 +3057,10 @@ impl World {
         // will not come up until enough has been used. Presentation says so
         // from `storage_snapshot`; there is no refusal channel and this does
         // not add one (see `BuyIngredient`).
-        if self.storage.is_rack(&placement.kind) {
-            let bays = self.storage.bays_of_kind(&placement.kind);
-            let remaining = self.storage_bays().saturating_sub(bays);
-            if self.storage.bays_used(&self.ingredients.owned) > remaining {
-                return false;
-            }
+        if self.storage.is_rack(&placement.kind)
+            && self.rack_holds_stock_up(&self.bay_pool(), entity)
+        {
+            return false;
         }
         let origin = self.position_of(entity);
         let tiles = placement.tiles(origin);
@@ -4602,6 +4736,9 @@ impl World {
             PlayerCommand::SetMothballed { tile, enabled } => {
                 self.try_set_mothballed(tile, enabled);
             }
+            PlayerCommand::SetRackFilter { tile, item } => {
+                self.try_set_rack_filter(tile, item);
+            }
             // Neither dirties a chunk: a head is not a tile. Both are silent
             // about an unknown category, and `Fire` about an empty pool —
             // the `Purchase` convention. `Hire` no longer refuses a head the
@@ -4752,6 +4889,41 @@ impl World {
         }
         tank.set_auto_fill(enabled);
         drop(tank);
+        self.mark_placement_dirty(entity);
+        true
+    }
+
+    /// [`PlayerCommand::SetRackFilter`]. Silent no-op on an empty tile, a
+    /// tile that is not a rack, an item that is not raw or not yet
+    /// unlocked, the filter the rack already has, and a change that would
+    /// leave stock with no bay to stand in.
+    fn try_set_rack_filter(&mut self, tile: TileCoord, item: Option<ItemId>) -> bool {
+        let Some(&entity) = self.topology.grid.get(&tile) else {
+            return false;
+        };
+        let Ok(current) = self
+            .ecs
+            .get::<&WarehouseRack>(entity)
+            .map(|r| r.filter.clone())
+        else {
+            return false;
+        };
+        if current == item {
+            return false;
+        }
+        if let Some(id) = &item {
+            let raw = self.raw_items.iter().any(|raw| raw == id) || self.raw_fluids.contains(id);
+            if !raw || !self.ingredient_unlocked(id) {
+                return false;
+            }
+        }
+        if !self.rack_could_hold(&self.bay_pool(), entity, item.as_deref()) {
+            return false;
+        }
+        self.ecs
+            .get::<&mut WarehouseRack>(entity)
+            .expect("checked above that this is a rack")
+            .filter = item;
         self.mark_placement_dirty(entity);
         true
     }
@@ -5815,13 +5987,14 @@ impl World {
                 }
             }
             BodyKind::WarehouseRack => {
-                let snapshot = self.rack_snapshot(entity, &self.bay_runs());
+                let snapshot = self.rack_snapshot_of(entity);
                 TileSnapshot::WarehouseRack {
                     direction: snapshot.direction,
                     footprint: snapshot.footprint,
                     origin_tile: snapshot.tile,
                     bays: snapshot.bays,
                     contents: snapshot.contents,
+                    filter: snapshot.filter,
                 }
             }
             BodyKind::Dock => {

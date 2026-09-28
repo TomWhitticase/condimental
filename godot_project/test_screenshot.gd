@@ -394,7 +394,7 @@ var _cursor_park_noise_tile := Vector2i(-999999, -999999)
 var _stalled_run := false
 var _shop := false
 var _shop_search := ""
-## `--config TX,TY` clicks the hopper or tank standing on that tile once
+## `--config TX,TY` clicks the building standing on that tile once
 ## the fixture is built, so the frame shows its configuration panel — the
 ## level bar, FILL with its reason when it is blocked, the AUTO-FILL switch
 ## and (hoppers) the item picker. Without `--stock` the larder is empty, so
@@ -1955,7 +1955,7 @@ func _open_config_at(tile: Vector2i) -> void:
 		# aimed at a tile with nothing configurable on it used to print this
 		# and still ship a SCREENSHOT_OK frame with no panel in it.
 		printerr(
-			"SCREENSHOT_FAIL: --config %s has no hopper or tank on it to "
+			"SCREENSHOT_FAIL: --config %s has nothing configurable on it to "
 			% str(tile)
 			+ "configure, so no panel opened."
 		)
