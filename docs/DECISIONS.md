@@ -37,9 +37,9 @@ matches what code comments and data files cite.
   filter keeps that: it moves a rack's bays out of the shared pool into a
   pool of their own for one id, and the ceiling is the old fold with the
   shared pool in place of the whole floor. A holding stands in its reserved
-  bays first, so reserving a rack for tomato never lowers tomato's ceiling
-  and never raises anyone else's. The alternative — binding each bay to an id and
-  persisting it — was rejected for the reasons it was rejected the first
+  bays first, so reserving an open rack for tomato never lowers tomato's
+  ceiling and never raises anyone else's. The alternative — binding each bay
+  to an id and persisting it — was rejected for the reasons it was rejected the first
   time; only the player's *choice* is stored, because nothing can re-derive
   it.
 
