@@ -35,7 +35,9 @@ See [WORKFLOW.md](WORKFLOW.md).
   Godot re-derives none of it: `RackSnapshot` carries `filter`,
   `blocked_filters` (the picks the sim would refuse now, drawn ✗ and named in
   words before the click) and `removal_refused` (which the ghost and hover now
-  read instead of doing their own bay sums). The picker keeps §5g's padlocks.
+  read instead of doing their own bay sums). `StorageSnapshot::free_bays` is
+  the room ANY raw may still take — an empty reserved bay is not in it — and
+  is what the market calls "free". The picker keeps §5g's padlocks.
   Full record in `docs/DECISIONS.md`.
 
 - 2026-09-27 **`gh pr merge --admin` is the owner's override of the
