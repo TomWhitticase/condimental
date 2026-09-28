@@ -23,7 +23,9 @@
 #     click then changes nothing,
 #   * "Any" clears the reservation,
 #   * removal's ✗ follows the snapshot's `removal_refused`, which the panel
-#     and the ghost share,
+#     and the ghost share — including for an open rack the floor-wide bay
+#     sum would call spare, because the only other room is a rack reserved
+#     for something else,
 #   * and a hopper's panel opened after a rack's still has its FILL button
 #     and its CONTENTS heading — the two kinds share one panel.
 #
@@ -36,6 +38,9 @@ const Layouts = preload("res://test_layouts.gd")
 ## Well away from anything else, and a hopper beside it for the last check.
 const RACK := Vector2i(0, 6)
 const HOPPER := Vector2i(-4, 6)
+## Racks placed beside RACK for the pooled-removal check.
+const OPEN_RACK := Vector2i(2, 6)
+const RESERVED_EMPTY := Vector2i(6, 6)
 
 var main
 var _ran := false
@@ -68,9 +73,13 @@ func _repoll() -> void:
 
 
 func _rack() -> Dictionary:
+	return _rack_at(RACK)
+
+
+func _rack_at(tile: Vector2i) -> Dictionary:
 	for rack in JSON.parse_string(main.sim.storage_snapshot_json()).get("racks", []):
 		var at: Array = rack["tile"]
-		if int(at[0]) == RACK.x and int(at[1]) == RACK.y:
+		if int(at[0]) == tile.x and int(at[1]) == tile.y:
 			return rack
 	return {}
 
@@ -275,6 +284,47 @@ func _run_checks() -> void:
 		_fail("a cleared rack's title reads '%s'" % main._config_title.text)
 		return
 
+	# --- An empty reserved rack is no room for anything else ---------------
+	# The floor-wide sum (`used_bays > total_bays - bays`) cannot see this:
+	# three open racks and one reserved-but-empty, with the open three holding
+	# 2·bays + 1 bays of stock, leave the sum a whole rack spare, but that
+	# spare rack will only take `locked[0]`. The ghost has to read the sim.
+	for x in [2, 4, 6]:
+		Layouts.place(main.sim, Layouts.WAREHOUSE_KIND, Vector2i(x, 6), "east")
+	main._rebuild_world()
+	main._config_click_at_tile(RESERVED_EMPTY)
+	_repoll()
+	main._on_config_picker_pressed(_slot_index(locked[0]))
+	_repoll()
+	if String(_rack_at(RESERVED_EMPTY).get("filter", "")) != locked[0]:
+		_fail("the rack at %s could not be reserved for '%s'" % [str(RESERVED_EMPTY), locked[0]])
+		return
+	Layouts.fund(main.sim, 50000)
+	main.sim.issue_command_json(JSON.stringify({
+		"type": "buy_ingredient", "item": second,
+		"quantity": int(storage.get("base_cap", 0)) + int(storage.get("slot_stack", 0)) * (bays + 1),
+	}))
+	_repoll()
+	var floor_state = JSON.parse_string(main.sim.storage_snapshot_json())
+	var used := int(floor_state.get("used_bays", 0))
+	var total := int(floor_state.get("total_bays", 0))
+	if used != 2 * bays + 1 or total != 4 * bays:
+		_fail("the fixture holds %d of %d bays, wanted %d of %d" % [used, total, 2 * bays + 1, 4 * bays])
+		return
+	if used > total - bays:
+		_fail("the floor-wide sum already refuses here — this check could not tell it from the sim's answer")
+		return
+	var open_key: String = main._tile_key(OPEN_RACK)
+	if not bool(_rack_at(OPEN_RACK).get("removal_refused", false)):
+		_fail("the sim would let the open rack at %s go, with its stock's only other room reserved" % str(OPEN_RACK))
+		return
+	if not main._rack_removal_refused(open_key) \
+			or not main._hover_text_at_tile(OPEN_RACK).contains("HOLDING"):
+		_fail("an open rack the sim refuses to pick up is not refused on the ghost and hover — %d of %d bays used, one rack reserved and empty:\n%s" % [
+			used, total, main._hover_text_at_tile(OPEN_RACK),
+		])
+		return
+
 	# --- A hopper's panel after a rack's is still a hopper's ----------------
 	main._config_click_at_tile(HOPPER)
 	_repoll()
@@ -286,7 +336,7 @@ func _run_checks() -> void:
 		_fail("a hopper's panel opened after a rack's lost FILL, AUTO-FILL or its heading")
 		return
 
-	print("RACK_FILTER_OK: a click on the rack opens its panel with %d slots (any + the wire's raws) and no FILL; '%s' reserves it and the title, tick and hover follow; %s are padlocked and refused until their gates open, and then '%s' can be reserved; with it full, '%s' is dimmed with a ✗ and explained before the click the sim then refuses; 'Any' clears it; and a hopper's panel after it is still a hopper's" % [
-		expected.size(), first, str(locked), locked[0], second,
+	print("RACK_FILTER_OK: a click on the rack opens its panel with %d slots (any + the wire's raws) and no FILL; '%s' reserves it and the title, tick and hover follow; %s are padlocked and refused until their gates open, and then '%s' can be reserved; with it full, '%s' is dimmed with a ✗ and explained before the click the sim then refuses; 'Any' clears it; an open rack is refused while the only spare rack is reserved for '%s'; and a hopper's panel after it is still a hopper's" % [
+		expected.size(), first, str(locked), locked[0], second, locked[0],
 	])
 	quit(0)

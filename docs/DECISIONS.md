@@ -37,8 +37,8 @@ matches what code comments and data files cite.
   filter keeps that: it moves a rack's bays out of the shared pool into a
   pool of their own for one id, and the ceiling is the old fold with the
   shared pool in place of the whole floor. A holding stands in its reserved
-  bays first, so reserving a rack for tomato can only raise tomato's ceiling
-  and lower everyone else's. The alternative — binding each bay to an id and
+  bays first, so reserving a rack for tomato never lowers tomato's ceiling
+  and never raises anyone else's. The alternative — binding each bay to an id and
   persisting it — was rejected for the reasons it was rejected the first
   time; only the player's *choice* is stored, because nothing can re-derive
   it.
@@ -1397,7 +1397,8 @@ matches what code comments and data files cite.
   `bays_for(count) = ceil(max(0, count − base_cap) / slot_stack)`, summed over
   the ledger — means there is no allocation state to drift out of step with
   the ledger, nothing to migrate in a save (`SavedBody::WarehouseRack` carries
-  no fields and `schema_version` stays 2), and a bay frees itself the moment
+  no fields and `schema_version` stays 2 — until v6 gave it a `filter`, see
+  the 2026-09-28 record), and a bay frees itself the moment
   the stock in it is consumed rather than staying reserved for an ingredient
   the player owns one unit of. The consequence to know is that free bays are a
   **shared pool**: filling every bay with tomato does stop the player buying
