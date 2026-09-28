@@ -17933,6 +17933,14 @@ func _update_hover_tooltip() -> void:
 	_hover_label.text = text
 	var state := _hover_panel_state(tile)
 	_apply_hover_panel_state(state)
+	# Drop the height the previous hover left behind (issue #173). A
+	# free-standing Control grows to its minimum but never shrinks back, so
+	# after a tall machine a short dock was measured, placed and laddered at
+	# the machine's height. Only the height: every line's height is known the
+	# moment the text is set, but a Label's minimum WIDTH lags a frame behind
+	# its text, and the current width is what `_panel_draw_size` trusts to
+	# cover that lag. Setting a size below the minimum clamps up to it.
+	_hover_tooltip.size = Vector2(_hover_tooltip.size.x, 0.0)
 	# Too tall to stand anywhere clear of the HUD? Shed lines until it is
 	# (issue #99). Measured every frame from the full panel, so a folded
 	# legend or a bigger window gives the lines straight back.
