@@ -16,6 +16,8 @@
 #     crossed the open panel drops the padlock and the raw can be reserved,
 #   * picking a raw reserves the rack in the simulation and the title, the
 #     tick and the hover line all follow the simulation's answer,
+#   * the market's warehouse line counts a reserved rack's empty bays apart
+#     from the free ones (the wire's `free_bays`), not as room for anything,
 #   * a pick the simulation would refuse for want of room is dimmed with a ✗
 #     BEFORE the click and explained in words under the picker, and the
 #     click then changes nothing,
@@ -170,6 +172,17 @@ func _run_checks() -> void:
 		return
 	if not main._hover_text_at_tile(RACK).contains("reserved for %s" % main._item_display_name(first)):
 		_fail("a reserved rack's hover does not name what for:\n%s" % main._hover_text_at_tile(RACK))
+		return
+	# The market's warehouse line does not promise a reserved rack's empty
+	# bays to every crate: the only rack is reserved, so nothing is free.
+	if int(main._storage_state.get("free_bays", -1)) != 0:
+		_fail("the only rack is reserved, yet the wire calls %s bays free" % str(main._storage_state.get("free_bays")))
+		return
+	main._update_market_storage()
+	var market_line: String = main._market_storage_label.text
+	if not market_line.contains("·  0 free") \
+			or not market_line.contains("%d empty on reserved shelving" % bays):
+		_fail("the market's warehouse line counts reserved bays as free:\n%s" % market_line)
 		return
 
 	# --- A padlock is refused until its gate opens -------------------------

@@ -774,6 +774,48 @@ fn a_reserved_rack_comes_up_only_while_open_bays_can_take_its_stock() {
     assert!(rack_at(&world, (1, -8)).removal_refused);
 }
 
+/// An EMPTY reserved rack is no room for anything else. Sugar standing in
+/// seven bays across two open racks cannot lose one of them, although the
+/// floor still has more free bays than that rack supplies — they are the
+/// tomato rack's, and sugar may not stand there. Summing bays across the
+/// whole floor, as the warehouse did before racks could be reserved, would
+/// let the rack come up and leave sugar over its own ceiling.
+#[test]
+fn an_empty_reserved_rack_is_no_room_for_other_stock() {
+    let mut world = world();
+    let (base_cap, slot_stack, bays) = knobs(&world);
+    build_rack(&mut world, (0, -8));
+    build_rack(&mut world, (1, -8));
+    build_rack(&mut world, (2, -8));
+    set_filter(&mut world, (0, -8), Some("tomato"));
+    order(&mut world, "sugar", base_cap + slot_stack * (bays + 1));
+    assert_eq!(
+        world.owned_ingredient("sugar"),
+        base_cap + slot_stack * (bays + 1),
+        "two open racks hold sugar's seven bays"
+    );
+
+    assert!(rack_at(&world, (2, -8)).removal_refused);
+    let placements = world.placement_count();
+    world.issue_command(PlayerCommand::Remove { tile: (2, -8) });
+    assert_eq!(
+        world.placement_count(),
+        placements,
+        "the open rack comes up only if sugar can stand somewhere else"
+    );
+    assert!(world.stock_cap_for("sugar") >= world.owned_ingredient("sugar"));
+    // The empty reserved rack itself holds nothing up.
+    assert!(!rack_at(&world, (0, -8)).removal_refused);
+    // And the wire does not call its bays free: only the open racks' five
+    // unused bays are room any ingredient may take.
+    let snapshot = world.storage_snapshot();
+    assert_eq!(snapshot.free_bays, 2 * bays - (bays + 1));
+    assert_eq!(
+        snapshot.total_bays - snapshot.used_bays,
+        3 * bays - (bays + 1)
+    );
+}
+
 /// The capacity invariant survives reservations too: whatever is reserved,
 /// re-reserved and cleared, nothing is ever held above its own ceiling.
 #[test]
@@ -843,6 +885,33 @@ fn a_save_reserving_a_rack_for_a_non_raw_is_refused() {
     let error = error.to_string();
     assert!(
         error.contains("gold") && error.contains("(0, -8)"),
+        "{error}"
+    );
+}
+
+/// The load path judges stock against the racks' filters, not the floor's
+/// bay total: a save whose reservations leave stock no bay it may stand in
+/// is refused, exactly like one holding more than its racks can. Sugar here
+/// stands in seven bays of two open racks; reserving one of them for tomato
+/// in the text leaves the floor's total unchanged and sugar with six.
+#[test]
+fn a_save_whose_reservations_strand_stock_is_refused() {
+    let mut world = world();
+    let (base_cap, slot_stack, bays) = knobs(&world);
+    build_rack(&mut world, (0, -8));
+    build_rack(&mut world, (1, -8));
+    order(&mut world, "sugar", base_cap + slot_stack * (bays + 1));
+    let text = world.to_save_ron();
+    World::from_save_ron(&text, recipes()).expect("the unedited save must load");
+
+    assert!(text.contains("filter: None"), "{text}");
+    let edited = text.replacen("filter: None", r#"filter: Some("tomato")"#, 1);
+    let Err(error) = World::from_save_ron(&edited, recipes()) else {
+        panic!("a reservation that leaves sugar with no bay must be refused");
+    };
+    let error = error.to_string();
+    assert!(
+        error.contains("'sugar'") && error.contains("will not fit"),
         "{error}"
     );
 }

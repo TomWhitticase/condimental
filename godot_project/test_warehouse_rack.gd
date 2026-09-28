@@ -448,7 +448,11 @@ func _run_checks() -> void:
 	if not main._market_storage_label.visible:
 		_fail("the market says nothing about the warehouse, with a rack standing")
 		return
-	for phrase in ["1 shelving unit", "bays %d / %d" % [used_bays, total_bays], "%d free" % (total_bays - used_bays)]:
+	var free_bays := int(main._storage_state.get("free_bays", -1))
+	if free_bays != total_bays - used_bays:
+		_fail("with no rack reserved every empty bay is free, but the wire says %d of %d" % [free_bays, total_bays - used_bays])
+		return
+	for phrase in ["1 shelving unit", "bays %d / %d" % [used_bays, total_bays], "%d free" % free_bays]:
 		if not main._market_storage_label.text.contains(phrase):
 			_fail("the market's warehouse line does not say '%s':\n%s" % [phrase, main._market_storage_label.text])
 			return

@@ -8286,9 +8286,16 @@ func _update_market_storage() -> void:
 	# "shelving unit", not the kind's own display name: the line already says
 	# Warehouse, and "3 Stock Shelvings" is not English. What the player
 	# counts is units of shelving; the bays beside it are what each supplies.
+	# "free" is the wire's `free_bays` — room ANY ingredient may take. An
+	# empty bay on a reserved rack is not that, so it is counted apart rather
+	# than promised to every crate in the market.
+	var free := int(_storage_state.get("free_bays", 0))
+	var reserved_empty := maxi(0, total - used - free)
 	_market_storage_label.text = "Warehouse: %d shelving unit%s  ·  bays %d / %d  ·  %d free" % [
-		racks, "" if racks == 1 else "s", used, total, maxi(0, total - used)
+		racks, "" if racks == 1 else "s", used, total, free
 	]
+	if reserved_empty > 0:
+		_market_storage_label.text += "  ·  %d empty on reserved shelving" % reserved_empty
 	_set_meter(
 		_market_bays_meter, clampf(float(used) / float(total), 0.0, 1.0),
 		METER_FILL_WARN if used >= total else METER_FILL_LEVEL

@@ -1500,6 +1500,12 @@ pub struct StorageSnapshot {
     /// which is the invariant [`super::storage::StorageCatalog::cap_for`]
     /// documents.
     pub used_bays: u32,
+    /// Bays **any** ingredient could still stand in: the open racks' bays
+    /// that nothing needs. An empty bay on a rack reserved for one
+    /// ingredient is not among them, so `total_bays - used_bays` can be
+    /// more than this — the difference is room only its own ingredient may
+    /// use.
+    pub free_bays: u32,
     /// Every placed rack, in tile order.
     pub racks: Vec<RackSnapshot>,
 }
@@ -2683,6 +2689,9 @@ impl World {
             slot_stack: self.storage.slot_stack(),
             total_bays: self.storage_bays(),
             used_bays: self.storage.bays_used(&self.ingredients.owned),
+            free_bays: pool
+                .shared()
+                .saturating_sub(self.storage.shared_used(&self.ingredients.owned, &pool)),
             racks: self
                 .topology
                 .racks
