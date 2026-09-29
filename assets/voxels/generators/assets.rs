@@ -1218,14 +1218,17 @@ pub fn cleat_covers(cell: &SurfaceCell, phase: u32) -> bool {
 // says so.
 //
 // **THE GEOMETRY, in this file's coordinates.** Every asset here is authored
-// facing EAST, and east is vox +X. The splitter's second output is one
-// quarter turn CLOCKWISE from its facing (`splitter.rs` owns that rule), so
-// for an east-facing splitter the branch runs SOUTH — and south is world -Z,
-// which this file's junction header establishes is vox **+Y**. So the model
-// is a T laid out as: intake from -X, straight exit at +X, branch exit at
-// +Y, and a closed rail along -Y. That closed rail is the near, camera-facing
-// edge (vox low-Y is world +Z), which is the right side to close: it is a
-// belt-height frame, so it frames the deck without standing in front of it.
+// facing EAST, and east is vox +X. A splitter's left output is one quarter
+// turn CLOCKWISE from its facing in sim terms (`splitter.rs` owns that
+// rule), so for an east-facing splitter the left runs SOUTH — world -Z,
+// which this file's junction header establishes is vox **+Y** — and the
+// right runs NORTH, vox -Y. The default `left` body is a T laid out as:
+// intake from -X, straight exit at +X, left exit at +Y, and a closed rail
+// along -Y. That closed rail is the near, camera-facing edge (vox low-Y is
+// world +Z), which frames the deck at belt height without standing in front
+// of it. The other three modes' bodies (`SplitterExits`) open and close the
+// same three sides by the same rules: a closed side gets the rail, an open
+// one a groove.
 //
 // **WHY THE READOUT IS INLAID IN THE DECK.** `SplitterSnapshot::next_output`
 // is the one piece of a splitter's state a player cannot infer from the tiles
