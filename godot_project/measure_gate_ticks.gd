@@ -6,7 +6,7 @@
 #   godot --headless --path godot_project --script measure_gate_ticks.gd
 #
 # WHY IT EXISTS. The gates' cost is the one thing about the 2026-09-26 trigger
-# change that no test can pin: a test asserting "the mustard gate takes 141 000
+# change that no test can pin: a test asserting "the mustard gate takes 155 000
 # ticks" would fail on every balance pass, which is the opposite of useful. But
 # an unmeasured claim in a PR body is worse — the first review of this change
 # reproduced the ketchup figure and could not reproduce the mustard one,
@@ -17,24 +17,29 @@
 # broke — restocked and refunded every poll — so both numbers are a FLOOR, not
 # a typical playthrough.
 #
-# WHAT IT PRINTED on 2026-09-27, at `data/unlocks.ron`'s shipped 100/100:
+# WHAT IT PRINTED on 2026-09-29, at `data/unlocks.ron`'s shipped 100/100:
 #
-#   BBQ gate crossed at tick 67000, 130 boxes sold — that is the tick
+#   BBQ gate crossed at tick 67000, 142 boxes sold — that is the tick
 #     `build_bbq_running_line` RETURNS at, not the tick the gate opened: it
 #     spots the open gate on a 250-tick poll at about tick 52 000, then builds
 #     the BBQ branch and runs `BBQ_SETTLE_TICKS` (15 000) more before handing
 #     back, and the ketchup line keeps selling throughout
 #   active contracts after signing 11 of 13 offers: 13
-#   MUSTARD gate crossed at tick 141000 — 78.3 minutes at 30 ticks/s,
-#     74 000 ticks after the line above; the BBQ gate itself opened at tick
-#     52 000, so 89 000 ticks (~49 min) of the run follow it
+#   MUSTARD gate crossed at tick 155000 — 86.1 minutes at 30 ticks/s,
+#     88 000 ticks after the line above; the BBQ gate itself opened at tick
+#     52 000, so 103 000 ticks (~57 min) of the run follow it
+#
+# It printed 141000 until 2026-09-29 (PR #209), when `build_bbq_running_line`
+# stopped signing `smokehouse_trial`: the hand-off now carries only 8 boxes
+# of BBQ sold, so this number moves with what that fixture signs during its
+# settle.
 #
 # IT PRINTED 181000 UNTIL 2026-09-27, and that number is in no file any more:
 # the signing step read `available_contracts`/`active_contracts`, which are not
 # the wire's keys, so `.get(…, [])` handed it an empty array, nothing was
 # signed and only the two orders `build_bbq_running_line` signs for itself were
 # ever asking for BBQ. It reported "active contracts after signing: 0" while
-# two were running (`smokehouse_trial` and `grill_pub`), which is what gave the
+# two were running (then `smokehouse_trial` and `grill_pub`), which is what gave the
 # mistake away. Hence the two
 # refusals below: a measuring tool that skips a step silently is worse than no
 # tool.

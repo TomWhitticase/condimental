@@ -864,35 +864,60 @@ const RACK_LOAD_TINT_FALLBACK := Color(0.72, 0.66, 0.56)
 ## --- The conveyor splitter (Epic B) ---------------------------------------
 ##
 ## The body is in MACHINE_MODELS above; this is its LIVE half — the lit arrow
-## that answers the one question a splitter's tile cannot: which of its two
+## that answers the one question a splitter's tile cannot: which of its
 ## outputs takes the next item (`SplitterSnapshot::next_output`, "the one
 ## piece of state a player cannot infer from the tiles around it").
 ##
 ## **One asset, turned by a quarter turn, and the turn is the simulation's
-## own.** The model is authored pointing STRAIGHT, and the branch is shown by
-## rotating it 90° clockwise on top of the placement's own facing — because
-## that is literally how the simulation derives the second output
-## (`Direction::rotate_cw`, `sim_core/src/sim/splitter.rs`). A second,
-## separately-authored branch arrow could end up pointing somewhere the
+## own.** The model is authored pointing STRAIGHT, and a side exit is shown
+## by rotating it a quarter turn either way on top of the placement's own
+## facing — because that is literally how the simulation derives the side
+## outputs (`Direction::rotate_cw`, `sim_core/src/sim/splitter.rs`). A
+## separately-authored side arrow could end up pointing somewhere the
 ## simulation does not; a rotation of the first cannot.
 ##
 ## The arrow sits FLUSH in a groove cut into the deck (its floor is one voxel
 ## down, hence SPLITTER_ARROW_FLOOR_VOXELS = BELT_SURFACE_VOXELS - 1) rather
 ## than standing on it: items are drawn sliding across this tile at
-## BELT_SURFACE_Y, so anything proud of the deck gets driven through. Both
-## grooves are cut whether or not either is lit, which is what makes the
-## readout a PAIR OF POSITIONS rather than a colour (UI_UX.md §7) — mirrors
+## BELT_SURFACE_Y, so anything proud of the deck gets driven through. Every
+## open exit's groove is cut whether or not it is lit, which is what makes
+## the readout a CHOICE OF POSITIONS rather than a colour (UI_UX.md §7) — mirrors
 ## assets/voxels/generators/assets.rs's SPLITTER_ARROW_Z; change one, change
 ## both.
 const SPLITTER_ASSET := "machine_splitter"
+## The body per `SplitMode` (the placement's `split_mode`): each opens
+## exactly the exits its mode deals to. SPLITTER_ASSET, the `left` body, is
+## the fallback for a mode this table has not heard of.
+const SPLITTER_MODE_ASSETS := {
+	"left": "machine_splitter",
+	"right": "machine_splitter_right",
+	"t_junction": "machine_splitter_t_junction",
+	"three_way": "machine_splitter_three_way",
+}
+## The four modes in the order the config panel offers them, with the words
+## it offers them in — `sim::splitter::SplitMode`'s wire names.
+const SPLITTER_MODES := ["left", "right", "t_junction", "three_way"]
+const SPLITTER_MODE_LABELS := {
+	"left": "Left",
+	"right": "Right",
+	"t_junction": "T junction",
+	"three_way": "Three way",
+}
 const SPLITTER_ARROW_ASSET := "splitter_arrow"
 const SPLITTER_ARROW_FLOOR_VOXELS := BELT_SURFACE_VOXELS - 1
 const SPLITTER_ARROW_FLOOR_Y := FLOOR_Y + SPLITTER_ARROW_FLOOR_VOXELS * VOXEL_UNIT
 ## Which side a snapshot's `next_output` names, as an index into its
-## `outputs` pair. Straight is 0, exactly as `sim::splitter::Side::index`
-## says — the array order is the simulation's, not this file's.
+## `outputs` triple. Straight 0, left 1, right 2, exactly as
+## `sim::splitter::Side::index` says — the array order is the simulation's,
+## not this file's.
 const SPLITTER_STRAIGHT := 0
-const SPLITTER_BRANCH := 1
+const SPLITTER_LEFT := 1
+const SPLITTER_RIGHT := 2
+const SPLITTER_SIDE_NAMES := ["straight", "left", "right"]
+## The arrow's extra yaw per side on top of the facing. Left is the sim's
+## clockwise quarter turn, which this renderer's mirroring draws as a +90°
+## yaw (on screen, the player's left); right is the opposite quarter turn.
+const SPLITTER_SIDE_YAW := [0.0, PI * 0.5, -PI * 0.5]
 
 ## The pipe run's fluid tank and the liquid standing in it (the "Visual
 ## overhaul round 2" epic — ticket 1 made the tank real in simulation, this
@@ -1278,7 +1303,7 @@ var _delivery_full := false # is some dock at capacity — the clipboard reads F
 # (`removal_refused`), never from arithmetic here.
 var _rack_states: Dictionary = {} # origin key -> rack snapshot (bays, contents, filter, refusals)
 var _rack_nodes: Dictionary = {} # origin key -> {"bays": Array of {"pallet", "load", "tint"}}
-var _storage_state: Dictionary = {} # base_cap / slot_stack / total_bays / used_bays
+var _storage_state: Dictionary = {} # base_cap / slot_stack / total_bays / used_bays / free_bays / racks
 
 # --- Build mode: the ghost, and what the next click will do ----------------
 # `_build_kind` is "" when the player is not placing anything; `_remove_mode`
@@ -3384,6 +3409,8 @@ func _asset_for_placement(placement: Dictionary) -> String:
 		return _tile_frames_for(placement)[0]
 	if kind == PIPE_KIND:
 		return _pipe_asset_for(origin)
+	if kind == SPLITTER_KIND:
+		return SPLITTER_MODE_ASSETS.get(String(placement.get("split_mode", "left")), SPLITTER_ASSET)
 	return _shop_asset_for(kind)
 
 
@@ -3823,8 +3850,8 @@ func _seed_machine_states() -> void:
 ## it exists for the same reason: `dirty_chunk_ids` only reports chunks
 ## something CHANGED in, so a splitter that has not yet passed an item
 ## produces no snapshot and its arrow would stay dark until it did. Which
-## way a freshly placed splitter will deal its first item is knowable (it is
-## `Side::default()`, straight), so it is asked for rather than guessed at.
+## way a freshly placed splitter will deal its first item is knowable (the
+## first side of its mode), so it is asked for rather than guessed at.
 func _seed_splitter_states() -> void:
 	for placement in _placements:
 		if String(placement.get("kind", "")) != SPLITTER_KIND:
@@ -3841,22 +3868,22 @@ func _seed_splitter_states() -> void:
 ##
 ## **Why this is not simply `next_output`.** The raw field is which side gets
 ## FIRST REFUSAL, and `sim_core/src/sim/splitter.rs`'s fallback rule is that
-## a side which cannot take the item passes it to the other one in the same
-## tick — so a splitter whose branch was never built reports `"branch"`
-## forever while every item goes straight through it. An arrow drawn from
+## a side which cannot take the item passes it on round the mode's rotation
+## in the same tick — so a splitter whose left belt was never built reports
+## `"left"` forever while every item goes straight through it. An arrow drawn from
 ## that field alone would point at bare floor while product sailed past it in
 ## the other direction: a readout lying about its own mechanism, which is the
 ## thing this codebase already refused to build for the fluid tank's head and
 ## the dock's fill level. So the ONE case the wire can settle is settled
 ## here — a due side with no output tile (`outputs[i] == null`) hands to the
-## other — and it is settled from the `outputs` pair the simulation reports
+## next — and it is settled from the `outputs` the simulation reports
 ## precisely so a renderer need not re-derive where they point.
 ##
 ## What this deliberately cannot show is a side that is built but momentarily
 ## FULL, which also falls back. That is transient and invisible on the wire;
 ## an unbuilt branch is durable and is the mistake a player wants told about.
 ##
-## With neither output connected nothing can leave at all, and the arrow is
+## With no output connected nothing can leave at all, and the arrow is
 ## hidden outright — a shape difference (no lit groove anywhere) for a
 ## splitter that is a dead end.
 func _apply_splitter_state(key: String, snapshot: Dictionary) -> void:
@@ -3868,22 +3895,30 @@ func _apply_splitter_state(key: String, snapshot: Dictionary) -> void:
 	var side := _splitter_effective_side(snapshot)
 	arrow.visible = side >= 0
 	if side >= 0:
-		arrow.rotation.y = float(nodes["yaw"]) + (PI * 0.5 if side == SPLITTER_BRANCH else 0.0)
+		arrow.rotation.y = float(nodes["yaw"]) + float(SPLITTER_SIDE_YAW[side])
 
 
-## Which output the next item off `snapshot` will reach — SPLITTER_STRAIGHT,
-## SPLITTER_BRANCH, or -1 when neither side is connected to anything. Pure,
-## so a test can drive it with a hand-built snapshot.
+## The side index `next_output` names — SPLITTER_STRAIGHT when it names
+## nothing this file knows.
+func _splitter_due_side(snapshot: Dictionary) -> int:
+	return maxi(SPLITTER_SIDE_NAMES.find(String(snapshot.get("next_output", "straight"))), 0)
+
+
+## Which output the next item off `snapshot` will reach — a SPLITTER_* side
+## index, or -1 when no side is connected to anything. Walks straight, left,
+## right round from the due side: a side the mode does not deal to reports
+## a null output, so this visits the mode's own sides in the mode's own
+## rotation without a copy of the modes table. Pure, so a test can drive it
+## with a hand-built snapshot.
 func _splitter_effective_side(snapshot: Dictionary) -> int:
 	var outputs: Array = snapshot.get("outputs", [])
-	var due := SPLITTER_BRANCH if String(snapshot.get("next_output", "straight")) == "branch" else SPLITTER_STRAIGHT
-	var other := SPLITTER_STRAIGHT if due == SPLITTER_BRANCH else SPLITTER_BRANCH
-	if outputs.size() < 2:
+	if outputs.size() < SPLITTER_SIDE_NAMES.size():
 		return -1
-	if outputs[due] != null:
-		return due
-	if outputs[other] != null:
-		return other
+	var due := _splitter_due_side(snapshot)
+	for step in SPLITTER_SIDE_NAMES.size():
+		var side := (due + step) % SPLITTER_SIDE_NAMES.size()
+		if outputs[side] != null:
+			return side
 	return -1
 
 
@@ -12909,6 +12944,9 @@ const RACK_PICKER_NOTE := "a picked ingredient has these shelves to itself — A
 ## The rack picker's "any" slot, which is also what an open rack's `filter`
 ## (`null` on the wire) reads as here — see `_rack_filter_of`.
 const RACK_ANY_CHOICE := ""
+## Under a SPLITTER's modes: what the round robin does, in one line, since
+## the four names do not say it.
+const SPLITTER_PICKER_NOTE := "items take turns among the open exits"
 ## The panel's fixed content width. Fixed rather than derived so the level
 ## bar has a width to scale against on the frame the panel opens, and so a
 ## long note does not decide how wide the panel is.
@@ -13205,9 +13243,10 @@ func _rebuild_config_picker() -> void:
 
 ## The list the picker is built from: a hopper's raw SOLIDS, a tank's raw
 ## FLUIDS, and a rack's "any" followed by both, since the larder holds solids
-## and fluids under one rule. All of it comes off `ingredients_snapshot_json`
-## and is the simulation's own idea of what the building may hold, so none
-## of it is a table this file keeps.
+## and fluids under one rule. All of that comes off `ingredients_snapshot_json`
+## and is the simulation's own idea of what the building may hold. A
+## splitter's four modes are the one list kept here: they are
+## `sim::splitter::SplitMode`'s wire names, not content.
 func _config_picker_choices() -> Array:
 	if _config_kind == HOPPER_KIND:
 		return _hopper_items
@@ -13215,6 +13254,8 @@ func _config_picker_choices() -> Array:
 		return _tank_fluids
 	if _config_kind == WAREHOUSE_RACK_KIND:
 		return [RACK_ANY_CHOICE] + _hopper_items + _tank_fluids
+	if _config_kind == SPLITTER_KIND:
+		return SPLITTER_MODES
 	return []
 
 
@@ -13241,11 +13282,7 @@ func _build_config_picker_slot(index: int, item_id: String) -> void:
 	icon.custom_minimum_size = CONFIG_PICKER_ICON_SIZE
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	# The "any" slot is the rack itself: open shelving is what it stands for.
-	icon.texture = (
-		_icon_for(item_id) if item_id != RACK_ANY_CHOICE
-		else _icon_for_asset(_shop_asset_for(WAREHOUSE_RACK_KIND))
-	)
+	icon.texture = _config_picker_icon(item_id)
 	column.add_child(icon)
 
 	var name_settings := LabelSettings.new()
@@ -13259,7 +13296,7 @@ func _build_config_picker_slot(index: int, item_id: String) -> void:
 	name_label.label_settings = name_settings
 	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	name_label.text = _item_display_name(item_id) if item_id != RACK_ANY_CHOICE else "Any"
+	name_label.text = _config_picker_name(item_id)
 	column.add_child(name_label)
 	_fit_config_picker_name(name_label, name_settings)
 	# And the frame is the last word on where the name may be drawn. The
@@ -13326,6 +13363,25 @@ func _build_config_picker_slot(index: int, item_id: String) -> void:
 		"item": item_id, "button": button, "mark": mark, "lock": lock,
 		"blocked": blocked, "column": column,
 	})
+
+
+## A picker slot's picture. The "any" slot is the rack itself: open shelving
+## is what it stands for. A splitter mode is that mode's own body, so the
+## slot shows the exits it opens.
+func _config_picker_icon(choice: String) -> Texture2D:
+	if _config_kind == SPLITTER_KIND:
+		return _icon_for_asset(SPLITTER_MODE_ASSETS.get(choice, SPLITTER_ASSET))
+	if choice == RACK_ANY_CHOICE:
+		return _icon_for_asset(_shop_asset_for(WAREHOUSE_RACK_KIND))
+	return _icon_for(choice)
+
+
+func _config_picker_name(choice: String) -> String:
+	if _config_kind == SPLITTER_KIND:
+		return String(SPLITTER_MODE_LABELS.get(choice, choice))
+	if choice == RACK_ANY_CHOICE:
+		return "Any"
+	return _item_display_name(choice)
 
 
 ## Shrinks a picker slot's name until no WORD in it has to be broken in half
@@ -13401,16 +13457,26 @@ func _open_config_panel(origin: Vector2i, kind: String) -> void:
 	# for) and what is standing on it, with nothing to fill — its stock is
 	# the larder's, bought at the market — so FILL and AUTO-FILL are hidden
 	# and the fill row carries only the contents line.
+	#
+	# A splitter is the fourth: the picker alone, choosing which way it
+	# splits. It holds nothing to fill and has no level.
 	var crewed := _config_can_mothball(origin)
 	var rack := kind == WAREHOUSE_RACK_KIND
-	_config_picker_box.visible = kind == HOPPER_KIND or kind == FLUID_TANK_KIND or rack
-	_config_picker_heading.text = "RESERVED FOR" if rack else "CONTENTS"
+	var splitter := kind == SPLITTER_KIND
+	_config_picker_box.visible = (
+		kind == HOPPER_KIND or kind == FLUID_TANK_KIND or rack or splitter
+	)
+	_config_picker_heading.text = (
+		"RESERVED FOR" if rack else ("SPLITS" if splitter else "CONTENTS")
+	)
 	_config_machine_box.visible = crewed
-	_config_fill_row.visible = not crewed
+	_config_fill_row.visible = not crewed and not splitter
 	_config_fill_button.visible = not rack
 	_config_fill_reason.visible = false
-	_config_auto_button.visible = not crewed and not rack
-	_config_auto_note.visible = not crewed and not rack
+	_config_auto_button.visible = not crewed and not rack and not splitter
+	_config_auto_note.visible = not crewed and not rack and not splitter
+	_config_level_label.visible = not splitter
+	_config_level_track.visible = not splitter
 	if kind == HOPPER_KIND:
 		_refresh_hopper_items()
 	elif kind == FLUID_TANK_KIND:
@@ -13494,7 +13560,7 @@ func _config_click_at_tile(tile: Vector2i) -> void:
 	var kind := String(placement.get("kind", ""))
 	var origin := _placement_origin(placement)
 	if not _config_can_mothball(origin) and kind != HOPPER_KIND and kind != FLUID_TANK_KIND \
-			and kind != WAREHOUSE_RACK_KIND:
+			and kind != WAREHOUSE_RACK_KIND and kind != SPLITTER_KIND:
 		_close_config_panel()
 		return
 	if _config_open and _config_tile == origin:
@@ -13550,6 +13616,8 @@ func _update_config_panel() -> void:
 		_update_config_dock(key)
 	elif _config_kind == WAREHOUSE_RACK_KIND:
 		_update_config_rack(key)
+	elif _config_kind == SPLITTER_KIND:
+		_update_config_splitter(placement)
 	else:
 		_update_config_machine(key)
 	_position_config_panel()
@@ -13644,6 +13712,24 @@ func _update_config_rack(key: String) -> void:
 	_config_picker_note.text = _with_gate_note(
 		_rack_picker_note(blocked), _hopper_items + _tank_fluids
 	)
+
+
+## A splitter's panel: the four modes, the current one ticked. The mode is
+## the placement's own `split_mode`, which the rebuild after every
+## `set_splitter_mode` re-reads.
+func _update_config_splitter(placement: Dictionary) -> void:
+	var mode := _splitter_mode_of(placement)
+	_config_title.text = "%s — %s" % [
+		_kind_display_name(SPLITTER_KIND),
+		String(SPLITTER_MODE_LABELS.get(mode, mode)),
+	]
+	_config_title_icon.texture = _icon_for_asset(SPLITTER_MODE_ASSETS.get(mode, SPLITTER_ASSET))
+	_update_config_picker(mode)
+	_config_picker_note.text = SPLITTER_PICKER_NOTE
+
+
+func _splitter_mode_of(placement: Dictionary) -> String:
+	return String(placement.get("split_mode", "left"))
 
 
 ## A rack's filter — `null` on the wire for open shelving, and
@@ -14205,7 +14291,7 @@ func _on_config_picker_pressed(index: int) -> void:
 	if not _config_open:
 		return
 	if _config_kind != HOPPER_KIND and _config_kind != FLUID_TANK_KIND \
-			and _config_kind != WAREHOUSE_RACK_KIND:
+			and _config_kind != WAREHOUSE_RACK_KIND and _config_kind != SPLITTER_KIND:
 		return
 	if index < 0 or index >= _config_picker_slots.size():
 		return
@@ -14218,7 +14304,17 @@ func _on_config_picker_pressed(index: int) -> void:
 	# cry refusal over a press that asked for nothing, which is why the
 	# already-chosen slot is let through silently.
 	var before := _config_contents()
-	if _config_kind == FLUID_TANK_KIND:
+	if _config_kind == SPLITTER_KIND:
+		# A world command, not a config one: the mode picks the body model
+		# and which neighbours the splitter feeds, so the tile and the belts
+		# around it are redrawn.
+		_issue_world_command({
+			"type": "set_splitter_mode",
+			"tile": [_config_tile.x, _config_tile.y],
+			"mode": chosen,
+		})
+		_update_config_panel()
+	elif _config_kind == FLUID_TANK_KIND:
 		# `set_tank_fluid` is the same shape of command against the fluid
 		# side: it declares what the drum holds, and the simulation seeds
 		# the run it discharges into from that (issue #43). Gameplay logic
@@ -14261,6 +14357,8 @@ func _config_contents() -> String:
 		return _declared_fluid_of(_fluid_tank_states.get(key, {}))
 	if _config_kind == WAREHOUSE_RACK_KIND:
 		return _rack_filter_of(_rack_states.get(key, {}))
+	if _config_kind == SPLITTER_KIND:
+		return _splitter_mode_of(placement)
 	return ""
 
 
@@ -18055,12 +18153,12 @@ func _link_neighbour_name(tile: Vector2i, side: String, link_kind: String) -> St
 	return _kind_display_name(String(neighbour.get("kind", link_kind)))
 
 
-## What one splitter's tooltip says. Three lines, because a splitter has
-## exactly three facts and one of them is the reason it exists: where each
-## output goes, and which one takes the next item.
+## What one splitter's tooltip says: its mode, which output takes the next
+## item, and whether each output its mode deals to is connected.
 ##
-## Both outputs are named even when one is `null`, and an unbuilt one is
-## called out in words rather than left off — "branch: not connected" is the
+## Every side the mode deals to (the wire's `sides`) is named even when its
+## output is `null`, and an unbuilt one is called out in words rather than
+## left off — "left: not connected" is the
 ## answer to "why is everything going straight", which is the single most
 ## likely question a player has about a splitter they just placed. The NEXT
 ## line reports the side the item will actually reach (see
@@ -18070,21 +18168,29 @@ func _splitter_hover_text(origin_key: String, direction: String) -> String:
 	var snapshot: Dictionary = _splitter_states.get(origin_key, {})
 	if snapshot.is_empty():
 		return "%s\nfacing %s" % [_kind_display_name(SPLITTER_KIND), direction]
-	var outputs: Array = snapshot.get("outputs", [null, null])
+	var outputs: Array = snapshot.get("outputs", [])
 	var side := _splitter_effective_side(snapshot)
-	var due := SPLITTER_BRANCH if String(snapshot.get("next_output", "straight")) == "branch" else SPLITTER_STRAIGHT
-	var next_line := "next: nowhere — neither output is connected"
+	var due := _splitter_due_side(snapshot)
+	var next_line := "next: nowhere — no output is connected"
 	if side >= 0:
-		next_line = "next: %s" % ("branch" if side == SPLITTER_BRANCH else "straight")
+		next_line = "next: %s" % SPLITTER_SIDE_NAMES[side]
 		if side != due:
-			next_line += " (%s not connected)" % ("branch" if due == SPLITTER_BRANCH else "straight")
-	return "%s  ·  facing %s\n%s\nstraight: %s\nbranch: %s" % [
-		_kind_display_name(SPLITTER_KIND),
-		direction,
+			next_line += " (%s not connected)" % SPLITTER_SIDE_NAMES[due]
+	var mode := String(snapshot.get("mode", "left"))
+	var lines := PackedStringArray([
+		"%s  ·  facing %s  ·  %s" % [
+			_kind_display_name(SPLITTER_KIND), direction,
+			String(SPLITTER_MODE_LABELS.get(mode, mode)),
+		],
 		next_line,
-		_splitter_output_text(outputs, SPLITTER_STRAIGHT),
-		_splitter_output_text(outputs, SPLITTER_BRANCH),
-	]
+	])
+	# Only the sides the mode deals to: a T's missing straight exit is not
+	# "not connected", it is not there.
+	for name in snapshot.get("sides", SPLITTER_SIDE_NAMES):
+		var index := SPLITTER_SIDE_NAMES.find(String(name))
+		if index >= 0:
+			lines.append("%s: %s" % [name, _splitter_output_text(outputs, index)])
+	return "\n".join(lines)
 
 
 ## Whether one output is connected — the state `outputs[i] == null` means,

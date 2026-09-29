@@ -19,8 +19,12 @@
 //!    one; no outputs connected holds everything and backs the line up.
 //! 4. **It is an ordinary placeable kind.** Place/Remove/Rotate refuse and
 //!    apply exactly as they do for every other kind, and one `rotate` turns
-//!    both outputs together, which is the whole reason a splitter needs no
+//!    every output together, which is the whole reason a splitter needs no
 //!    second direction field.
+//! 5. **Its mode picks the sides** (`left`, `right`, `t_junction`,
+//!    `three_way`): each deals its input evenly across exactly its own
+//!    sides, is set by `set_splitter_mode` over the wire, and survives a
+//!    save.
 //!
 //! Everything below runs with no Godot process involved (ARCHITECTURE.md
 //! §7).
@@ -31,7 +35,7 @@ use sim_core::sim::machines::MachineRegistry;
 use sim_core::sim::types::{Money, TileCoord};
 use sim_core::sim::{
     ContractRegistry, Direction, HOPPER_CAPACITY, PlayerCommand, RecipeRegistry, SPLITTER_KIND,
-    Side, TileSnapshot, World, command_from_json,
+    Side, SplitMode, TileSnapshot, World, command_from_json,
 };
 
 /// A one-stage recipe file: four tomatoes into one paste, on the crusher.
@@ -126,8 +130,8 @@ fn in_hoppers(world: &World) -> u32 {
 /// its two outputs.
 ///
 /// Facing east, so the straight-through output is `(1, 0)` and the branch —
-/// one quarter turn clockwise, i.e. south — is `(0, -1)`. Returns
-/// `(straight_run, branch_run)`.
+/// the default `left` mode's side, one quarter turn clockwise in the sim,
+/// i.e. south — is `(0, -1)`. Returns `(straight_run, branch_run)`.
 struct Junction {
     world: World,
     straight: Vec<TileCoord>,
@@ -369,7 +373,7 @@ fn rotating_a_splitter_turns_both_outputs_together() {
     build(&mut world, "belt", (-1, 0), Direction::West);
     build(&mut world, "belt", (0, 1), Direction::North);
 
-    let outputs_now = |world: &World| -> (Direction, [Option<TileCoord>; 2]) {
+    let outputs_now = |world: &World| -> (Direction, [Option<TileCoord>; 3]) {
         let Some(TileSnapshot::Splitter {
             direction, outputs, ..
         }) = world.query_tile((0, 0))
@@ -380,10 +384,10 @@ fn rotating_a_splitter_turns_both_outputs_together() {
     };
 
     let expected = [
-        (Direction::East, [Some((1, 0)), Some((0, -1))]),
-        (Direction::South, [Some((0, -1)), Some((-1, 0))]),
-        (Direction::West, [Some((-1, 0)), Some((0, 1))]),
-        (Direction::North, [Some((0, 1)), Some((1, 0))]),
+        (Direction::East, [Some((1, 0)), Some((0, -1)), None]),
+        (Direction::South, [Some((0, -1)), Some((-1, 0)), None]),
+        (Direction::West, [Some((-1, 0)), Some((0, 1)), None]),
+        (Direction::North, [Some((0, 1)), Some((1, 0)), None]),
     ];
     for (facing, tiles) in expected {
         assert_eq!(
@@ -546,9 +550,11 @@ fn the_splitter_wire_form_has_the_documented_shape() {
             "footprint",
             "items",
             "kind",
+            "mode",
             "moved_ticks",
             "next_output",
             "outputs",
+            "sides",
             "tile",
         ],
         "SplitterSnapshot's documented fields"
@@ -558,8 +564,14 @@ fn the_splitter_wire_form_has_the_documented_shape() {
     assert_eq!(entry["tile"], serde_json::json!([0, 0]));
     assert_eq!(
         entry["outputs"],
-        serde_json::json!([[1, 0], [0, -1]]),
-        "straight-through first, then the branch one turn clockwise"
+        serde_json::json!([[1, 0], [0, -1], null]),
+        "straight, left, right — and a fresh splitter deals only to the first two"
+    );
+    assert_eq!(entry["mode"], "left", "a fresh splitter splits left");
+    assert_eq!(
+        entry["sides"],
+        serde_json::json!(["straight", "left"]),
+        "the sides reported are the mode's own, in dealing order"
     );
     assert_eq!(
         entry["next_output"], "straight",
@@ -578,12 +590,15 @@ fn the_splitter_wire_form_has_the_documented_shape() {
     assert_eq!(placement.direction, Direction::East);
     assert_eq!(placement.occupies, vec![(0, 0)]);
     assert!(placement.recipe.is_none());
+    assert_eq!(placement.split_mode, Some(SplitMode::Left));
 
     let tile = serde_json::to_value(j.world.query_tile((0, 0)).expect("occupied"))
         .expect("a tile snapshot serializes");
     assert_eq!(tile["kind"], "splitter");
     assert_eq!(tile["next_output"], "straight");
-    assert_eq!(tile["outputs"], serde_json::json!([[1, 0], [0, -1]]));
+    assert_eq!(tile["outputs"], serde_json::json!([[1, 0], [0, -1], null]));
+    assert_eq!(tile["mode"], "left");
+    assert_eq!(tile["sides"], serde_json::json!(["straight", "left"]));
 }
 
 /// A splitter is placed by the same JSON command every other kind is — no
@@ -652,4 +667,198 @@ fn splitters_compose_into_a_four_way_split() {
     // The first splitter halves (6 down each side); the second halves its
     // half (3 and 3).
     assert_eq!((na, nb, nc), (3, 3, 6));
+}
+
+/// A splitter at the origin facing east with a three-tile run off every one
+/// of its three sides — straight `(1, 0)` east, left `(0, -1)` south, right
+/// `(0, 1)` north — fed by a hopper from the west, in `mode`.
+struct Cross {
+    world: World,
+    straight: Vec<TileCoord>,
+    left: Vec<TileCoord>,
+    right: Vec<TileCoord>,
+}
+
+impl Cross {
+    fn build(mode: &str, tomatoes: u32) -> Self {
+        let mut world = funded();
+        build(&mut world, "hopper", (-1, 0), Direction::East);
+        build(&mut world, SPLITTER_KIND, (0, 0), Direction::East);
+        let straight = build_belt_run(&mut world, (1, 0), Direction::East, 3);
+        let left = build_belt_run(&mut world, (0, -1), Direction::South, 3);
+        let right = build_belt_run(&mut world, (0, 1), Direction::North, 3);
+        let command =
+            format!(r#"{{"type": "set_splitter_mode", "tile": [0, 0], "mode": "{mode}"}}"#);
+        world.issue_command(command_from_json(&command).expect("the command parses"));
+        common::buy(&mut world, "tomato", tomatoes.max(HOPPER_CAPACITY));
+        world.issue_command(PlayerCommand::FillHopper {
+            amount: tomatoes,
+            tile: None,
+        });
+        Self {
+            world,
+            straight,
+            left,
+            right,
+        }
+    }
+
+    fn counts(&self) -> (usize, usize, usize) {
+        (
+            items_on(&self.world, &self.straight),
+            items_on(&self.world, &self.left),
+            items_on(&self.world, &self.right),
+        )
+    }
+}
+
+/// The headline claim of the modes: each one deals its input evenly across
+/// exactly the sides it names, and nothing at all down a side it does not —
+/// even though every side has a belt ready to take it.
+#[test]
+fn each_mode_deals_evenly_across_exactly_its_own_sides() {
+    for (mode, expected) in [
+        ("left", (6, 6, 0)),
+        ("right", (6, 0, 6)),
+        ("t_junction", (0, 6, 6)),
+        ("three_way", (4, 4, 4)),
+    ] {
+        let mut cross = Cross::build(mode, 12);
+        for _ in 0..3000 {
+            cross.world.tick();
+        }
+        assert_eq!(
+            cross.counts(),
+            expected,
+            "mode {mode}: (straight, left, right)"
+        );
+    }
+}
+
+/// `set_splitter_mode` is a real player command: it changes the mode the
+/// wire reports and the outputs it lists, and it is a silent no-op on a
+/// tile that is not a splitter.
+#[test]
+fn set_splitter_mode_changes_the_reported_mode_and_outputs() {
+    let mut cross = Cross::build("t_junction", 0);
+    let Some(TileSnapshot::Splitter {
+        mode,
+        outputs,
+        sides,
+        next_output,
+        links,
+        ..
+    }) = cross.world.query_tile((0, 0))
+    else {
+        panic!("(0, 0) is the splitter");
+    };
+    assert_eq!(mode, SplitMode::TJunction);
+    assert_eq!(outputs, [None, Some((0, -1)), Some((0, 1))]);
+    assert_eq!(sides, vec![Side::Left, Side::Right]);
+    assert_eq!(
+        next_output,
+        Side::Left,
+        "a T never leaves straight due — it does not deal straight on"
+    );
+    assert!(
+        links.output.is_none(),
+        "the wire's single `output` is the straight side, which a T does not have"
+    );
+    let placement = cross
+        .world
+        .world_layout()
+        .into_iter()
+        .find(|p| p.kind == SPLITTER_KIND)
+        .expect("the splitter is in the layout");
+    assert_eq!(placement.split_mode, Some(SplitMode::TJunction));
+
+    cross.world.issue_command(PlayerCommand::SetSplitterMode {
+        tile: (0, 0),
+        mode: SplitMode::ThreeWay,
+    });
+    let Some(TileSnapshot::Splitter { mode, outputs, .. }) = cross.world.query_tile((0, 0)) else {
+        panic!("(0, 0) is the splitter");
+    };
+    assert_eq!(mode, SplitMode::ThreeWay);
+    assert_eq!(outputs, [Some((1, 0)), Some((0, -1)), Some((0, 1))]);
+
+    // A belt is not a splitter, and an empty tile is nothing: both are
+    // silent no-ops that change nothing and panic nowhere.
+    let before = cross.world.to_save_ron();
+    cross.world.issue_command(PlayerCommand::SetSplitterMode {
+        tile: (1, 0),
+        mode: SplitMode::Right,
+    });
+    cross.world.issue_command(PlayerCommand::SetSplitterMode {
+        tile: (40, 40),
+        mode: SplitMode::Right,
+    });
+    assert_eq!(cross.world.to_save_ron(), before);
+}
+
+/// Switching mode mid-flow moves nothing that is already on the splitter
+/// and loses nothing: mass is conserved across the switch.
+#[test]
+fn switching_mode_under_load_conserves_every_unit() {
+    let mut cross = Cross::build("left", 12);
+    for _ in 0..200 {
+        cross.world.tick();
+    }
+    cross.world.issue_command(PlayerCommand::SetSplitterMode {
+        tile: (0, 0),
+        mode: SplitMode::Right,
+    });
+    for _ in 0..3000 {
+        cross.world.tick();
+    }
+    let (straight, left, right) = cross.counts();
+    assert_eq!(straight + left + right, 12, "{straight} / {left} / {right}");
+    assert!(left > 0 && right > 0, "both modes dealt to their side");
+}
+
+/// A splitter's mode and its cursor survive a save: a three-way splitter
+/// part-way round its rotation comes back three-way and due on the same
+/// side, and carries on dealing exactly as the unsaved one does.
+#[test]
+fn a_splitters_mode_survives_a_save() {
+    let mut cross = Cross::build("three_way", 12);
+    for _ in 0..400 {
+        cross.world.tick();
+    }
+    let text = cross.world.to_save_ron();
+    assert!(text.contains("mode: three_way"), "the mode is in the file");
+    let mut loaded = World::from_save_ron(&text, one_stage()).expect("the save loads");
+    let (
+        Some(TileSnapshot::Splitter {
+            mode,
+            next_output,
+            outputs,
+            ..
+        }),
+        Some(original),
+    ) = (loaded.query_tile((0, 0)), cross.world.query_tile((0, 0)))
+    else {
+        panic!("(0, 0) is the splitter in both worlds");
+    };
+    let TileSnapshot::Splitter {
+        next_output: original_next,
+        ..
+    } = original
+    else {
+        unreachable!()
+    };
+    assert_eq!(mode, SplitMode::ThreeWay);
+    assert_eq!(next_output, original_next);
+    assert_eq!(outputs, [Some((1, 0)), Some((0, -1)), Some((0, 1))]);
+    for _ in 0..3000 {
+        cross.world.tick();
+        loaded.tick();
+    }
+    let after_load = (
+        items_on(&loaded, &cross.straight),
+        items_on(&loaded, &cross.left),
+        items_on(&loaded, &cross.right),
+    );
+    assert_eq!(after_load, cross.counts());
+    assert_eq!(after_load, (4, 4, 4));
 }

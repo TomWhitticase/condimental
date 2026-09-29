@@ -108,6 +108,18 @@ pub const ASSETS: &[Asset] = &[
         build: machine_splitter,
     },
     Asset {
+        name: "machine_splitter_right",
+        build: machine_splitter_right,
+    },
+    Asset {
+        name: "machine_splitter_t_junction",
+        build: machine_splitter_t_junction,
+    },
+    Asset {
+        name: "machine_splitter_three_way",
+        build: machine_splitter_three_way,
+    },
+    Asset {
         name: "splitter_arrow",
         build: splitter_arrow,
     },
@@ -1206,14 +1218,17 @@ pub fn cleat_covers(cell: &SurfaceCell, phase: u32) -> bool {
 // says so.
 //
 // **THE GEOMETRY, in this file's coordinates.** Every asset here is authored
-// facing EAST, and east is vox +X. The splitter's second output is one
-// quarter turn CLOCKWISE from its facing (`splitter.rs` owns that rule), so
-// for an east-facing splitter the branch runs SOUTH — and south is world -Z,
-// which this file's junction header establishes is vox **+Y**. So the model
-// is a T laid out as: intake from -X, straight exit at +X, branch exit at
-// +Y, and a closed rail along -Y. That closed rail is the near, camera-facing
-// edge (vox low-Y is world +Z), which is the right side to close: it is a
-// belt-height frame, so it frames the deck without standing in front of it.
+// facing EAST, and east is vox +X. A splitter's left output is one quarter
+// turn CLOCKWISE from its facing in sim terms (`splitter.rs` owns that
+// rule), so for an east-facing splitter the left runs SOUTH — world -Z,
+// which this file's junction header establishes is vox **+Y** — and the
+// right runs NORTH, vox -Y. The default `left` body is a T laid out as:
+// intake from -X, straight exit at +X, left exit at +Y, and a closed rail
+// along -Y. That closed rail is the near, camera-facing edge (vox low-Y is
+// world +Z), which frames the deck at belt height without standing in front
+// of it. The other three modes' bodies (`SplitterExits`) open and close the
+// same three sides by the same rules: a closed side gets the rail, an open
+// one a groove.
 //
 // **WHY THE READOUT IS INLAID IN THE DECK.** `SplitterSnapshot::next_output`
 // is the one piece of a splitter's state a player cannot infer from the tiles
@@ -1297,68 +1312,168 @@ fn splitter_arrow_cells(turns: u32) -> Vec<(i32, i32)> {
     cells
 }
 
-/// A conveyor splitter: one belt in, two belts out.
+/// A conveyor splitter in `left` mode, the default: straight on and left.
 ///
 /// See this section's header for the layout and for why the next-output
 /// readout is inlaid in the deck rather than standing on it.
 pub fn machine_splitter(p: &Palette) -> VoxModel {
+    splitter_body(p, SplitterExits::LEFT)
+}
+
+/// A splitter in `right` mode: straight on and right.
+pub fn machine_splitter_right(p: &Palette) -> VoxModel {
+    splitter_body(p, SplitterExits::RIGHT)
+}
+
+/// A splitter in `t_junction` mode: left and right, nothing straight on.
+pub fn machine_splitter_t_junction(p: &Palette) -> VoxModel {
+    splitter_body(p, SplitterExits::T_JUNCTION)
+}
+
+/// A splitter in `three_way` mode: straight on, left and right.
+pub fn machine_splitter_three_way(p: &Palette) -> VoxModel {
+    splitter_body(p, SplitterExits::THREE_WAY)
+}
+
+/// Which of a splitter's three exits a body is built open — one per
+/// `sim_core::sim::SplitMode`, whose `sides()` this mirrors. Left is vox +Y
+/// and right is vox -Y (this section's header has why).
+#[derive(Clone, Copy)]
+struct SplitterExits {
+    straight: bool,
+    left: bool,
+    right: bool,
+}
+
+impl SplitterExits {
+    const LEFT: Self = Self {
+        straight: true,
+        left: true,
+        right: false,
+    };
+    const RIGHT: Self = Self {
+        straight: true,
+        left: false,
+        right: true,
+    };
+    const T_JUNCTION: Self = Self {
+        straight: false,
+        left: true,
+        right: true,
+    };
+    const THREE_WAY: Self = Self {
+        straight: true,
+        left: true,
+        right: true,
+    };
+
+    /// The quarter turns of [`splitter_arrow_cells`] that point at each open
+    /// exit: 0 straight, 1 left (+Y), 3 right (-Y).
+    fn arrow_turns(self) -> Vec<u32> {
+        [(self.straight, 0), (self.left, 1), (self.right, 3)]
+            .into_iter()
+            .filter_map(|(open, turns)| open.then_some(turns))
+            .collect()
+    }
+}
+
+/// One splitter body with `exits` open and every other side railed shut.
+fn splitter_body(p: &Palette, exits: SplitterExits) -> VoxModel {
     let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, 16]);
     let last = TILE_VOXELS as i32 - 1;
     let (l0, l1) = BELT_LANE;
     let (t0, t1) = SPLITTER_TABLE;
     let deck = (BELT_SURFACE_Z - 1, BELT_SURFACE_Z);
+    // With no straight exit the tile ends at a rail hard against the table,
+    // and the side frames stop there with it.
+    let end_x = if exits.straight { last } else { t1 + 3 };
 
-    // Legs: the belt's own four, plus two more carrying the branch stub, so
+    // Legs: the belt's own four, plus two more under each branch stub, so
     // the tile stands on something wherever it has deck.
     for (x0, x1) in [(2, 4), (27, 29)] {
         for (y0, y1) in [(5, 7), (24, 26)] {
             m.cuboid((x0, x1), (y0, y1), (0, 4), p.idx("steel_dark"));
         }
     }
-    for (x0, x1) in [(4, 6), (25, 27)] {
-        m.cuboid((x0, x1), (28, 30), (0, 4), p.idx("steel_dark"));
+    for (open, (y0, y1)) in [(exits.left, (28, 30)), (exits.right, (1, 3))] {
+        if open {
+            for (x0, x1) in [(4, 6), (25, 27)] {
+                m.cuboid((x0, x1), (y0, y1), (0, 4), p.idx("steel_dark"));
+            }
+        }
     }
 
     // Side frames at exactly the belt's own height, so a splitter dropped
-    // into a run reads as part of the line. The -Y rail is unbroken (that
-    // side has no output); the +Y one is only the two stubs either side of
-    // the branch mouth, and the branch's own rails carry on from them.
-    m.cuboid((0, last), (4, 6), (4, 8), p.idx("steel_dark"));
-    for (x0, x1) in [(0, l0 - 1), (l1 + 1, last)] {
-        m.cuboid((x0, x1), (25, 27), (4, 8), p.idx("steel_dark"));
+    // into a run reads as part of the line. A closed side is one unbroken
+    // rail; an open one is only the two stubs either side of the branch
+    // mouth, and the branch's own rails carry on from them.
+    for (open, (y0, y1), (b0, b1)) in [
+        (exits.right, (4, 6), (0, 6)),
+        (exits.left, (25, 27), (25, last)),
+    ] {
+        if open {
+            for (x0, x1) in [(0, l0 - 1), (l1 + 1, end_x)] {
+                m.cuboid((x0, x1), (y0, y1), (4, 8), p.idx("steel_dark"));
+            }
+            for (x0, x1) in [(4, 6), (25, 27)] {
+                m.cuboid((x0, x1), (b0, b1), (4, 8), p.idx("steel_dark"));
+            }
+        } else {
+            m.cuboid((0, end_x), (y0, y1), (4, 8), p.idx("steel_dark"));
+        }
     }
-    for (x0, x1) in [(4, 6), (25, 27)] {
-        m.cuboid((x0, x1), (25, last), (4, 8), p.idx("steel_dark"));
+    if !exits.straight {
+        m.cuboid((t1 + 1, end_x), (4, 27), (4, 8), p.idx("steel_dark"));
     }
 
-    // Hazard striping on the outer face of the rails the camera can see
-    // (UI_UX.md §3), matching `belt_body`'s.
-    m.hazard_stripe_x(
-        (0, last),
-        (4, 4),
-        (5, 6),
-        3,
-        p.idx("hazard_yellow"),
-        p.idx("hazard_black"),
-    );
-
-    // Rollers: one pair under the through lane, one under the branch stub.
-    for x in [3, 28] {
-        m.cylinder_y((x, 7), 2.5, (l0, l1), p.idx("brass"));
+    // Hazard striping on the outer face of the near rail the camera can see
+    // (UI_UX.md §3), matching `belt_body`'s — broken where the right branch
+    // leaves through it.
+    let near_spans = if exits.right {
+        vec![(0, l0 - 1), (l1 + 1, end_x)]
+    } else {
+        vec![(0, end_x)]
+    };
+    for x in near_spans {
+        m.hazard_stripe_x(
+            x,
+            (4, 4),
+            (5, 6),
+            3,
+            p.idx("hazard_yellow"),
+            p.idx("hazard_black"),
+        );
     }
-    m.cylinder_x((28, 7), 2.5, (l0, l1), p.idx("brass"));
+
+    // Rollers: one under the intake, and one under each open exit.
+    m.cylinder_y((3, 7), 2.5, (l0, l1), p.idx("brass"));
+    if exits.straight {
+        m.cylinder_y((28, 7), 2.5, (l0, l1), p.idx("brass"));
+    }
+    if exits.left {
+        m.cylinder_x((28, 7), 2.5, (l0, l1), p.idx("brass"));
+    }
+    if exits.right {
+        m.cylinder_x((3, 7), 2.5, (l0, l1), p.idx("brass"));
+    }
 
     // Running surfaces. Plain rubber where product travels in a straight
-    // line — the intake, the straight exit and the branch stub — at the
-    // belt's own height and lane, so the three stubs line up with whatever
-    // belt tile they are laid against. Deliberately NO arrow cleat here:
-    // the belt family's arrow says "this way", and on a splitter that is
-    // the lit arrow's job — a static yellow mark beside an amber one would
-    // be a second direction readout on the one tile that has a live one.
-    for (x0, x1) in [(0, t0 - 1), (t1 + 1, last)] {
-        m.cuboid((x0, x1), (l0, l1), deck, p.idx("rubber"));
+    // line — the intake and each exit stub — at the belt's own height and
+    // lane, so every stub lines up with whatever belt tile is laid against
+    // it. Deliberately NO arrow cleat here: the belt family's arrow says
+    // "this way", and on a splitter that is the lit arrow's job — a static
+    // yellow mark beside an amber one would be a second direction readout on
+    // the one tile that has a live one.
+    m.cuboid((0, t0 - 1), (l0, l1), deck, p.idx("rubber"));
+    if exits.straight {
+        m.cuboid((t1 + 1, last), (l0, l1), deck, p.idx("rubber"));
     }
-    m.cuboid((l0, l1), (t1 + 1, last), deck, p.idx("rubber"));
+    if exits.left {
+        m.cuboid((l0, l1), (t1 + 1, last), deck, p.idx("rubber"));
+    }
+    if exits.right {
+        m.cuboid((l0, l1), (0, t0 - 1), deck, p.idx("rubber"));
+    }
 
     // The diverter table itself: stainless, because it is the one part of a
     // splitter that is a mechanism rather than a surface, and it is what
@@ -1367,7 +1482,7 @@ pub fn machine_splitter(p: &Palette) -> VoxModel {
     // `steel` and NOT `steel_light`, which is what it was first built with:
     // rendered in the scene the palette's brightest metal is a blown-out
     // white square filling most of the tile, and everything cut into it
-    // (both arrows, the seam) washes out against it. Mid steel keeps the
+    // (the arrows, the seam) washes out against it. Mid steel keeps the
     // "this is machined, that is rubber" contrast and gives the grooves
     // something to be dark against.
     m.cuboid((t0, t1), (t0, t1), deck, p.idx("steel"));
@@ -1388,16 +1503,23 @@ pub fn machine_splitter(p: &Palette) -> VoxModel {
         m.set(x, y, deck.1, p.idx("steel_dark"));
     }
 
-    // Brass threshold at each of the two exit lips — the same accent every
-    // other "product passes through here" fitting in this factory carries,
-    // and here it is what marks the tile as having TWO ways out.
-    m.cuboid((last, last), (l0, l1), (deck.1, deck.1), p.idx("brass"));
-    m.cuboid((l0, l1), (last, last), (deck.1, deck.1), p.idx("brass"));
+    // Brass threshold at each exit lip — the same accent every other
+    // "product passes through here" fitting in this factory carries, and
+    // here it is what counts the tile's ways out.
+    if exits.straight {
+        m.cuboid((last, last), (l0, l1), (deck.1, deck.1), p.idx("brass"));
+    }
+    if exits.left {
+        m.cuboid((l0, l1), (last, last), (deck.1, deck.1), p.idx("brass"));
+    }
+    if exits.right {
+        m.cuboid((l0, l1), (0, 0), (deck.1, deck.1), p.idx("brass"));
+    }
 
-    // The two arrow grooves, one at each exit lip. Cut, not painted: a
-    // painted arrow is a decal the deck's own shading flattens, where a
-    // recess keeps an edge at every angle and gives `splitter_arrow`
-    // somewhere to sit flush instead of standing in the product's way.
+    // One arrow groove at each open exit's lip. Cut, not painted: a painted
+    // arrow is a decal the deck's own shading flattens, where a recess keeps
+    // an edge at every angle and gives `splitter_arrow` somewhere to sit
+    // flush instead of standing in the product's way.
     //
     // Their floor is `steel_dark`, and that is the one colour in the palette
     // that works here: an arrow spans the machined table AND the rubber lane
@@ -1409,24 +1531,31 @@ pub fn machine_splitter(p: &Palette) -> VoxModel {
     // and the lit amber are the same colour at scene scale, so the readout
     // had two arrows and no way to tell which one was on.
     //
-    // Both grooves are cut whether or not either is lit, which is the whole
-    // of UI_UX.md §7's never-colour-alone rule here: what the player reads is
-    // WHICH OF TWO POSITIONS is glowing, and both positions are visible
-    // shapes on the deck even with nothing lit at all.
-    for turns in [0, 1] {
+    // Every open exit's groove is cut whether or not it is lit, which is the
+    // whole of UI_UX.md §7's never-colour-alone rule here: what the player
+    // reads is WHICH OF THE POSITIONS is glowing, and every position is a
+    // visible shape on the deck even with nothing lit at all.
+    for turns in exits.arrow_turns() {
         for (x, y) in splitter_arrow_cells(turns) {
             m.erase(x, y, SPLITTER_ARROW_Z);
             m.set(x, y, SPLITTER_ARROW_Z - 1, p.idx("steel_dark"));
         }
     }
 
-    // Drive cabinet on the near (-Y) edge, ahead of the rail and clear of
-    // every lane: the one piece of the tile that says a splitter is powered
-    // kit rather than a bend in a conveyor. Kept below the deck's own height
-    // so it cannot stand in front of the table it belongs to.
-    m.cuboid((21, 28), (0, 3), (0, 7), p.idx("paint_blue"));
-    m.cuboid((21, 28), (0, 3), (8, 8), p.idx("steel_light"));
-    m.cuboid((23, 26), (0, 0), (3, 5), p.idx("status_green"));
+    // Drive cabinet, clear of every lane: the one piece of the tile that
+    // says a splitter is powered kit rather than a bend in a conveyor. Kept
+    // below the deck's own height so it cannot stand in front of the table
+    // it belongs to. It sits along the near (-Y) edge ahead of the rail when
+    // that edge is closed; when the right branch leaves through it, the
+    // cabinet shrinks into the near +X corner beside the branch's rails.
+    let (cx, cy, lamp) = if exits.right {
+        ((28, last), (0, 3), (29, 30))
+    } else {
+        ((21, 28), (0, 3), (23, 26))
+    };
+    m.cuboid(cx, cy, (0, 7), p.idx("paint_blue"));
+    m.cuboid(cx, cy, (8, 8), p.idx("steel_light"));
+    m.cuboid(lamp, (0, 0), (3, 5), p.idx("status_green"));
     m
 }
 
@@ -6086,6 +6215,84 @@ mod tests {
             lit, straight,
             "the lit arrow does not match the groove cut for it"
         );
+    }
+
+    /// Each split mode's body is open on exactly the exits the simulation
+    /// deals to (`SplitMode::sides`) and railed shut on the rest, and cuts
+    /// an arrow groove at every open exit and none at a closed one — the
+    /// body is the half of the mode readout that does not move.
+    #[test]
+    fn each_splitter_body_opens_exactly_its_modes_exits() {
+        let p = palette();
+        let last = TILE_VOXELS as i32 - 1;
+        let mid = (BELT_LANE.0 + BELT_LANE.1) / 2;
+        let deck = BELT_SURFACE_Z;
+        for (name, m, exits) in [
+            ("left", machine_splitter(&p), SplitterExits::LEFT),
+            ("right", machine_splitter_right(&p), SplitterExits::RIGHT),
+            (
+                "t_junction",
+                machine_splitter_t_junction(&p),
+                SplitterExits::T_JUNCTION,
+            ),
+            (
+                "three_way",
+                machine_splitter_three_way(&p),
+                SplitterExits::THREE_WAY,
+            ),
+        ] {
+            assert!(m.filled(0, mid, deck), "{name}: no intake lane");
+            // (edge cell of the exit lane, a cell of the closing rail)
+            for (open, lip, rail, side) in [
+                (exits.straight, (last, mid), (26, mid), "straight"),
+                (exits.left, (mid, last), (mid, 26), "left"),
+                (exits.right, (mid, 0), (mid, 5), "right"),
+            ] {
+                let lane_to_edge = m.filled(lip.0, lip.1, deck);
+                assert_eq!(
+                    lane_to_edge, open,
+                    "{name}: the {side} exit's lane reaching the edge should be {open}"
+                );
+                if open {
+                    assert!(
+                        !m.filled(lip.0, lip.1, deck + 1),
+                        "{name}: something blocks the {side} exit"
+                    );
+                } else {
+                    assert!(
+                        m.filled(rail.0, rail.1, 6),
+                        "{name}: the closed {side} side has no rail"
+                    );
+                    assert!(
+                        !m.filled(rail.0, rail.1, deck + 1),
+                        "{name}: the {side} rail stands above the deck"
+                    );
+                }
+            }
+            for (turns, open) in [(0, exits.straight), (1, exits.left), (3, exits.right)] {
+                // Only the cells over the table: past its edge a closed
+                // side has no deck at groove height to cut or not.
+                let (t0, t1) = SPLITTER_TABLE;
+                for (x, y) in splitter_arrow_cells(turns)
+                    .into_iter()
+                    .filter(|&(x, y)| (t0..=t1).contains(&x) && (t0..=t1).contains(&y))
+                {
+                    assert_eq!(
+                        !m.filled(x, y, SPLITTER_ARROW_Z),
+                        open,
+                        "{name}: groove at {x},{y} (turns {turns}) cut should be {open}"
+                    );
+                }
+            }
+        }
+        // The right arrow is the left one turned half way round, and the
+        // three grooves are pairwise disjoint.
+        let cells = |t| -> std::collections::BTreeSet<(i32, i32)> {
+            splitter_arrow_cells(t).into_iter().collect()
+        };
+        assert!(cells(0).is_disjoint(&cells(1)));
+        assert!(cells(0).is_disjoint(&cells(3)));
+        assert!(cells(1).is_disjoint(&cells(3)));
     }
 
     #[test]

@@ -55,7 +55,8 @@
 # `--fixture <name>` picks a different one: `machines` (hopper, machine and
 # dock, i.e. one of each sort of building), `fluids` (a tank, a pipe run and
 # the machine that taps it), `vat` (the 2x2 cooking vat, alone), `splitter` (a
-# line that forks) or `chain` (THE WHOLE SHIPPED LINE, bought and placed out
+# line that forks), `splitter_modes` (one splitter in each of the four
+# modes) or `chain` (THE WHOLE SHIPPED LINE, bought and placed out
 # of a new game's own balance — test_layouts.gd's `build_reference_line`).
 #
 # `--contracts` builds that full line and then runs it until the contract
@@ -324,7 +325,7 @@ const FIXTURE_NAMES: PackedStringArray = [
 	"demo", "machines", "fluids", "vat", "splitter", "chain", "stress",
 	"pipes", "gallery", "items", "fluid_gallery", "bottleneck", "bbq",
 	"stalled_run", "understaffed", "shortfall", "payday_warning", "full_dock",
-	"unclerked_dock", "warehouse", "split_docks", "mustard",
+	"unclerked_dock", "warehouse", "split_docks", "mustard", "splitter_modes",
 ]
 
 ## The fixtures whose whole claim is a factory that is WORKING, and which are
@@ -997,7 +998,7 @@ const UNLOCK_NOTICE_GLYPH := "★"
 ## A fixture buys, places, hires, signs and runs tens of thousands of ticks
 ## inside frame 1, so main.gd's contract notices fire for things that — in the
 ## world this shot claims to photograph — happened long before the shutter.
-## `--bbq` signs two orders as it builds, and its frames came back with
+## `--bbq` signed two orders as it built, and its frames came back with
 ## `✔ SIGNED: smokehouse_trial` hanging over a factory that had been running
 ## for 27,000 ticks.
 ##
@@ -1062,6 +1063,8 @@ func _build_fixture() -> void:
 			Layouts.build_multi_tile(_main.sim)
 		"splitter":
 			Layouts.build_splitter_line(_main.sim)
+		"splitter_modes":
+			Layouts.build_splitter_modes(_main.sim)
 		"chain":
 			Layouts.build_reference_line(_main.sim)
 		"stress":
