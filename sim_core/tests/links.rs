@@ -425,7 +425,7 @@ fn a_splitter_reports_its_straight_output_and_feeds_both_sides() {
     // The existing field is untouched.
     match world.query_tile((1, 0)) {
         Some(TileSnapshot::Splitter { outputs, links, .. }) => {
-            assert_eq!(outputs, [Some((2, 0)), Some((1, -1))]);
+            assert_eq!(outputs, [Some((2, 0)), Some((1, -1)), None]);
             assert_eq!(links, conveyor(&world, (1, 0)));
         }
         other => panic!("expected a splitter at (1, 0), got {other:?}"),
@@ -986,7 +986,7 @@ fn query_tile_json_carries_links_on_belts_splitters_and_pipes() {
     let splitter = serde_json::to_string(&world.query_tile((1, 0)).unwrap()).unwrap();
     assert_eq!(
         splitter,
-        r#"{"kind":"splitter","direction":"east","items_here":[],"outputs":[[2,0],null],"next_output":"straight","links":{"inputs":[{"from":"west","kind":"belt"}],"output":{"to":"east","kind":"belt"}}}"#
+        r#"{"kind":"splitter","direction":"east","items_here":[],"outputs":[[2,0],null,null],"sides":["straight","left"],"mode":"left","next_output":"straight","links":{"inputs":[{"from":"west","kind":"belt"}],"output":{"to":"east","kind":"belt"}}}"#
     );
     let pipe = serde_json::to_string(&world.query_tile((0, 1)).unwrap()).unwrap();
     assert_eq!(

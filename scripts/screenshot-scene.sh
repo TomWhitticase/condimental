@@ -37,7 +37,7 @@
 # with the list of names and a non-zero status; it used to build the demo
 # line and look plausible.
 #
-# Pass --fixture <machines|fluids|vat|splitter|chain|stress|pipes|gallery|demo> for a different one:
+# Pass --fixture <machines|fluids|vat|splitter|splitter_modes|chain|stress|pipes|gallery|demo> for a different one:
 # `machines` (a hopper, a machine and a dock), `fluids` (a tank, a pipe run
 # and the machine tapping it), `vat` (the 2x2 cooking vat alone), `splitter`
 # (a line that FORKS — one splitter with both outputs built and a second with

@@ -18,6 +18,22 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-29 **A splitter has a mode: left, right, T junction or three way.**
+  Click a splitter and its configuration panel's SPLITS picker sets
+  `SetSplitterMode { tile, mode }` (`set_splitter_mode`). A splitter has three
+  possible sides — straight (the facing), left (`rotate_cw` of it, which the
+  mirrored renderer draws on the player's left) and right (the opposite
+  quarter turn) — and `SplitMode::sides()` is the one table of which a mode
+  deals to: `left` = straight + left (the default, and every splitter before
+  this), `right` = straight + right, `t_junction` = left + right,
+  `three_way` = all three. Round robin over the mode's sides with same-tick
+  fallback, as before. The sides stay derived from the facing; only the mode
+  is stored, so one `Rotate` still turns every output. The mode is saved
+  (`SavedSplitter::mode`, schema v7, `scripts/migrate-save-v6-to-v7.py`); a
+  mode switch recomputes topology and Godot rebuilds the world, since the
+  body model (one per mode, `machine_splitter*`) and the neighbours' links
+  change. Supersedes the 2026-09-08 rule that the branch is always the
+  clockwise side. Full record in `docs/DECISIONS.md`.
 - 2026-09-28 **A warehouse rack may be reserved for one raw ingredient.**
   Click a rack and its configuration panel's RESERVED FOR picker sets
   `SetRackFilter { tile, item }` (`set_rack_filter`, `item` null for "Any").
@@ -1503,7 +1519,9 @@ See [WORKFLOW.md](WORKFLOW.md).
   shows where an item will *actually* go, never the raw field alone.
 - 2026-09-08 **Splitter, ticket 1 (sim).** A splitter's branch output is
   always one quarter turn clockwise from its straight output, derived
-  rather than stored, so one `Rotate` turns both. Round-robin with
+  rather than stored, so one `Rotate` turns both. (The "always clockwise"
+  half is superseded by the 2026-09-29 split modes; derived-not-stored
+  stands.) Round-robin with
   same-tick fallback to the open side so a blocked branch never stalls
   the line.
 - 2026-09-08 **Chain rework, ticket 1 (sim).** The middle of the chain is

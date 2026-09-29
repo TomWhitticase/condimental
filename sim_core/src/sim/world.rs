@@ -112,11 +112,11 @@
 //!   tick time to a *distinct* touching run **by fluid id**, never by
 //!   position. One run per input, first fit in tile order. A fluid output
 //!   is still exactly one, off the outlet face ([`validate_fluid_scope`]).
-//! - **One placement resolves to two downstream targets, and only one.** A
-//!   belt looks at the single tile it points at; a
-//!   [splitter](super::splitter) looks at two — the tile on its own facing
-//!   and the tile one quarter turn clockwise from it — and deals its front
-//!   item alternately between them (`splitter_outputs` below, and
+//! - **One placement resolves to several downstream targets, and only one.**
+//!   A belt looks at the single tile it points at; a
+//!   [splitter](super::splitter) looks at up to three — the tile on its own
+//!   facing and the two either side of it, as its mode says — and deals its
+//!   front item round them in turn (`splitter_outputs` below, and
 //!   `splitter.rs`'s module doc for both rules). Everything else about it is
 //!   belt-like: it holds what it carries in an ordinary [`BeltSegment`] and
 //!   accepts a hand-off from anything a belt accepts one from, so it can be
@@ -230,7 +230,7 @@ use super::machine::{LOAD_WINDOW_TICKS, LoadWindow, Machine, WorkState};
 use super::machines::{Footprint, MachineRegistry};
 use super::recipe::{Recipe, RecipeRegistry};
 use super::shop::{DEFAULT_PURCHASE_QUANTITY, Shop, ShopCatalog, ShopSnapshot};
-use super::splitter::{SPLITTER_KIND, Side, Splitter};
+use super::splitter::{SPLITTER_KIND, Side, SplitMode, Splitter};
 use super::staff::{
     CrewEntry, CrewRequest, CrewSource, EstablishmentEntry, StaffPools, StaffSnapshot, crew_entries,
 };
@@ -578,6 +578,22 @@ pub enum PlayerCommand {
         tile: TileCoord,
         item: Option<ItemId>,
     },
+    /// Sets which of its outputs a splitter deals to — left, right, both
+    /// sides as a T, or all three ([`SplitMode`], `super::splitter`'s module
+    /// doc). The splitter's one player setting, from its configuration
+    /// panel.
+    ///
+    /// A silent no-op, the `Purchase` convention, on an empty tile, a tile
+    /// that is not a splitter, and the mode it already has. **Never
+    /// refused otherwise**: every mode is valid on every splitter, and one
+    /// whose new side has nothing built on it simply holds that side
+    /// refusing, as an unbuilt branch always has. Free, like `Rotate`.
+    ///
+    /// Tile-addressed like [`Self::Rotate`], and like it re-runs the
+    /// topology pass: the mode decides which tiles the splitter hands to,
+    /// which is a link, and links are only ever rebuilt there. What the
+    /// splitter is carrying stays on it.
+    SetSplitterMode { tile: TileCoord, mode: SplitMode },
     /// Hires one head into a staff category (the staff pools MVP epic,
     /// GAMEPLAY.md §7). **Free, and never refused for a known category** —
     /// wages are the cost (§5), paid every pay period by `World::tick`, and
@@ -733,6 +749,13 @@ enum PlayerCommandDto {
         #[serde(default)]
         item: Option<ItemId>,
     },
+    /// `{"type": "set_splitter_mode", "tile": [6, 0], "mode": "three_way"}`
+    /// — `mode` required, one of `"left"`, `"right"`, `"t_junction"`,
+    /// `"three_way"`.
+    SetSplitterMode {
+        tile: TileCoord,
+        mode: SplitMode,
+    },
     Hire {
         category: String,
     },
@@ -817,6 +840,9 @@ impl From<PlayerCommandDto> for PlayerCommand {
             }
             PlayerCommandDto::SetRackFilter { tile, item } => {
                 PlayerCommand::SetRackFilter { tile, item }
+            }
+            PlayerCommandDto::SetSplitterMode { tile, mode } => {
+                PlayerCommand::SetSplitterMode { tile, mode }
             }
             PlayerCommandDto::Hire { category } => PlayerCommand::Hire { category },
             PlayerCommandDto::Fire { category } => PlayerCommand::Fire { category },
@@ -914,24 +940,30 @@ pub struct BeltSnapshot {
 /// { "tile": [6, 0], "kind": "splitter", "direction": "east",
 ///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
 ///   "items": [["tomato", 0.44]], "moved_ticks": 418,
-///   "outputs": [[7, 0], [6, -1]],
-///   "next_output": "straight" }
+///   "outputs": [[7, 0], [6, -1], null], "sides": ["straight", "left"],
+///   "mode": "left", "next_output": "straight" }
 /// ```
 ///
 /// A splitter is drawn like a belt tile that has something on its end, and
-/// this snapshot is [`BeltSnapshot`] plus the three facts only a splitter
-/// has:
+/// this snapshot is [`BeltSnapshot`] plus the facts only a splitter has:
 ///
-/// - **`outputs` is always a two-element array, straight-through first**:
-///   the tile on the placement's own `direction`, then the tile one quarter
-///   turn clockwise from it (see [`super::splitter`], which owns that rule —
-///   presentation should read these tiles rather than re-derive them). An
-///   entry is `null` when nothing that can accept an item stands there,
-///   which is exactly the state "this branch isn't built yet".
-/// - **`next_output`** is `"straight"` or `"branch"` — which side gets first
-///   refusal on the next item. It is the one piece of a splitter's state a
-///   player cannot infer from the tiles around it, and the natural thing for
-///   an arrow or a lamp to point at.
+/// - **`outputs` is always a three-element array: straight, left, right**
+///   ([`Side::ALL`]'s order) — the tile each side hands to (see
+///   [`super::splitter`], which owns where each points — presentation should
+///   read these tiles rather than re-derive them). An entry is `null` when
+///   nothing that can accept an item stands there, which is exactly the state
+///   "this branch isn't built yet", **and** when the `mode` does not deal to
+///   that side at all — either way no item will leave by it.
+/// - **`sides`** is the sides `mode` deals to, in its dealing order
+///   ([`SplitMode::sides`]) — so a renderer can tell an output the mode never
+///   uses from one that is simply not built, without its own copy of the
+///   modes table.
+/// - **`mode`** is `"left"`, `"right"`, `"t_junction"` or `"three_way"`
+///   ([`SplitMode`]) — which sides it deals to, the player's one setting.
+/// - **`next_output`** is `"straight"`, `"left"` or `"right"` — which side
+///   gets first refusal on the next item. It is the one piece of a
+///   splitter's state a player cannot infer from the tiles around it, and
+///   the natural thing for an arrow or a lamp to point at.
 /// - `items` are positioned exactly as a belt tile's are, in `[0, 1]` from
 ///   this tile's start, because a splitter carries them in an ordinary
 ///   one-tile belt segment.
@@ -947,7 +979,9 @@ pub struct SplitterSnapshot {
     /// it still reports its own clock so the two kinds' wire shapes stay
     /// interchangeable.
     pub moved_ticks: u64,
-    pub outputs: [Option<TileCoord>; 2],
+    pub outputs: [Option<TileCoord>; 3],
+    pub sides: Vec<Side>,
+    pub mode: SplitMode,
     pub next_output: Side,
 }
 
@@ -1613,15 +1647,18 @@ pub enum TileSnapshot {
         links: ConveyorLinks,
     },
     /// `{"kind": "splitter", "direction": "east",
-    ///   "items_here": ["tomato"], "outputs": [[7, 0], [6, -1]],
-    ///   "next_output": "straight", "links": {...}}` — enough for a hover
-    /// tooltip ("Splitter — next: straight"). `outputs` and `next_output`
-    /// mean exactly what they do in [`SplitterSnapshot`]; `links` is the
-    /// placement's [`ConveyorLinks`] (`output` = the straight side).
+    ///   "items_here": ["tomato"], "outputs": [[7, 0], [6, -1], null], "sides": ["straight", "left"],
+    ///   "mode": "left", "next_output": "straight", "links": {...}}` —
+    /// enough for a hover tooltip ("Splitter — next: straight"). `outputs`,
+    /// `mode` and `next_output` mean exactly what they do in
+    /// [`SplitterSnapshot`]; `links` is the placement's [`ConveyorLinks`]
+    /// (`output` = the straight side, absent in `t_junction`).
     Splitter {
         direction: Direction,
         items_here: Vec<ItemId>,
-        outputs: [Option<TileCoord>; 2],
+        outputs: [Option<TileCoord>; 3],
+        sides: Vec<Side>,
+        mode: SplitMode,
         next_output: Side,
         links: ConveyorLinks,
     },
@@ -1847,7 +1884,8 @@ pub struct PipeConnection {
 /// geometry, not of which placement the pass happened to walk first.
 /// `output` is the one sink this tile hands to, `null` when nothing that
 /// can accept an item stands where it points. For a splitter this is the
-/// **straight** output; the branch stays in [`SplitterSnapshot::outputs`].
+/// **straight** output (absent in `t_junction`, which has none); the sides
+/// stay in [`SplitterSnapshot::outputs`].
 ///
 /// These are the same links the tick uses (`Topology::belt_to_belt`,
 /// `belt_to_sink`, `source_to_belt`, `splitter_outputs`), recorded once in
@@ -1960,9 +1998,16 @@ pub struct PlacementSnapshot {
     /// derived here rather than stored. `true` for everything that asks for
     /// nobody, and for a mothballed machine.
     ///
-    /// Before `links`, which stays last: it is the only optional key here,
-    /// and `tests/links.rs` pins that shape byte for byte.
+    /// Before the optional keys, and `tests/links.rs` pins that shape byte
+    /// for byte.
     pub crewed: bool,
+    /// A splitter's [`SplitMode`], present on every splitter and **absent**
+    /// on every other kind, `links`' rule. It is on the placement and not
+    /// only on the splitter's own snapshot because it decides which body the
+    /// tile is drawn with (each mode opens a different set of exits), and
+    /// the body is staged from this list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub split_mode: Option<SplitMode>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub links: Option<Links>,
 }
@@ -2102,13 +2147,13 @@ struct Topology {
     /// quadratic in the line's length.
     belt_ahead: Vec<Option<Entity>>,
     /// **The one one-to-many relation in this simulation**: a splitter and
-    /// the two things standing on its output tiles — straight-through
-    /// first, then the branch one quarter turn clockwise (see
-    /// [`super::splitter`]). Either entry is `None` when nothing that can
-    /// accept an item is there, which is what makes "a splitter with one
+    /// the things standing on its output tiles — straight, left, right, in
+    /// [`Side::ALL`]'s order (see [`super::splitter`]). An entry is `None`
+    /// when nothing that can accept an item is there or the splitter's mode
+    /// does not deal to that side, which is what makes "a splitter with one
     /// output feeds that one" and "a splitter with none holds everything"
     /// fall out of the ordinary offer loop rather than being special cases.
-    splitter_outputs: Vec<(Entity, [Option<Entity>; 2])>,
+    splitter_outputs: Vec<(Entity, [Option<Entity>; 3])>,
     /// A belt hands off into a machine's inlet face, or into a dock.
     belt_to_sink: Vec<(Entity, Entity)>,
     /// A machine or hopper discharges onto the belt off its outlet face.
@@ -3129,7 +3174,11 @@ impl World {
     /// without this pass a loaded world is named as though every tank were
     /// undeclared, and the very layout issue #43 exists for — two tank-fed
     /// raw runs into one machine — comes back ambiguous and stuck however
-    /// it was saved. Nothing else is disturbed: the pass carries pipe
+    /// it was saved. A splitter's **mode** arrives the same way and is an
+    /// input to its links in exactly that sense: without this pass every
+    /// loaded splitter would deal to the default mode's sides until the
+    /// next placement anywhere rebuilt them. Nothing else is disturbed: the
+    /// pass carries pipe
     /// volumes across by tile, which is what lets it run on a live world at
     /// all.
     pub(super) fn recompute_topology_after_restore(&mut self) {
@@ -3447,7 +3496,7 @@ impl World {
         //
         // What may receive a solid item handed *into* `target`. Written once
         // because two relations now ask it — a belt's single downstream tile
-        // and each of a splitter's two — and they must never diverge on what
+        // and each of a splitter's — and they must never diverge on what
         // counts as a valid sink.
         let resolve_sink = |grid: &BTreeMap<TileCoord, Entity>, target: TileCoord| {
             let &occupant = grid.get(&target)?;
@@ -3496,20 +3545,28 @@ impl World {
                 topology.belt_to_sink.push((belt, occupant));
             }
         }
-        // A splitter's two outputs: its own facing, then one quarter turn
-        // clockwise from it (`splitter.rs` owns that rule and this is its
-        // only call site). A side with nothing valid on it stays `None` and
-        // simply always refuses at tick time.
+        // A splitter's outputs: straight, left and right, each derived from
+        // its facing (`splitter.rs` owns that rule and this is its only call
+        // site). A side its mode does not deal to, or with nothing valid on
+        // it, stays `None` and simply always refuses at tick time.
         for &splitter in &topology.splitters {
             let placement = self.placement_of(splitter);
             let origin = self.position_of(splitter);
-            let outputs = Side::BOTH.map(|side| {
+            let mode = self
+                .ecs
+                .get::<&Splitter>(splitter)
+                .expect("a splitter placement carries a Splitter")
+                .mode();
+            let outputs = Side::ALL.map(|side| {
+                if !mode.deals_to(side) {
+                    return None;
+                }
                 let direction = side.direction_from(placement.direction);
                 let sink = resolve_sink(&topology.grid, direction.step(origin));
                 if let Some(occupant) = sink {
                     let occupant_body = body_of(occupant);
                     // The wire's `output` is the straight side only; the
-                    // branch is already on the wire as `outputs[1]`.
+                    // sides are already on the wire as `outputs[1..]`.
                     if side == Side::Straight {
                         conveyor_links(&mut links, splitter).output = Some(LinkOutput {
                             to: direction,
@@ -3910,7 +3967,7 @@ impl World {
     /// 5. **Producers push** onto a belt's start: a hopper meters one raw
     ///    unit, a machine hands over one finished unit, a belt hands its
     ///    front item to the belt ahead of it, and **a splitter deals its
-    ///    front item to one of its two outputs**. All after every belt has
+    ///    front item to one of its outputs**. All after every belt has
     ///    already moved this tick, so nothing crosses two tiles in one tick
     ///    — a splitter included, since an item handed *onto* it this tick
     ///    lands at the start of its segment and is not at the end yet.
@@ -4144,8 +4201,8 @@ impl World {
         }
         self.topology.belt_to_belt = belt_to_belt;
 
-        // ...and a splitter deals its front item to one of its two outputs,
-        // alternating (`splitter.rs` owns the rule). After the belt-to-belt
+        // ...and a splitter deals its front item to one of its outputs, in
+        // rotation (`splitter.rs` owns the rule). After the belt-to-belt
         // hop rather than before it only so the whole of step 5 reads in one
         // order; the two passes are independent, because an item handed onto
         // a splitter this tick lands at the start of its segment and cannot
@@ -4427,17 +4484,17 @@ impl World {
         true
     }
 
-    /// Offers `splitter`'s front item to its two outputs in the order its
-    /// cursor says (due side first, then the other — see
+    /// Offers `splitter`'s front item to its outputs in the order its
+    /// cursor says (due side first, then the rest in rotation — see
     /// [`super::splitter`]'s module doc for why the fallback exists and why
     /// the cursor advances on whichever side actually took it). Returns the
     /// entity that took it, so the caller can dirty its chunk.
     ///
     /// One item per tick at most, like every other hand-off here. Nothing at
-    /// all happens when both sides refuse: the item stays exactly where it
+    /// all happens when every side refuses: the item stays exactly where it
     /// is and the line backs up behind the splitter, which is what a
-    /// splitter with no outputs — or two full ones — has to do.
-    fn try_split(&mut self, splitter: Entity, outputs: [Option<Entity>; 2]) -> Option<Entity> {
+    /// splitter with no outputs — or only full ones — has to do.
+    fn try_split(&mut self, splitter: Entity, outputs: [Option<Entity>; 3]) -> Option<Entity> {
         {
             // Cheap early out, and the reason `record_output` below can
             // trust that a successful hand-off moved *this* item.
@@ -4447,12 +4504,11 @@ impl World {
                 .expect("a splitter placement carries a BeltSegment");
             segment.front_ready()?;
         }
-        let order = self
+        let body = *self
             .ecs
             .get::<&Splitter>(splitter)
-            .expect("a splitter placement carries a Splitter")
-            .offer_order();
-        for side in order {
+            .expect("a splitter placement carries a Splitter");
+        for side in body.offer_order() {
             let Some(target) = outputs[side.index()] else {
                 continue;
             };
@@ -4748,6 +4804,9 @@ impl World {
             PlayerCommand::SetRackFilter { tile, item } => {
                 self.try_set_rack_filter(tile, item);
             }
+            PlayerCommand::SetSplitterMode { tile, mode } => {
+                self.try_set_splitter_mode(tile, mode);
+            }
             // Neither dirties a chunk: a head is not a tile. Both are silent
             // about an unknown category, and `Fire` about an empty pool —
             // the `Purchase` convention. `Hire` no longer refuses a head the
@@ -4933,6 +4992,26 @@ impl World {
             .get::<&mut WarehouseRack>(entity)
             .expect("checked above that this is a rack")
             .filter = item;
+        self.mark_placement_dirty(entity);
+        true
+    }
+
+    /// [`PlayerCommand::SetSplitterMode`]. Silent no-op on an empty tile, a
+    /// tile that is not a splitter, and the mode it already has.
+    fn try_set_splitter_mode(&mut self, tile: TileCoord, mode: SplitMode) -> bool {
+        let Some(&entity) = self.topology.grid.get(&tile) else {
+            return false;
+        };
+        {
+            let Ok(mut splitter) = self.ecs.get::<&mut Splitter>(entity) else {
+                return false;
+            };
+            if splitter.mode() == mode {
+                return false;
+            }
+            splitter.set_mode(mode);
+        }
+        self.recompute_topology();
         self.mark_placement_dirty(entity);
         true
     }
@@ -5360,6 +5439,7 @@ impl World {
                         .get::<&Machine>(entity)
                         .ok()
                         .map(|machine| machine.recipe.clone()),
+                    split_mode: self.ecs.get::<&Splitter>(entity).ok().map(|s| s.mode()),
                     links: self.topology.links.get(&entity).cloned(),
                     occupies: placement.tiles(origin),
                     kind: placement.kind,
@@ -5555,6 +5635,10 @@ impl World {
     fn splitter_snapshot(&self, splitter: Entity) -> SplitterSnapshot {
         let placement = self.placement_of(splitter);
         let segment = self.ecs.get::<&BeltSegment>(splitter).unwrap();
+        let body = *self
+            .ecs
+            .get::<&Splitter>(splitter)
+            .expect("a splitter placement carries a Splitter");
         SplitterSnapshot {
             tile: self.position_of(splitter),
             kind: placement.kind,
@@ -5567,11 +5651,9 @@ impl World {
                 .collect(),
             moved_ticks: segment.moved_ticks(),
             outputs: self.splitter_output_tiles(splitter),
-            next_output: self
-                .ecs
-                .get::<&Splitter>(splitter)
-                .expect("a splitter placement carries a Splitter")
-                .due(),
+            sides: body.mode().sides().to_vec(),
+            mode: body.mode(),
+            next_output: body.due(),
         }
     }
 
@@ -5579,13 +5661,13 @@ impl World {
     /// the topology's own links rather than re-derived — so what is reported
     /// can never disagree with where an item actually goes (the same rule
     /// [`Self::outbound_belt_tile`] follows).
-    fn splitter_output_tiles(&self, splitter: Entity) -> [Option<TileCoord>; 2] {
+    fn splitter_output_tiles(&self, splitter: Entity) -> [Option<TileCoord>; 3] {
         self.topology
             .splitter_outputs
             .iter()
             .find(|&&(entity, _)| entity == splitter)
             .map(|&(_, outputs)| outputs.map(|target| target.map(|t| self.position_of(t))))
-            .unwrap_or([None, None])
+            .unwrap_or([None; 3])
     }
 
     fn machine_snapshot(&self, machine: Entity) -> MachineSnapshot {
@@ -5909,6 +5991,10 @@ impl World {
             }
             BodyKind::Splitter => {
                 let segment = self.ecs.get::<&BeltSegment>(entity).unwrap();
+                let body = *self
+                    .ecs
+                    .get::<&Splitter>(entity)
+                    .expect("a splitter placement carries a Splitter");
                 TileSnapshot::Splitter {
                     direction: placement.direction,
                     items_here: segment
@@ -5917,11 +6003,9 @@ impl World {
                         .map(|(item, _)| item)
                         .collect(),
                     outputs: self.splitter_output_tiles(entity),
-                    next_output: self
-                        .ecs
-                        .get::<&Splitter>(entity)
-                        .expect("a splitter placement carries a Splitter")
-                        .due(),
+                    sides: body.mode().sides().to_vec(),
+                    mode: body.mode(),
+                    next_output: body.due(),
                     links: self.conveyor_links_of(entity),
                 }
             }

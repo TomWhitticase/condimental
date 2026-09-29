@@ -58,7 +58,7 @@ pub use shop::{
     DEFAULT_PURCHASE_QUANTITY, OwnedEquipment, Shop, ShopCatalog, ShopEntry, ShopEntrySnapshot,
     ShopSnapshot,
 };
-pub use splitter::{SPLITTER_KIND, Side, Splitter};
+pub use splitter::{SPLITTER_KIND, Side, SplitMode, Splitter};
 pub use staff::{
     CategoryPool, CrewEntry, CrewRequest, PaydayReport, StaffCatalog, StaffCategory,
     StaffCategorySnapshot, StaffLoadError, StaffPools, StaffRestore, StaffRestoreError,

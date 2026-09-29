@@ -11,23 +11,27 @@
 #   * a placed splitter renders its own bespoke model — not the generic
 #     `machine` housing — at the tile the simulation reports,
 #   * the belts around a splitter — the one feeding it, the one it hands
-#     straight to and its branch belt — are plain straights (each is fed
+#     straight to and its left belt — are plain straights (each is fed
 #     from behind), and the feeding belt's tooltip names the splitter,
 #   * the next-output arrow exists, points along the placement's own facing
 #     when the straight side is due, and turns exactly one quarter turn
-#     CLOCKWISE — the simulation's own `rotate_cw` — when the branch is,
-#   * a splitter whose branch was never built shows the arrow pointing
-#     STRAIGHT even though `next_output` says "branch", because that is where
+#     CLOCKWISE — the simulation's own `rotate_cw` — when the left is,
+#   * a splitter whose left belt was never built shows the arrow pointing
+#     STRAIGHT even though `next_output` says "left", because that is where
 #     the item actually goes (`splitter.rs`'s fallback rule), and one with
-#     neither output connected hides the arrow altogether,
+#     no output connected hides the arrow altogether,
 #   * items crossing a splitter render as item nodes at the running height,
 #     from the same `items` field a belt tile uses,
 #   * product that went DOWN THE BRANCH is drawn — which is a regression test
 #     as much as a splitter one: the branch leaves the splitter's own chunk,
 #     and the per-pass hide this scene used to do meant one dirty chunk's
 #     render wiped the other's items (see `_render_carried_items`),
-#   * hovering a splitter names both outputs and which one is next, and says
-#     "not connected" about a branch that was never laid.
+#   * hovering a splitter names its mode's outputs and which one is next, and
+#     says "not connected" about a side that was never laid,
+#   * clicking a splitter opens the configuration panel with its four modes,
+#     and picking one issues `set_splitter_mode`: the body swaps to that
+#     mode's model, the arrow turns the other way for `right`, and the
+#     tooltip names only the mode's own sides.
 #
 # The one-frame-before-checking dance and the "never hold your own camera
 # reference" rule are inherited from test_hover.gd — see that file's header.
@@ -121,7 +125,7 @@ func _run_checks() -> void:
 
 	# --- the belts around a splitter are plain straights -------------------
 	# (1, 0) hands over to the splitter at (2, 0) and is fed from behind;
-	# (3, 0) is fed by the splitter from behind; the branch belt (2, -1)
+	# (3, 0) is fed by the splitter from behind; the left belt (2, -1)
 	# faces south and is fed by the splitter from the north — behind it. All
 	# three are straight, and the splitter keeps its own model.
 	var straight: Array = main._belt_frames_for_shape(main.BELT_SHAPE_STRAIGHT)
@@ -160,14 +164,14 @@ func _run_checks() -> void:
 		_fail("the arrow stands at y=%f, expected the deck groove at %f" % [arrow_y, groove_y])
 		return
 
-	# --- the branch side, driven by the real simulation -------------------
+	# --- the left side, driven by the real simulation ---------------------
 	# The hopper meters tomatoes onto the line; once one has crossed the
 	# splitter the cursor flips and the arrow must turn a quarter turn
 	# clockwise from the placement's own facing.
 	main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
 	var branch_yaw := east_yaw + PI * 0.5
 	if not _tick_until(2000, func(): return is_equal_approx(_arrow(FORKED).rotation.y, branch_yaw)):
-		_fail("after an item crossed the splitter the arrow never turned to the branch (yaw %f), it reads %f" % [
+		_fail("after an item crossed the splitter the arrow never turned left (yaw %f), it reads %f" % [
 			branch_yaw, _arrow(FORKED).rotation.y,
 		])
 		return
@@ -246,7 +250,7 @@ func _run_checks() -> void:
 		return
 
 	if not _tick_until(4000, func(): return _due_branch(STRAIGHT_ONLY)):
-		_fail("the branchless splitter never reported 'branch' as due — the fallback case was never exercised")
+		_fail("the branchless splitter never reported 'left' as due — the fallback case was never exercised")
 		return
 	var lonely := _arrow(STRAIGHT_ONLY)
 	if not lonely.visible:
@@ -259,18 +263,23 @@ func _run_checks() -> void:
 		return
 
 	# --- the pure fallback rule, including the dead end --------------------
-	if main._splitter_effective_side({"next_output": "branch", "outputs": [[1, 0], null]}) != main.SPLITTER_STRAIGHT:
-		_fail("a due branch with nothing on it must fall back to the straight output")
-		return
-	if main._splitter_effective_side({"next_output": "straight", "outputs": [null, [0, -1]]}) != main.SPLITTER_BRANCH:
-		_fail("a due straight with nothing on it must fall back to the branch")
-		return
-	if main._splitter_effective_side({"next_output": "straight", "outputs": [null, null]}) != -1:
-		_fail("a splitter with neither output connected has nowhere to send anything")
-		return
-	main._apply_splitter_state(main._tile_key(FORKED), {"next_output": "straight", "outputs": [null, null]})
+	# Round the rotation straight, left, right from the due side — the
+	# simulation reports a side its mode does not deal to as null, so that
+	# walk is the mode's own rotation.
+	for case in [
+		[{"next_output": "left", "outputs": [[1, 0], null, null]}, main.SPLITTER_STRAIGHT, "a due left with nothing on it falls back straight"],
+		[{"next_output": "straight", "outputs": [null, [0, -1], null]}, main.SPLITTER_LEFT, "a due straight with nothing on it falls back left"],
+		[{"next_output": "straight", "outputs": [null, null, [0, 1]]}, main.SPLITTER_RIGHT, "a due straight with only a right falls back right"],
+		[{"next_output": "left", "outputs": [[1, 0], null, [0, 1]]}, main.SPLITTER_RIGHT, "a three-way's due left falls to right, next in the rotation"],
+		[{"next_output": "right", "outputs": [[1, 0], [0, -1], null]}, main.SPLITTER_STRAIGHT, "a due right wraps round to straight"],
+		[{"next_output": "straight", "outputs": [null, null, null]}, -1, "a splitter with no output connected has nowhere to send anything"],
+	]:
+		if main._splitter_effective_side(case[0]) != case[1]:
+			_fail("%s (got %d)" % [case[2], main._splitter_effective_side(case[0])])
+			return
+	main._apply_splitter_state(main._tile_key(FORKED), {"next_output": "straight", "outputs": [null, null, null]})
 	if _arrow(FORKED).visible:
-		_fail("a splitter with neither output connected must hide its arrow, not point at bare floor")
+		_fail("a splitter with no output connected must hide its arrow, not point at bare floor")
 		return
 
 	# --- hover ------------------------------------------------------------
@@ -279,18 +288,25 @@ func _run_checks() -> void:
 		_fail("hovering a splitter says '%s'" % forked_text)
 		return
 	var lonely_text: String = main._hover_text_at_tile(STRAIGHT_ONLY)
-	for needle in ["straight:", "branch:", "next:"]:
+	for needle in ["straight:", "left:", "next:", "left"]:
 		if not lonely_text.contains(needle):
 			_fail("the splitter tooltip is missing '%s': '%s'" % [needle, lonely_text])
 			return
 	if not lonely_text.contains("not connected"):
-		_fail("a splitter with an unbuilt branch must say so; it says '%s'" % lonely_text)
+		_fail("a splitter with an unbuilt left belt must say so; it says '%s'" % lonely_text)
+		return
+	if lonely_text.contains("right:"):
+		_fail("a left-mode splitter must not list a right exit it does not have: '%s'" % lonely_text)
+		return
+
+	if not _check_mode_panel():
 		return
 
 	print("SPLITTERS_OK: a bespoke model at the sim's tile, the feeding belt still plain, the")
 	print("  next-output arrow pointing along the facing and one quarter turn clockwise for the")
 	print("  branch, an unbuilt branch falling back to straight and a dead end hiding the arrow,")
-	print("  items drawn crossing the tile, and hover naming both outputs")
+	print("  items drawn crossing the tile, hover naming the mode's outputs, and the")
+	print("  configuration panel switching the mode, the body and the arrow's side")
 	quit(0)
 
 
@@ -317,4 +333,84 @@ func _items_at(tile: Vector2i) -> int:
 
 func _due_branch(tile: Vector2i) -> bool:
 	var state: Dictionary = main._splitter_states.get(main._tile_key(tile), {})
-	return String(state.get("next_output", "")) == "branch"
+	return String(state.get("next_output", "")) == "left"
+
+
+## The splitter's configuration panel, end to end through the real click and
+## the real command: the four modes offered, the current one ticked, and a
+## pick that reaches the simulation and comes back as a new body, arrow and
+## tooltip.
+func _check_mode_panel() -> bool:
+	main._config_click_at_tile(FORKED)
+	if not main._config_open or main._config_kind != main.SPLITTER_KIND:
+		_fail("clicking a splitter did not open its configuration panel")
+		return false
+	var offered: Array = []
+	for slot in main._config_picker_slots:
+		offered.append(String(slot["item"]))
+	if offered != ["left", "right", "t_junction", "three_way"]:
+		_fail("the splitter panel offers %s, expected the four modes" % str(offered))
+		return false
+	if not main._config_picker_slots[0]["mark"].visible:
+		_fail("a fresh splitter's panel should tick 'left', its default mode")
+		return false
+	for row in [
+		["fill row", main._config_fill_row], ["AUTO-FILL", main._config_auto_button],
+		["AUTO-FILL note", main._config_auto_note], ["level", main._config_level_label],
+		["level bar", main._config_level_track],
+	]:
+		if row[1].visible:
+			_fail("a splitter has nothing to fill, but its panel shows the %s" % row[0])
+			return false
+
+	for pick in [
+		["right", "machine_splitter_right", ["straight:", "right:"], ["left:"]],
+		["t_junction", "machine_splitter_t_junction", ["left:", "right:"], ["straight:"]],
+		["three_way", "machine_splitter_three_way", ["straight:", "left:", "right:"], []],
+	]:
+		var mode: String = pick[0]
+		main._on_config_picker_pressed(main.SPLITTER_MODES.find(mode))
+		var placement: Dictionary = main._placement_at_tile(FORKED)
+		if String(placement.get("split_mode", "")) != mode:
+			_fail("picking '%s' left the splitter in mode '%s'" % [mode, placement.get("split_mode")])
+			return false
+		var body := _splitter_instance(FORKED)
+		if body.get("asset") != pick[1]:
+			_fail("a '%s' splitter is drawn as '%s', expected '%s'" % [mode, body.get("asset"), pick[1]])
+			return false
+		if body["nodes"].is_empty():
+			_fail("the '%s' body rendered no meshes — its .vox didn't import" % mode)
+			return false
+		var ticked := ""
+		for slot in main._config_picker_slots:
+			if slot["mark"].visible:
+				ticked = String(slot["item"])
+		if ticked != mode:
+			_fail("after picking '%s' the panel ticks '%s'" % [mode, ticked])
+			return false
+		var label: String = main.SPLITTER_MODE_LABELS[mode]
+		if not main._config_title.text.ends_with(label):
+			_fail("a '%s' splitter's panel is titled '%s', expected it to name '%s'" % [mode, main._config_title.text, label])
+			return false
+		var text: String = main._hover_text_at_tile(FORKED)
+		for needle in pick[2]:
+			if not text.contains(needle):
+				_fail("a '%s' splitter's tooltip is missing '%s': '%s'" % [mode, needle, text])
+				return false
+		for needle in pick[3]:
+			if text.contains(needle):
+				_fail("a '%s' splitter's tooltip lists '%s', a side it does not deal to: '%s'" % [mode, needle, text])
+				return false
+
+	# A right turn is drawn the other way round from a left one.
+	var east_yaw: float = main._direction_yaw("east")
+	main._apply_splitter_state(main._tile_key(FORKED), {
+		"next_output": "right", "outputs": [[3, 0], [2, -1], [2, 1]],
+	})
+	if not is_equal_approx(_arrow(FORKED).rotation.y, east_yaw - PI * 0.5):
+		_fail("a due right should turn the arrow a quarter turn the other way from left (yaw %f), it reads %f" % [
+			east_yaw - PI * 0.5, _arrow(FORKED).rotation.y,
+		])
+		return false
+	main._close_config_panel()
+	return true
