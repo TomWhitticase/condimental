@@ -455,6 +455,9 @@ case "$out" in
   *) out="$repo_root/$out" ;;
 esac
 mkdir -p "$(dirname "$out")"
+# An older frame at this path would pass the "was it written" check below
+# after a refused or crashed render, and be reported as this run's output.
+rm -f "$out"
 
 # THE CLOCK IS PINNED, AND THAT IS WHAT MAKES THIS REPRODUCIBLE (issue #82).
 # `--fixed-fps` tells the engine to hand every frame the same delta and stop

@@ -85,13 +85,25 @@ fn a_new_game_starts_with_no_contract_and_offers_the_whole_board() {
         let gate = world.economy().unlocks().gate_for_contract(&offer.id);
         if gated.contains(&offer.id.as_str()) {
             let gate = gate.expect("a gated offer has a gate");
-            assert!(offer.locked, "'{}' is behind a closed gate and must read locked", offer.id);
-            assert_eq!(offer.unlock_name, gate.name, "'{}' names its gate", offer.id);
+            assert!(
+                offer.locked,
+                "'{}' is behind a closed gate and must read locked",
+                offer.id
+            );
+            assert_eq!(
+                offer.unlock_name, gate.name,
+                "'{}' names its gate",
+                offer.id
+            );
             assert_eq!(offer.unlock_item, gate.after_sold.item);
             assert_eq!(offer.unlock_boxes, gate.after_sold.boxes);
             assert_eq!(offer.unlock_sold, 0, "a new game has sold nothing");
         } else {
-            assert!(!offer.locked, "'{}' is open and must not read locked", offer.id);
+            assert!(
+                !offer.locked,
+                "'{}' is open and must not read locked",
+                offer.id
+            );
             assert!(offer.unlock_name.is_empty() && offer.unlock_item.is_empty());
             assert_eq!((offer.unlock_boxes, offer.unlock_sold), (0, 0));
         }

@@ -1337,8 +1337,8 @@ The second draft of the contracts page asked for `open_contract_count`
 correctly and then wrote "of the thirteen orders in the file, nine are on the
 board of a brand-new factory" — true at zero deliveries and false from the
 tenth onwards, because the number moves and "a brand-new factory" does not.
-The prose has to carry the same tense as the fact: *the board is showing nine
-right now, and anything missing from it is behind a gate*. Picking the right
+The prose has to carry the same tense as the fact: *nine of them are open
+to sign right now, and the rest are padlocked behind a gate*. Picking the right
 fact is half the job; the clause around it is the other half, and neither the
 loader nor a test can see that half.
 
