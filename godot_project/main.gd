@@ -9238,20 +9238,6 @@ func _set_board_sauce_filter(item_id: String) -> void:
 	_update_contract_board()
 
 
-## A chip's count, padded with figure spaces (a digit's width) to as many
-## digits as `most`, what the chip counts with the other row cleared: "17"
-## going to "8" narrowed its chip, and where the chip rows are the offer
-## column's widest line — beside a running docket — the whole board shifted
-## sideways on the click. Padding to the board's size instead made "BBQ 4"
-## wider than the ALL view ever draws it, 12px past a 1280 window.
-func _board_chip_count(count: int, most: int) -> String:
-	var digits := str(most).length()
-	var text := str(count)
-	while text.length() < digits:
-		text = "\u2007" + text
-	return text
-
-
 ## Shows the rows both filters let through, and writes every chip's count:
 ## how many offers that chip would show given the OTHER filter as it stands,
 ## so a click never lands on an empty board by surprise.
@@ -9259,13 +9245,6 @@ func _apply_board_filters() -> void:
 	var shown := 0
 	var status_counts := {}
 	var sauce_counts := {"": 0}
-	# What each chip counts with the other row cleared, for its padding.
-	var status_most := {"all": _board_rows.size()}
-	var sauce_most := {"": _board_rows.size()}
-	for row in _board_rows:
-		status_most[row["status"]] = int(status_most.get(row["status"], 0)) + 1
-		for item_id in row["mix_ids"]:
-			sauce_most[item_id] = int(sauce_most.get(item_id, 0)) + 1
 	for row in _board_rows:
 		var status := String(row["status"])
 		var mix_ids: Array = row["mix_ids"]
@@ -9289,13 +9268,13 @@ func _apply_board_filters() -> void:
 			continue
 		var chosen := key == _board_status_filter
 		chip.set_pressed_no_signal(chosen)
-		chip.text = "%s%s  %s" % ["✔ " if chosen else "", pair[1], _board_chip_count(int(status_counts.get(key, 0)), int(status_most.get(key, 0)))]
+		chip.text = "%s%s  %d" % ["✔ " if chosen else "", pair[1], int(status_counts.get(key, 0))]
 	for item_id in _board_sauce_chips:
 		var chip: Button = _board_sauce_chips[item_id]
 		var chosen := String(item_id) == _board_sauce_filter
 		chip.set_pressed_no_signal(chosen)
 		var title := "ALL" if item_id == "" else String(_board_sauce_titles.get(item_id, item_id))
-		chip.text = "%s%s  %s" % ["✔ " if chosen else "", title, _board_chip_count(int(sauce_counts.get(item_id, 0)), int(sauce_most.get(item_id, 0)))]
+		chip.text = "%s%s  %d" % ["✔ " if chosen else "", title, int(sauce_counts.get(item_id, 0))]
 	_board_no_match.visible = shown == 0
 	_board_scroll.visible = shown > 0
 	if shown == 0:

@@ -92,12 +92,11 @@ matches what code comments and data files cite.
   **The offer column keeps one width through every filter.** Sized by the
   cards it showed, it changed width on each click and the board re-centred
   under the cursor (~6-11px). The column is pinned to the widest card on the
-  whole board plus the scroll bar, the no-match card takes the same width,
-  and each chip's count is padded with figure spaces to the digits of what
-  it counts with the other row cleared, since beside a running docket the
-  chip rows are the column's widest line. (Padding every chip to the board's
-  size drew "BBQ 4" wider than the ALL view ever does, 12px past a 1280
-  window.)
+  whole board plus the scroll bar, and the no-match card takes the same
+  width. The chip rows are narrower than that column in every state the
+  test drives (the chips' side margins are 6, not 8), so the chips' own
+  width changes, a count going from 17 to 8 or the ✔ moving to the chosen
+  chip, do not reach the board.
 
   **And with the board full (the third review).** Signing every order the
   sim accepts found two more: a signed order that had been lost before
