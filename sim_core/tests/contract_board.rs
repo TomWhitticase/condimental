@@ -59,15 +59,15 @@ fn a_new_game_starts_with_no_contract_and_offers_the_whole_board() {
         "and the clipboard Godot draws from is empty too"
     );
     let snapshot = world.economy_snapshot();
-    // Every offer EXCEPT the ones a progression gate holds back
-    // (`data/unlocks.ron`): the board a new game reads is what it may
-    // actually sign, not everything `contracts.ron` holds.
+    // EVERY offer, in file order — and the ones a progression gate holds
+    // back (`data/unlocks.ron`) padlocked, naming that gate, rather than
+    // left out. A board that hid them looked like the whole game.
     //
-    // `gated` is read from the same unlock state the board was filtered
-    // with, deliberately — the claim here is that the two agree, not that
-    // the gates hold the right ids. WHICH ids a tier must hold back is
-    // pinned in `tests/unlocks.rs` against the contracts file, because a
-    // list checked against itself cannot notice an id going missing.
+    // `gated` is read from the same unlock state the board was built with,
+    // deliberately — the claim here is that the two agree, not that the
+    // gates hold the right ids. WHICH ids a tier must hold back is pinned in
+    // `tests/unlocks.rs` against the contracts file, because a list checked
+    // against itself cannot notice an id going missing.
     let gated: Vec<&str> = board
         .ordered()
         .iter()
@@ -78,19 +78,30 @@ fn a_new_game_starts_with_no_contract_and_offers_the_whole_board() {
         !gated.is_empty(),
         "the shipped content must gate something, or this test proves nothing"
     );
-    assert_eq!(snapshot.board.len(), board.len() - gated.len());
-    for id in &gated {
-        assert!(
-            !snapshot.board.iter().any(|o| o.id == *id),
-            "'{id}' is behind a closed gate and must not be on a new game's board"
-        );
+    let listed: Vec<&str> = snapshot.board.iter().map(|o| o.id.as_str()).collect();
+    let every: Vec<&str> = board.ordered().iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(listed, every, "the board lists every offer, in file order");
+    for offer in &snapshot.board {
+        let gate = world.economy().unlocks().gate_for_contract(&offer.id);
+        if gated.contains(&offer.id.as_str()) {
+            let gate = gate.expect("a gated offer has a gate");
+            assert!(offer.locked, "'{}' is behind a closed gate and must read locked", offer.id);
+            assert_eq!(offer.unlock_name, gate.name, "'{}' names its gate", offer.id);
+            assert_eq!(offer.unlock_item, gate.after_sold.item);
+            assert_eq!(offer.unlock_boxes, gate.after_sold.boxes);
+            assert_eq!(offer.unlock_sold, 0, "a new game has sold nothing");
+        } else {
+            assert!(!offer.locked, "'{}' is open and must not read locked", offer.id);
+            assert!(offer.unlock_name.is_empty() && offer.unlock_item.is_empty());
+            assert_eq!((offer.unlock_boxes, offer.unlock_sold), (0, 0));
+        }
     }
     assert!(
         snapshot.board.iter().all(|o| !o.active),
         "every offer on a new game's board is still for sale"
     );
     assert!(
-        snapshot.board.iter().any(|o| o.affordable),
+        snapshot.board.iter().any(|o| o.affordable && !o.locked),
         "and the starting balance can sign at least one of them"
     );
 }

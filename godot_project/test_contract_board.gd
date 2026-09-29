@@ -34,7 +34,13 @@
 #     card saying nothing is running;
 #   * at 1280x720 the board shows at least two WHOLE offers, on a new game and
 #     with nothing running, and the empty card keeps the left column to its
-#     pinned width.
+#     pinned width;
+#   * every offer is listed, and the ones a gate holds back are padlocked —
+#     locked paper, a 🔒 on the badge and the button, the gate named with its
+#     own meter and count — and a signature on one is refused by the sim;
+#   * the SHOW and sauce filters show exactly the offers they name, count
+#     them on their chips, clear on a second click, and a filter that matches
+#     nothing shows a card saying so.
 extends SceneTree
 
 
@@ -99,11 +105,22 @@ func _whole_offers_at_small(main) -> int:
 	var used := 0.0
 	var whole := 0
 	for row in main._board_rows:
+		if not row["panel"].visible:
+			continue
 		used += row["panel"].get_combined_minimum_size().y + (sep if whole > 0 else 0.0)
 		if used > room + 0.5:
 			break
 		whole += 1
 	return whole
+
+
+## The offer ids the filters leave showing, in board order.
+func _shown_ids(main) -> Array:
+	var out: Array = []
+	for row in main._board_rows:
+		if row["panel"].visible:
+			out.append(String(row["id"]))
+	return out
 
 
 func _row_for(main, id: String) -> Dictionary:
@@ -160,24 +177,39 @@ func _run_checks(main) -> void:
 			_fail("board row %d is '%s' but the snapshot's offer %d is '%s' — rows must follow file order" % [
 				i, main._board_rows[i]["id"], i, board[i]["id"]])
 			return
-		if String(main._board_rows[i]["name_label"].text) != String(board[i]["name"]):
+		if String(main._board_rows[i]["name_label"].text).replace("\n", " ") != String(board[i]["name"]):
 			_fail("row '%s' shows the wrong name" % board[i]["id"])
 			return
 		var terms: String = String(main._board_rows[i]["terms_label"].text)
-		for fragment in ["every %d ticks" % int(board[i]["cadence_ticks"]), "+%d" % int(board[i]["payout"]), "%d strike" % int(board[i]["strikes"])]:
+		for fragment in ["every %s" % main._format_remaining(int(board[i]["cadence_ticks"])), "%d strike" % int(board[i]["strikes"])]:
 			if not terms.contains(fragment):
 				_fail("row '%s' terms '%s' do not state '%s'" % [board[i]["id"], terms, fragment])
 				return
+		if terms.contains("tick"):
+			_fail("row '%s' terms '%s' speak in ticks — a player-facing clock is seconds" % [board[i]["id"], terms])
+			return
+		if not String(main._board_rows[i]["payout_label"].text).contains("+%d" % int(board[i]["payout"])):
+			_fail("row '%s' does not state its payout, got '%s'" % [board[i]["id"], main._board_rows[i]["payout_label"].text])
+			return
 
-	# --- A new game: nothing running, the whole board for sale ------------
+	# --- A new game: nothing running, every open offer for sale -----------
+	# The board lists EVERY offer; the ones a gate holds back are padlocked
+	# (2026-09-29), so "for sale" is the unlocked ones.
 	var offers: Array = []
+	var locked_offers: Array = []
 	for offer in board:
 		if bool(offer["starter"]):
 			_fail("the shipped board must sign nothing for a new player, '%s' is a starter" % offer["id"])
 			return
-		offers.append(String(offer["id"]))
+		if bool(offer["locked"]):
+			locked_offers.append(String(offer["id"]))
+		else:
+			offers.append(String(offer["id"]))
 	if offers.is_empty():
 		_fail("the shipped board must offer at least one contract to buy")
+		return
+	if locked_offers.is_empty():
+		_fail("a new game's board must show some padlocked offers, or the padlock checks prove nothing")
 		return
 	if not _card_ids(main).is_empty() or not _active_ids(main).is_empty():
 		_fail("a new game's clipboard should carry no docket, got %s" % str(_card_ids(main)))
@@ -202,6 +234,104 @@ func _run_checks(main) -> void:
 		if String(row["sign_button"].text) != "SIGN · %d" % offer_price:
 			_fail("offer '%s' button should name the price, got '%s'" % [id, row["sign_button"].text])
 			return
+		if row["lock_row"].visible or row["badge_lock"].visible:
+			_fail("open offer '%s' must not carry a padlock" % id)
+			return
+
+	# --- A locked offer: padlocked four ways, and refused if signed --------
+	for id in locked_offers:
+		var row := _row_for(main, id)
+		var offer: Dictionary = {}
+		for o in board:
+			if String(o["id"]) == id:
+				offer = o
+		if not row["sign_button"].disabled or not String(row["sign_button"].text).begins_with("🔒"):
+			_fail("locked offer '%s' must have a disabled 🔒 button, got '%s'" % [id, row["sign_button"].text])
+			return
+		if not row["lock_row"].visible or not row["badge_lock"].visible:
+			_fail("locked offer '%s' must show its padlock line and the badge padlock" % id)
+			return
+		if not String(row["lock_label"].text).contains(String(offer["unlock_name"])):
+			_fail("locked offer '%s' must name its gate '%s', got '%s'" % [id, offer["unlock_name"], row["lock_label"].text])
+			return
+		if not String(row["lock_count"].text).contains("%d of %d" % [int(offer["unlock_sold"]), int(offer["unlock_boxes"])]):
+			_fail("locked offer '%s' must say how far along its gate is, got '%s'" % [id, row["lock_count"].text])
+			return
+		if not row["lock_meter"].has_meta("fraction"):
+			_fail("locked offer '%s' has no gate meter driven by _set_meter" % id)
+			return
+		if row["panel"].get_theme_stylebox("panel") != main._contract_card_style_locked:
+			_fail("locked offer '%s' must be on the locked paper" % id)
+			return
+	var econ_locked: String = main.sim.economy_snapshot_json()
+	main._do_sign_contract(String(locked_offers[0]))
+	if _active_ids(main).has(locked_offers[0]) or main.sim.economy_snapshot_json() != econ_locked:
+		_fail("signing locked '%s' must be refused by the sim" % locked_offers[0])
+		return
+
+	# --- The filters: status and sauce, counted, never silently empty ------
+	main._update_contract_board()
+	var all_count: int = main._board_rows.size()
+	main._set_board_status_filter("locked")
+	if _shown_ids(main) != locked_offers:
+		_fail("LOCKED should show exactly the padlocked offers %s, shows %s" % [str(locked_offers), str(_shown_ids(main))])
+		return
+	var locked_chip: Button = main._board_status_chips["locked"]
+	if not locked_chip.button_pressed or not locked_chip.text.ends_with(str(locked_offers.size())):
+		_fail("the LOCKED chip should be pressed and count %d, reads '%s'" % [locked_offers.size(), locked_chip.text])
+		return
+	main._set_board_status_filter("open")
+	if _shown_ids(main) != offers:
+		_fail("OPEN should show exactly the unlocked offers %s, shows %s" % [str(offers), str(_shown_ids(main))])
+		return
+	main._set_board_status_filter("signed")
+	if not _shown_ids(main).is_empty() or not main._board_no_match.visible:
+		_fail("SIGNED on a new game matches nothing, and the board must say so")
+		return
+	main._set_board_status_filter("all")
+	if _shown_ids(main).size() != all_count or main._board_no_match.visible:
+		_fail("ALL should show every offer again")
+		return
+	# The sauce chips come from the wire's mixes — one per product, none typed
+	# here — and each shows exactly the offers whose mix names it.
+	if main._board_sauce_ids.size() < 2:
+		_fail("the shipped board asks for several products, so there should be several sauce chips, got %s" % str(main._board_sauce_ids))
+		return
+	for item_id in main._board_sauce_ids:
+		var expected: Array = []
+		for offer in board:
+			for pair in offer["mix"]:
+				if String(pair[0]) == item_id and not expected.has(String(offer["id"])):
+					expected.append(String(offer["id"]))
+		main._set_board_sauce_filter(item_id)
+		if _shown_ids(main) != expected:
+			_fail("the '%s' chip should show %s, shows %s" % [item_id, str(expected), str(_shown_ids(main))])
+			return
+	var last_sauce: String = main._board_sauce_ids[-1]
+	main._set_board_sauce_filter(last_sauce)
+	if main._board_sauce_filter != "" or _shown_ids(main).size() != all_count:
+		_fail("clicking the chosen sauce chip again should clear the sauce filter")
+		return
+	# The two combine: OPEN + a product only gated orders ask for is empty.
+	var gated_only := ""
+	for item_id in main._board_sauce_ids:
+		var any_open := false
+		for offer in board:
+			for pair in offer["mix"]:
+				if String(pair[0]) == item_id and not bool(offer["locked"]):
+					any_open = true
+		if not any_open:
+			gated_only = item_id
+	if gated_only == "":
+		_fail("a new game should have a product only padlocked orders ask for")
+		return
+	main._set_board_status_filter("open")
+	main._set_board_sauce_filter(gated_only)
+	if not _shown_ids(main).is_empty() or not main._board_no_match.visible:
+		_fail("OPEN + '%s' on a new game should match nothing, shows %s" % [gated_only, str(_shown_ids(main))])
+		return
+	main._set_board_sauce_filter(gated_only)
+	main._set_board_status_filter("all")
 
 	# --- C opens and closes it, changing nothing in the simulation --------
 	var econ_before: String = main.sim.economy_snapshot_json()
@@ -409,6 +539,8 @@ func _run_checks(main) -> void:
 	var quickest_ticks := 0
 	var quickest_price := 0
 	for offer in board:
+		if bool(offer["locked"]):
+			continue
 		var ticks := int(offer["cadence_ticks"]) * int(offer["strikes"])
 		if quickest == "" or ticks < quickest_ticks:
 			quickest = String(offer["id"])

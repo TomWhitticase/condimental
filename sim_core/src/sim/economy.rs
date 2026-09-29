@@ -107,7 +107,7 @@ use fixed::types::I48F16;
 use super::contracts::{Contract, ContractRegistry};
 use super::inventory::Inventory;
 use super::types::{ItemId, Money};
-use super::unlocks::{BoxesSold, UnlockRegistry, UnlockSnapshot};
+use super::unlocks::{BoxesSold, GateProgress, UnlockRegistry, UnlockSnapshot};
 
 /// What a new game starts with in the bank (the "Real Placement" epic's
 /// ticket 1).
@@ -430,12 +430,16 @@ pub struct EconomySnapshot {
     /// contracts board menu is built from, the way `shop_snapshot_json`'s
     /// `entries` build the build menu.
     ///
-    /// **Offers behind a progression gate that has not opened are absent**
-    /// (`data/unlocks.ron`), so this is what the player may sign rather
-    /// than everything `contracts.ron` holds. The filtering is here and not
-    /// in Godot for the usual reason — the sim decides, presentation
-    /// renders — and it is genuine: `SignContract` on a locked id is
-    /// refused (`SignRefusal::Locked`) whether or not a row was ever drawn.
+    /// **Offers behind a progression gate that has not opened are listed
+    /// and flagged `locked`** (`data/unlocks.ron`), with the gate that holds
+    /// each one back — the contents picker's padlock rule
+    /// ([`super::ingredients::ContentsChoice`]) applied to the board, since
+    /// 2026-09-29. Until then a locked offer was absent, which left a new
+    /// game's board looking like the whole game and gave the player no order
+    /// to aim a second line at. `locked` is decided here and not in Godot
+    /// for the usual reason — the sim decides, presentation renders — and it
+    /// is genuine: `SignContract` on a locked id is refused
+    /// (`SignRefusal::Locked`) whatever a row says.
     pub board: Vec<ContractOfferSnapshot>,
     /// **Lifetime successful deliveries** — satisfied windows, whatever
     /// they carried. On the wire because a payout readout wants it; the
@@ -448,8 +452,8 @@ pub struct EconomySnapshot {
     /// against the one last drawn and toast whatever just opened, exactly
     /// as the active-contract list is diffed to announce a signature or a
     /// loss. Nothing else should read it — a locked ingredient is already
-    /// absent from `ingredients_snapshot_json`, and a locked contract is
-    /// already absent from `board`.
+    /// absent from `ingredients_snapshot_json`, and a locked contract
+    /// already carries its own gate on `board`.
     pub unlocks: Vec<UnlockSnapshot>,
 }
 
@@ -507,6 +511,19 @@ pub struct ContractOfferSnapshot {
     pub affordable: bool,
     /// How many times this offer has been lost and gone back on the board.
     pub times_lost: u32,
+    /// Whether a gate that has not opened holds this offer back. The
+    /// simulation refuses to sign it while this is true. The four fields
+    /// after it are [`super::ingredients::ContentsChoice`]'s, meaning the
+    /// same thing, and are empty/0 when this is false.
+    pub locked: bool,
+    /// The gate's player-facing name ("BBQ Sauce").
+    pub unlock_name: String,
+    /// The item **id** whose boxes the gate counts; titled by presentation.
+    pub unlock_item: String,
+    /// Boxes of `unlock_item` the gate opens at.
+    pub unlock_boxes: u32,
+    /// Boxes of `unlock_item` sold so far.
+    pub unlock_sold: u32,
 }
 
 impl Economy {
@@ -580,12 +597,22 @@ impl Economy {
             .ingredient_available(id, &self.lifetime_boxes_sold)
     }
 
-    /// Whether the board may offer `id` right now. [`Self::try_sign`]
-    /// refuses anything this says no to, so hiding a locked row is
-    /// presentation agreeing with the sim rather than enforcing anything.
+    /// Whether `id` may be signed right now. [`Self::try_sign`] refuses
+    /// anything this says no to, so a padlocked row is presentation
+    /// agreeing with the sim rather than enforcing anything.
     pub fn contract_unlocked(&self, id: &str) -> bool {
         self.unlocks
             .contract_available(id, &self.lifetime_boxes_sold)
+    }
+
+    /// The shut gate holding `id` back from being signed, or `None` when it
+    /// may be signed now — the one question behind both `contract_unlocked`
+    /// and a board row's padlock, so the two cannot disagree.
+    pub fn contract_gate(&self, id: &str) -> Option<GateProgress> {
+        self.unlocks
+            .gate_for_contract(id)
+            .filter(|gate| !gate.is_open(&self.lifetime_boxes_sold))
+            .map(|gate| gate.progress(&self.lifetime_boxes_sold))
     }
 
     /// Spends `amount` if there is enough money, and reports whether it
@@ -846,8 +873,8 @@ impl Economy {
                 .board
                 .ordered()
                 .iter()
-                .filter(|offer| self.contract_unlocked(&offer.id))
-                .map(|offer| ContractOfferSnapshot {
+                .map(|offer| (offer, self.contract_gate(&offer.id)))
+                .map(|(offer, gate)| ContractOfferSnapshot {
                     id: offer.id.clone(),
                     name: offer.name.clone(),
                     mix: offer.mix.clone(),
@@ -859,6 +886,11 @@ impl Economy {
                     active: self.is_active(&offer.id),
                     affordable: self.money >= offer.price,
                     times_lost: self.times_lost(&offer.id),
+                    locked: gate.is_some(),
+                    unlock_name: gate.as_ref().map_or(String::new(), |g| g.name.clone()),
+                    unlock_item: gate.as_ref().map_or(String::new(), |g| g.item.clone()),
+                    unlock_boxes: gate.as_ref().map_or(0, |g| g.required),
+                    unlock_sold: gate.as_ref().map_or(0, |g| g.sold),
                 })
                 .collect(),
             lifetime_deliveries: self.lifetime_deliveries,

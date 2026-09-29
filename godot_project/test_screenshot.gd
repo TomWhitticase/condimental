@@ -468,6 +468,11 @@ var _board := false
 ## unscrolled board. A player reaches it with the wheel; this reaches it
 ## through the same ScrollContainer, and does nothing without `--board`.
 var _board_end := false
+## `--board-filter <key>` presses one of that board's filter chips before the
+## shutter, through the chip's own setter: a status (`open`, `signed`,
+## `locked`) or a product id from the mixes (`boxed_bbq`). A value that is
+## neither is REFUSED, not shot as the unfiltered board it would look like.
+var _board_filter := ""
 var _staff := false
 ## `--production` opens the PRODUCTION panel (P) over the settled bottleneck
 ## line — the fixture with every stage counted and a contract paid, so the
@@ -758,6 +763,7 @@ func _initialize() -> void:
 	_market = args.has("--market")
 	_board = args.has("--board")
 	_board_end = args.has("--board-end")
+	_board_filter = _string_arg(args, "--board-filter")
 	_unlocked = args.has("--unlocked")
 	_unlock_toast = args.has("--unlock-toast")
 	_no_hud = args.has("--no-hud")
@@ -2488,6 +2494,16 @@ func _process(delta: float) -> bool:
 	# A frame later than the open, deliberately: the offers are built and the
 	# ScrollContainer sized in the same update that opens the board, and its
 	# scroll ceiling is whatever the layout pass has settled on by then.
+	if _frames == 3 and _board and _board_filter != "":
+		if _main._board_status_chips.has(_board_filter):
+			_main._set_board_status_filter(_board_filter)
+		elif _main._board_sauce_chips.has(_board_filter):
+			_main._set_board_sauce_filter(_board_filter)
+		else:
+			printerr("SCREENSHOT_FAIL: --board-filter '%s' names no chip; status %s, products %s" % [
+				_board_filter, str(_main._board_status_chips.keys()), str(_main._board_sauce_ids)])
+			_refuse()
+			return true
 	if _frames == 3 and _board and _board_end:
 		_scroll_board_to_end()
 	if _frames == 2 and _staff:

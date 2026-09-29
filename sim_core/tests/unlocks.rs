@@ -263,8 +263,8 @@ fn the_gate_is_shut_one_box_short_and_open_on_the_threshold() {
             "'{id}' must still be locked one box short of the threshold"
         );
         assert!(
-            !board.board.iter().any(|o| &o.id == id),
-            "'{id}' must not be listed on the board one box short"
+            board.board.iter().any(|o| &o.id == id && o.locked),
+            "'{id}' must be listed on the board padlocked one box short"
         );
     }
 
@@ -296,8 +296,8 @@ fn the_gate_is_shut_one_box_short_and_open_on_the_threshold() {
     }
     for id in &contracts {
         assert!(
-            board.board.iter().any(|o| &o.id == id),
-            "'{id}' must be listed on the board the tick the gate opens"
+            board.board.iter().any(|o| &o.id == id && !o.locked),
+            "'{id}' must be listed on the board unlocked the tick the gate opens"
         );
     }
     let bbq = board
@@ -518,8 +518,8 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
              offers an order for a sauce that cannot be made yet and it runs to strikes"
         );
         assert!(
-            !board.board.iter().any(|o| &o.id == id),
-            "'{id}' must not be offered at nought deliveries — the mustard_sauce gate in \
+            board.board.iter().any(|o| &o.id == id && o.locked),
+            "'{id}' must be padlocked at nought deliveries — the mustard_sauce gate in \
              data/unlocks.ron has to name it in `contracts`"
         );
     }
@@ -650,8 +650,8 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
             "'{id}' must be on the board on the mustard_sauce gate's threshold box"
         );
         assert!(
-            board.board.iter().any(|o| &o.id == id),
-            "'{id}' must be offered the tick the mustard_sauce gate opens"
+            board.board.iter().any(|o| &o.id == id && !o.locked),
+            "'{id}' must be offered unlocked the tick the mustard_sauce gate opens"
         );
     }
     let announced = board

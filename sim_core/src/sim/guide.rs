@@ -112,8 +112,9 @@ pub enum GuideFact {
     /// How many orders `data/contracts.ron` holds in all, gated ones
     /// included.
     ContractCount,
-    /// How many of those the board is showing at the current boxes sold —
-    /// the ones with no gate, or whose gate has opened.
+    /// How many of those are open to sign at the current boxes sold — the
+    /// ones with no gate, or whose gate has opened. The board lists the rest
+    /// too, padlocked.
     OpenContractCount,
     /// How many of those are `starter: true`: active in a new game without
     /// being signed. Not "the ones a new player may sign", which is

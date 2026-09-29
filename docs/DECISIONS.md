@@ -25,6 +25,47 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-29: **The contracts board lists every offer and padlocks the gated
+  ones; its filters are presentation.** (Owner's ask: "I want contracts that
+  are for items that i cant make to be locked (e.g. at the start i can only
+  make ketchup so anything that isnt just ketchup should be locked) Also make
+  the contract menu filterable".)
+
+  **Shown and refused, rather than hidden.** The gate (2026-09-21) held gated
+  contracts "back from the board" by leaving them out of the snapshot, so a
+  new player saw nine ketchup orders and no sign that BBQ or mustard orders
+  existed or what would open them — the only hint was a cookbook page. A
+  padlocked row answers both on the screen where the decision is made, and
+  the gate becomes something to aim at. Enforcement did not move: the sim
+  still refuses a signature on a locked id (`SignRefusal::Locked`), and the
+  lock is decided in Rust (`World::contract_gate`, off
+  `UnlockRegistry::gate_for_contract` and the boxes-sold ledger), never in
+  GDScript. The wire shape copies `ContentsChoice` (`locked`, `unlock_name`,
+  `unlock_item`, `unlock_boxes`, `unlock_sold`) so a padlock reads the same
+  field names wherever it appears. The market keeps hiding gated raws: that
+  was not asked for, and the rack picker already padlocks them where a
+  choice is made.
+
+  **Filters are Godot's.** Which rows show is sorting, which CLAUDE.md gives
+  to the presentation layer; the wire already carries `active`, `locked` and
+  the mix, so nothing new crosses it. Status chips (all / open / signed /
+  locked) and one sauce chip per product the mixes name, derived from the
+  wire rather than typed, each counting what it would show against the
+  other row so no click lands on an empty board by surprise; an empty
+  combination shows a card saying so.
+
+  **The card, and what 1280x720 cost.** The first cut put the payout on the
+  name line and the gate on a line of its own: 1492px of board in a 1280
+  window. What won the width back: the payout moved under the badge, the
+  gate's name onto the name line, sauce chips drop the words every product
+  name shares ("Boxed"), and `_fit_contract_board_split` breaks PER CARD —
+  it used to break every offer to the level its widest one needed, so one
+  three-product order put every ketchup order on three lines and the window
+  showed one offer. A fifth break level splits a long name at its middle
+  space (beside four running dockets, "Burger Franchise Supply Deal" was
+  18px too wide). A LOST offer's status folded onto one line for the same
+  height reason. `test_contract_board.gd` pins two whole offers at 1280x720.
+
 - 2026-09-28: **A warehouse rack may be reserved for one raw ingredient.**
   (Owner's ask: "click on a warehouse rack and then select one item so that
   for that specific warehouse rack it will only allow holding of the

@@ -22,8 +22,8 @@
 // around it claims, and nothing about tense: `{open_contract_count}` in
 // "nine are on the board of a brand-new factory" is the right fact in a
 // clause that stops being true at the tenth order signed. Write the clause in
-// the same tense as the fact — "the board is showing {open_contract_count}
-// right now" — and prefer a phrasing that reads correctly at any value a
+// the same tense as the fact — "{open_contract_count} of them are open to
+// sign right now" — and prefer a phrasing that reads correctly at any value a
 // balance pass could produce, since "{starter_contracts} are active" becomes
 // "1 are". Neither the loader nor a test can see either of these.
 //
@@ -84,7 +84,7 @@
             title: "Contracts",
             tagline: "An order is a promise with a clock on it.",
             body: [
-                "Of the {contract_count} orders in the file, the board is showing {open_contract_count} right now — anything missing from it is behind a gate that opens when you have sold enough boxes of the sauce below it. Each order names a mix of cases, how often it wants them, what it pays, and what it costs to sign. You begin with {starter_contracts} of them already signed. Every order on the board is yours to sign, once there is a line to serve it.",
+                "The board lists all {contract_count} orders in the file, and {open_contract_count} of them are open to sign right now — the rest carry a padlock and name the gate that opens them, which is selling enough boxes of the sauce below. Each order names a mix of cases, how often it wants them, what it pays, and what it costs to sign. You begin with {starter_contracts} of them already signed. Every open order is yours to sign, once there is a line to serve it.",
                 "Sign one and the clock starts. Ship the mix inside the window and it pays; miss the window and it takes a strike. Run out of strikes and the order is gone, and so is the price you paid for it. Signing more than the line can feed is the most expensive mistake available early.",
                 "Each dock holds at most {dock_capacity} cases, of any mix, so it is a loading bay and not a warehouse. Past that ceiling the packer behind it backs up.",
             ],

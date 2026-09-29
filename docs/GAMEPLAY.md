@@ -263,7 +263,9 @@ implementation history (epics, tickets, balancing passes) behind each one.
   into a satisfied contract window), and two lists: ingredients held back from
   the market, contracts held back from the board.
   Both are enforced in the simulation, not the panel: buying or signing a
-  gated id is refused. **No recipe is ever locked** — a gated sauce's recipes
+  gated id is refused. A held-back contract is still LISTED on the board,
+  padlocked with its gate and progress, so the next tier is visible before
+  it opens (2026-09-29). **No recipe is ever locked** — a gated sauce's recipes
   sit in `recipes.ron` from a new game and are merely unbuildable and
   unsellable — which keeps progression entirely off the tick path. The gate
   announces itself by name when it opens, which is the point of having one.
