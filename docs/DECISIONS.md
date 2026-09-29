@@ -38,7 +38,7 @@ matches what code comments and data files cite.
   padlocked row answers both on the screen where the decision is made, and
   the gate becomes something to aim at. Enforcement did not move: the sim
   still refuses a signature on a locked id (`SignRefusal::Locked`), and the
-  lock is decided in Rust (`World::contract_gate`, off
+  lock is decided in Rust (`Economy::contract_gate`, off
   `UnlockRegistry::gate_for_contract` and the boxes-sold ledger), never in
   GDScript. The wire shape copies `ContentsChoice` (`locked`, `unlock_name`,
   `unlock_item`, `unlock_boxes`, `unlock_sold`) so a padlock reads the same

@@ -23,7 +23,7 @@ See [WORKFLOW.md](WORKFLOW.md).
   the board, flagged: `ContractOfferSnapshot` carries `locked`,
   `unlock_name`, `unlock_item`, `unlock_boxes`, `unlock_sold` — the shape
   `ContentsChoice` already gives a gated ingredient (§5g) — filled by
-  `World::contract_gate`, and `SignContract` still returns
+  `Economy::contract_gate`, and `SignContract` still returns
   `SignRefusal::Locked`. The card draws the flag (locked paper, 🔒 on the badge,
   the button naming the gate, its meter with the count in words on it, the
   height of an open card) and decides

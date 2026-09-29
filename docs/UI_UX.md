@@ -448,7 +448,7 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   terms in words and one SIGN button that names the price. A SIGN button on
   the clipboard would make every running order look like a thing to click.
   The button says what a click will do or why it will not (**SIGNED**, **✗
-  SIGN · 150**, **🔒 200**) and, under it, a short line on where the offer
+  SIGN · 150**, **🔒 BBQ Sauce**) and, under it, a short line on where the offer
   stands (a lost offer says **✗ LOST — sign again**). Each card reads left
   to right the way a column of them is scanned: a **badge** (the mix's first
   product, large) with what one delivery **pays** under it in the payout
