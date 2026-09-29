@@ -73,10 +73,31 @@ matches what code comments and data files cite.
   LOCKED filter at 1280x720 showed one card. The gate's name moved onto the
   disabled button (where a price nobody can pay yet was), the meter took the
   status line's place under it, one line tall with the count written on it,
-  and the mix uses the sauce chips' short names. Every card is now 116–120px
-  and the test pins two whole offers under LOCKED, OPEN and each sauce too.
-  The SIGNED chip's label lost its built-in ✔, which had made the selection
-  tick meaningless on that one chip.
+  and the mix uses the sauce chips' short names. On a new game every card is
+  now 116–120px. With a docket running the offer column is narrower and a
+  two-product order can still break one item a line (~185px), but the list
+  is file order and those orders sit below the fold, so from the top two
+  whole offers still show. The test pins that under LOCKED, OPEN, SIGNED
+  and each sauce, on a new game AND with a contract running. The SIGNED
+  chip's label lost its built-in ✔, which had made the selection tick
+  meaningless on that one chip.
+
+  **The disabled button is the board's rule, not §5g's.** The configuration
+  panel's picker keeps a padlocked slot clickable and lets the sim refuse it
+  with a sound (§5g). The board already disabled every button it will not
+  honour (✗ can't afford, SIGNED), and a locked order follows that. What the
+  board takes from §5g is the rest: listed rather than hidden, dimmed, a
+  glyph, and the gate named with its distance.
+
+  **The offer column keeps one width through every filter.** Sized by the
+  cards it showed, it changed width on each click and the board re-centred
+  under the cursor (~6-11px). The column is pinned to the widest card on the
+  whole board plus the scroll bar, the no-match card takes the same width,
+  and each chip's count is padded with figure spaces to the digits of what
+  it counts with the other row cleared, since beside a running docket the
+  chip rows are the column's widest line. (Padding every chip to the board's
+  size drew "BBQ 4" wider than the ALL view ever does, 12px past a 1280
+  window.)
 
 - 2026-09-28: **A warehouse rack may be reserved for one raw ingredient.**
   (Owner's ask: "click on a warehouse rack and then select one item so that

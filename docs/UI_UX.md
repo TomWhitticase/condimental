@@ -467,9 +467,11 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   one three-product order does not put every one-product order on three
   lines. The mix names each product by its sauce chip's short name ("3 ×
   Ketchup, 2 × BBQ"), the icon beside it being the box. At 1280x720 at
-  least two whole offers show, under every filter that matches two.
+  least two whole offers show, under every filter that matches two, and a
+  filter never changes the offer column's width.
 - **Every offer is on the board; the ones a gate holds back are padlocked**
-  (2026-09-29, the §5g padlock applied to orders). A locked card is the
+  (2026-09-29: §5g's padlock applied to orders, except that the button is
+  disabled, as it is for every order the board will not honour). A locked card is the
   carbon copy: greyer paper, faded words, a 🔒 over the badge's corner, the
   disabled button naming the gate ("🔒 BBQ Sauce"), and under it, where an
   open card's status line sits, the gate's own meter one line tall with its

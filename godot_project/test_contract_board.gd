@@ -169,6 +169,41 @@ func _chip_error(main, board: Array) -> String:
 	return ""
 
 
+## "" if at 1280x720 every filtered view shows two whole offers (or all it
+## has, if fewer) and leaves the board the width ALL gives it; otherwise
+## what is wrong. Leaves both filters cleared.
+func _filter_views_error(main) -> String:
+	_whole_offers_at_small(main)
+	# And under every filter: a padlocked card used to carry one more line
+	# than an open one, and the LOCKED view at 1280x720 showed one (PR #208's
+	# review). A filter showing fewer than two offers owes as many as it has.
+	# The offer column also keeps ONE width through every filter, the
+	# no-match card included: sized by the visible cards, the board jumped
+	# sideways on each click. (The left column is measured apart: a running
+	# docket's own status line changes width as its window drains, which no
+	# filter touches.)
+	var board_width: float = main._board_scroll.get_parent().get_combined_minimum_size().x
+	var filter_views: Array = [["locked", ""], ["open", ""], ["signed", ""]]
+	for item_id in main._board_sauce_ids:
+		filter_views.append(["all", String(item_id)])
+	for view in filter_views:
+		main._set_board_status_filter(view[0])
+		main._set_board_sauce_filter(view[1])
+		var owed := mini(2, _shown_ids(main).size())
+		var whole := _whole_offers_at_small(main)
+		if whole < owed:
+			return "at 1280x720 the %s + '%s' view shows %d whole offer(s) of %d — it owes %d" % [
+				view[0], view[1], whole, _shown_ids(main).size(), owed]
+		var view_width: float = main._board_scroll.get_parent().get_combined_minimum_size().x
+		if absf(view_width - board_width) > 0.5:
+			return "the %s + '%s' view makes the offer column %.0fpx wide, ALL makes it %.0fpx — a filter must not move it" % [
+				view[0], view[1], view_width, board_width]
+		if view[1] != "":
+			main._set_board_sauce_filter(view[1])
+	main._set_board_status_filter("all")
+	return ""
+
+
 func _row_for(main, id: String) -> Dictionary:
 	for row in main._board_rows:
 		if String(row["id"]) == id:
@@ -302,6 +337,16 @@ func _run_checks(main) -> void:
 			return
 		if row["status_label"].visible:
 			_fail("locked offer '%s' shows its gate count in the status's place, not both" % id)
+			return
+		# Faded ONCE: a modulate multiplies down the tree, and the terms sit
+		# inside the faded mix row unless a split moved them out.
+		var alpha := 1.0
+		var node: Node = row["terms_label"]
+		while node != row["panel"]:
+			alpha *= (node as CanvasItem).modulate.a
+			node = node.get_parent()
+		if absf(alpha - 0.55) > 0.01:
+			_fail("locked offer '%s' terms are drawn at %.2f alpha, not faded once to 0.55" % [id, alpha])
 			return
 		if not String(row["lock_count"].text).contains("%d of %d" % [int(offer["unlock_sold"]), int(offer["unlock_boxes"])]):
 			_fail("locked offer '%s' must say how far along its gate is, got '%s'" % [id, row["lock_count"].text])
@@ -442,24 +487,10 @@ func _run_checks(main) -> void:
 	if fresh_whole < 2:
 		_fail("at 1280x720 a new game's board shows %d whole offer(s) — it must show at least 2 to compare" % fresh_whole)
 		return
-	# And under every filter: a padlocked card used to carry one more line
-	# than an open one, and the LOCKED view at 1280x720 showed one (PR #208's
-	# review). A filter showing fewer than two offers owes as many as it has.
-	var filter_views: Array = [["locked", ""], ["open", ""]]
-	for item_id in main._board_sauce_ids:
-		filter_views.append(["all", String(item_id)])
-	for view in filter_views:
-		main._set_board_status_filter(view[0])
-		main._set_board_sauce_filter(view[1])
-		var owed := mini(2, _shown_ids(main).size())
-		var whole := _whole_offers_at_small(main)
-		if whole < owed:
-			_fail("at 1280x720 the %s + '%s' view shows %d whole offer(s) of %d — it owes %d" % [
-				view[0], view[1], whole, _shown_ids(main).size(), owed])
-			return
-		if view[1] != "":
-			main._set_board_sauce_filter(view[1])
-	main._set_board_status_filter("all")
+	var views_error := _filter_views_error(main)
+	if views_error != "":
+		_fail("new game: " + views_error)
+		return
 	_key(main, KEY_C)
 	if main._board_open or board_panel.visible:
 		_fail("a second C should close the board")
@@ -528,6 +559,13 @@ func _run_checks(main) -> void:
 		return
 	if main._contract_notice.text.find("SIGNED") < 0 or main._contract_notice.modulate.a < 0.99:
 		_fail("signing should announce itself on the notice line, got '%s'" % main._contract_notice.text)
+		return
+	# With a docket running the left column is at its docket width, not the
+	# empty card's, and the offers get what is left: the filtered views owe
+	# the same two whole offers there.
+	views_error = _filter_views_error(main)
+	if views_error != "":
+		_fail("with '%s' running: %s" % [first_offer, views_error])
 		return
 
 	# --- The pure risk function -------------------------------------------
