@@ -393,12 +393,15 @@ matches what code comments and data files cite.
   gate was ten windows — minutes, not half an hour. The second gate is worse,
   and it is now measured from zero rather than estimated: a factory that earns
   the first gate, builds the BBQ branch and signs every order the board will
-  take crosses the mustard gate at **tick 141 000 — 78 minutes at 30
-  ticks/sec**, which is **89 000 ticks (~49 min) after the BBQ gate opened at
-  tick 52 000**. The tool's own "74 000 ticks" line counts from where it starts
+  take crosses the mustard gate at **tick 155 000 — 86 minutes at 30
+  ticks/sec**, which is **103 000 ticks (~57 min) after the BBQ gate opened at
+  tick 52 000**. (It was 141 000 until 2026-09-29, when the fixture it builds
+  on stopped signing `smokehouse_trial` during its settle — PR #209 — so the
+  tool starts from only 8 boxes of BBQ sold.) The tool's
+  own "88 000 ticks" line counts from where it starts
   measuring — the fixture's hand-off at tick 67 000, once the BBQ branch is
   built and settled — so the two figures are the same run seen from two
-  reference points, and the one a player feels is the 89 000.
+  reference points, and the one a player feels is the 103 000.
   `godot_project/measure_gate_ticks.gd` is that measurement, kept in the tree
   so the figure can be re-run rather than believed; it earns both gates
   instead of patching the ledger the way every shipped fixture does. **The
@@ -406,11 +409,11 @@ matches what code comments and data files cite.
   keys that do not exist (`available_contracts`/`active_contracts` rather than
   `board`/`contracts`), so its "sign everything" step was a silent no-op, only
   the two orders the fixture signs for itself were ever running, and it
-  reported 181 000. With the whole board signed the figure is 141 000, and the
+  reported 181 000. With the whole board signed the figure is 155 000, and the
   tool now refuses rather than measuring a world it did not build. The cause
   is not the factory: with all four BBQ orders signed the board asks ~4.5
-  boxes per 1 000 ticks, and the branch put 90 boxes into paid windows over the
-  74 000 ticks that were measured — about **1.2 per 1 000 ticks**, a quarter of
+  boxes per 1 000 ticks, and the branch put 92 boxes into paid windows over the
+  88 000 ticks that were measured — about **1.0 per 1 000 ticks**, under a quarter of
   what is asked for. **The numbers are the owner's and were not changed**, but the
   consequence is recorded here: the 2026-09-20 measurement behind issue #55
   ("the bank at the moment of building decides whether the BBQ branch costs

@@ -1303,7 +1303,7 @@ var _delivery_full := false # is some dock at capacity — the clipboard reads F
 # (`removal_refused`), never from arithmetic here.
 var _rack_states: Dictionary = {} # origin key -> rack snapshot (bays, contents, filter, refusals)
 var _rack_nodes: Dictionary = {} # origin key -> {"bays": Array of {"pallet", "load", "tint"}}
-var _storage_state: Dictionary = {} # base_cap / slot_stack / total_bays / used_bays
+var _storage_state: Dictionary = {} # base_cap / slot_stack / total_bays / used_bays / free_bays / racks
 
 # --- Build mode: the ghost, and what the next click will do ----------------
 # `_build_kind` is "" when the player is not placing anything; `_remove_mode`
