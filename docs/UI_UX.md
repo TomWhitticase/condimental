@@ -448,19 +448,46 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   terms in words and one SIGN button that names the price. A SIGN button on
   the clipboard would make every running order look like a thing to click.
   The button says what a click will do or why it will not (**SIGNED**, **✗
-  SIGN · 150**) and, under it, a short line on where the offer stands (a
-  lost offer says **LOST — sign again**). The terms are one line — "every
-  2500 ticks · pays +90 · 2 strikes" — so that at 1280x720 two whole offers
-  can be compared side by side with the running dockets. The board
+  SIGN · 150**, **🔒 BBQ Sauce**) and, under it, a short line on where the offer
+  stands (a lost offer says **✗ LOST — sign again**). Each card reads left
+  to right the way a column of them is scanned: a **badge** (the mix's first
+  product, large) with what one delivery **pays** under it in the payout
+  green; the name; the mix with its icons and the terms — "every 34s · 3
+  strikes", seconds, never ticks; and the button. The board
   is two columns: **FOR SALE** on the right, and **YOUR CONTRACTS** on the
   left — the clipboard's running dockets, built and driven by the same code,
   wider, with no button on them — so the next order is chosen looking at the
   ones already signed. A signature lands in the left column on the same
   click; with nothing running it shows a paper card that says so and points
   right, its sentence wrapped inside the column's pinned width so the empty
-  state takes nothing from the offers. At its narrowest the board breaks an offer's strike rule onto its
-  own line (a third step of `_fit_contract_board_split`), and a running
-  docket's status line wraps inside the column's pinned width.
+  state takes nothing from the offers. **Each card breaks only as far as it
+  must** to fit (`_fit_contract_board_split`, per card since 2026-09-29):
+  terms onto their own line, then the strike rule off the terms, then a
+  many-item mix one item a line, then a long name at its middle space — so
+  one three-product order does not put every one-product order on three
+  lines. The mix names each product by its sauce chip's short name ("3 ×
+  Ketchup, 2 × BBQ"), the icon beside it being the box. At 1280x720 at
+  least two whole offers show, under every filter that matches two, and a
+  filter never changes the offer column's width.
+- **Every offer is on the board; the ones a gate holds back are padlocked**
+  (2026-09-29: §5g's padlock applied to orders, except that the button is
+  disabled, as it is for every order the board will not honour). A locked card is the
+  carbon copy: greyer paper, faded words, a 🔒 over the badge's corner, the
+  disabled button naming the gate ("🔒 BBQ Sauce"), and under it, where an
+  open card's status line sits, the gate's own meter one line tall with its
+  count in words written on it ("0 of 100 Ketchup sold") — so a locked card
+  is exactly as tall as an open one. The sim flags it (`locked` and the
+  `unlock_*` fields on the board snapshot) and refuses a signature on it;
+  the card only draws that.
+- **The board filters by status and by sauce.** Two chip rows over the
+  offers: SHOW (ALL · OPEN · SIGNED · 🔒 LOCKED) and SAUCE (ALL, then one
+  chip per product the mixes name, with its icon, in board order, the words
+  every product name shares dropped: "Ketchup", "BBQ", "Mustard"). Each chip
+  counts the offers it would show given the other row as it stands, so a
+  click never lands on an empty board by surprise; the chosen chip is
+  yellow-bordered AND ticked (§7), and no chip's own label uses the tick; clicking the chosen sauce clears it. A
+  combination that matches nothing shows a paper card saying so. Filtering
+  is presentation — it hides rows the wire sent and decides nothing.
 - **A docket says how it is doing and whether it is in danger, four ways at
   once** (§7): a status line with a glyph and words (**✔ READY**, **⚠ AT
   RISK — 1 short, 70% of the window gone**, **⚠ LAST CHANCE — miss this
@@ -1313,8 +1340,8 @@ The second draft of the contracts page asked for `open_contract_count`
 correctly and then wrote "of the thirteen orders in the file, nine are on the
 board of a brand-new factory" — true at zero deliveries and false from the
 tenth onwards, because the number moves and "a brand-new factory" does not.
-The prose has to carry the same tense as the fact: *the board is showing nine
-right now, and anything missing from it is behind a gate*. Picking the right
+The prose has to carry the same tense as the fact: *nine of them are open
+to sign right now, and the rest are padlocked behind a gate*. Picking the right
 fact is half the job; the clause around it is the other half, and neither the
 loader nor a test can see that half.
 

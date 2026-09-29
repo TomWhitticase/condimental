@@ -53,7 +53,8 @@ next bill) · `--contracts` (signs every offer, runs to a mixed board) ·
 `--populate` (run forward so product is moving).
 
 **HUD / panels** — `--shop` (build menu, E) · `--market` (M) · `--board`
-(contracts board, C) · `--staff` (H, implies `--populate`) · `--production`
+(contracts board, C) — add `--board-filter all|open|signed|locked` or a product id (`boxed_mustard`) to
+press one of its filter chips · `--staff` (H, implies `--populate`) · `--production`
 (P, implies `--populate`) · `--pause` · `--menu` (renders `menu.tscn`, writing
 and removing a real save so the load list has a row) · `--no-hud` (hide the
 HUD; the clipboard and hotbar cover the corners a junction usually lands in).

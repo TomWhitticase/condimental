@@ -25,6 +25,92 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-29: **The contracts board lists every offer and padlocks the gated
+  ones; its filters are presentation.** (Owner's ask: "I want contracts that
+  are for items that i cant make to be locked (e.g. at the start i can only
+  make ketchup so anything that isnt just ketchup should be locked) Also make
+  the contract menu filterable".)
+
+  **Shown and refused, rather than hidden.** The gate (2026-09-21) held gated
+  contracts "back from the board" by leaving them out of the snapshot, so a
+  new player saw nine ketchup orders and no sign that BBQ or mustard orders
+  existed or what would open them — the only hint was a cookbook page. A
+  padlocked row answers both on the screen where the decision is made, and
+  the gate becomes something to aim at. Enforcement did not move: the sim
+  still refuses a signature on a locked id (`SignRefusal::Locked`), and the
+  lock is decided in Rust (`Economy::contract_gate`, off
+  `UnlockRegistry::gate_for_contract` and the boxes-sold ledger), never in
+  GDScript. The wire shape copies `ContentsChoice` (`locked`, `unlock_name`,
+  `unlock_item`, `unlock_boxes`, `unlock_sold`) so a padlock reads the same
+  field names wherever it appears. The market keeps hiding gated raws: that
+  was not asked for, and the rack picker already padlocks them where a
+  choice is made.
+
+  **Filters are Godot's.** Which rows show is sorting, which CLAUDE.md gives
+  to the presentation layer; the wire already carries `active`, `locked` and
+  the mix, so nothing new crosses it. Status chips (all / open / signed /
+  locked) and one sauce chip per product the mixes name, derived from the
+  wire rather than typed, each counting what it would show against the
+  other row so no click lands on an empty board by surprise; an empty
+  combination shows a card saying so.
+
+  **The card, and what 1280x720 cost.** The first cut put the payout on the
+  name line and the gate on a line of its own: 1492px of board in a 1280
+  window. What won the width back: the payout moved under the badge, the
+  gate's name onto the name line, sauce chips drop the words every product
+  name shares ("Boxed"), and `_fit_contract_board_split` breaks PER CARD —
+  it used to break every offer to the level its widest one needed, so one
+  three-product order put every ketchup order on three lines and the window
+  showed one offer. A fifth break level splits a long name at its middle
+  space (beside four running dockets, "Burger Franchise Supply Deal" was
+  18px too wide). A LOST offer's status folded onto one line for the same
+  height reason. `test_contract_board.gd` pins two whole offers at 1280x720.
+
+  **Then the filtered views (PR #208's review).** A locked card still had
+  one line more than an open one — the gate's meter under the terms — and a
+  mixed locked order ("3 × Boxed Ketchup, 2 × Boxed BBQ") broke one item a
+  line, so a padlocked card was 215px against an open one's 116–120 and the
+  LOCKED filter at 1280x720 showed one card. The gate's name moved onto the
+  disabled button (where a price nobody can pay yet was), the meter took the
+  status line's place under it, one line tall with the count written on it,
+  and the mix uses the sauce chips' short names. On a new game every card is
+  now 116–120px. With a docket running the offer column is narrower and a
+  two-product order can still break one item a line (~185px), but the list
+  is file order and those orders sit below the fold, so from the top two
+  whole offers still show. The test pins that under LOCKED, OPEN, SIGNED
+  and each sauce, on a new game AND with a contract running. The SIGNED
+  chip's label lost its built-in ✔, which had made the selection tick
+  meaningless on that one chip.
+
+  **The disabled button is the board's rule, not §5g's.** The configuration
+  panel's picker keeps a padlocked slot clickable and lets the sim refuse it
+  with a sound (§5g). The board already disabled every button it will not
+  honour (✗ can't afford, SIGNED), and a locked order follows that. What the
+  board takes from §5g is the rest: listed rather than hidden, dimmed, a
+  glyph, and the gate named with its distance.
+
+  **The offer column keeps one width through every filter.** Sized by the
+  cards it showed, it changed width on each click and the board re-centred
+  under the cursor (~6-11px). The column is pinned to the widest card on the
+  whole board plus the scroll bar, and the no-match card takes the same
+  width. The chip rows are narrower than that column in every state the
+  test drives (the chips' side margins are 6, not 8), so the chips' own
+  width changes, a count going from 17 to 8 or the ✔ moving to the chosen
+  chip, do not reach the board.
+
+  **And with the board full (the third review).** Signing every order the
+  sim accepts found two more: a signed order that had been lost before
+  carried "lost 2 times before" on a second status line (144px, the SIGNED
+  view one card), now folded as "✔ running · lost ×2"; and the SAUCE chip
+  row beside eight wide dockets made the board 1271px against the 1264 a
+  1280 window leaves a modal, so the chips' side margins went from 8 to 6.
+  A locked card's fade is applied where its terms get their parent
+  (`_apply_offer_fade`, called from `_set_offer_split`), not only when the
+  lock is read. `test_contract_board.gd` runs the filtered-views check on a
+  new game, with one order running and with every order running, and
+  checks the single fade at 1600x900 and 1280x720, requiring it to have
+  seen the terms both inside and outside the mix row.
+
 - 2026-09-29: **A splitter has a mode: left, right, T junction or three
   way.** (Owner's ask: "Currently splitters only let us split to the left. I
   want splitters to be configurable. so we click on the splitter an in its

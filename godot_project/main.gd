@@ -1982,6 +1982,35 @@ const BOARD_ACTIVE_COLUMN_WIDTH := 300.0 * UI_SCALE
 ## Where an offer's terms break when the board is at its narrowest: the
 ## strike rule goes onto its own line (`_fit_contract_board_split`).
 const BOARD_TERMS_JOIN := "  ·  "
+## The board's two filters (2026-09-29): which offers by where they stand,
+## and which by the sauce they ask for. Both are presentation — a filter
+## hides rows the wire already sent and decides nothing — so they live here
+## and are not saved. STATUS keys are the four answers `_board_offer_status`
+## gives, plus "all"; the SAUCE chips are built from the mixes on the wire,
+## so a fourth sauce in `contracts.ron` is a fourth chip with no Godot edit.
+const BOARD_STATUS_FILTERS := [
+	["all", "ALL"],
+	["open", "OPEN"],
+	["signed", "SIGNED"],
+	["locked", "🔒 LOCKED"],
+]
+var _board_status_filter := "all"
+## An item id every shown offer's mix must name, or "" for every sauce.
+var _board_sauce_filter := ""
+var _board_status_chips: Dictionary = {} # filter key -> Button
+var _board_sauce_row: HBoxContainer
+var _board_sauce_chips: Dictionary = {} # item id ("" = every sauce) -> Button
+var _board_sauce_ids: Array = [] # the item ids the chips were built for
+var _board_sauce_titles: Dictionary = {} # item id -> the chip's short name
+## The paper card the offer column shows when the filters match nothing.
+var _board_no_match: PanelContainer
+var _board_no_match_label: Label
+## A badge icon's side: the offer's first product, large, at the card's
+## left edge — the thing the eye finds first when scanning a column. With the
+## payout under it, this column is what sets a card's height; at 40 a card
+## was 5px too tall for a 1280x720 window to show two whole offers.
+const BOARD_BADGE_SIZE := Vector2(34, 34)
+const BOARD_UNLOCK_METER_WIDTH := 128.0 * UI_SCALE
 
 # --- The staff panel (the staff pools MVP, ticket 3, 2026-09-12) -----------
 # `data/staff.ron`'s four categories, read off `staff_snapshot_json`: how
@@ -2184,6 +2213,7 @@ const CONTRACT_LAST_CHANCE_COLOR := Color(0.70, 0.20, 0.14, 1.0)
 var _contract_card_style_ready: StyleBoxFlat
 var _contract_card_style_risk: StyleBoxFlat
 var _contract_card_style_last_chance: StyleBoxFlat
+var _contract_card_style_locked: StyleBoxFlat
 var _contract_warn_settings: LabelSettings
 var _contract_ready_settings: LabelSettings
 var _contract_empty_label: Label
@@ -6267,6 +6297,12 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_card_style_last_chance = _contract_card_style.duplicate()
 	_contract_card_style_last_chance.border_color = CONTRACT_LAST_CHANCE_COLOR
 	_contract_card_style_last_chance.set_border_width_all(_ui_i(3))
+	# A padlocked offer on the board is the one card whose PAPER changes: it
+	# is not an order in trouble but not yet an order at all, so it is a
+	# different kind of card, greyed like a carbon copy of what is coming.
+	_contract_card_style_locked = _contract_card_style.duplicate()
+	_contract_card_style_locked.bg_color = Color(0.64, 0.62, 0.56, 1.0)
+	_contract_card_style_locked.border_color = Color(0.42, 0.41, 0.38, 1.0)
 
 	# The dockets live in a ScrollContainer whose height is capped in
 	# _update_contract_panel — a safety valve for a future contracts.ron with
@@ -8630,6 +8666,27 @@ func _build_contract_board(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	offer_col.add_child(heading)
 	_board_offer_heading = heading
 
+	# The filters: where an offer stands on one row, which sauce on the
+	# next. Two rows rather than one because a row of seven chips beside the
+	# running dockets is wider than a 1280 window's offer column.
+	_board_status_chips.clear()
+	_board_sauce_chips.clear()
+	_board_sauce_ids.clear()
+	var status_row := HBoxContainer.new()
+	status_row.name = "StatusFilters"
+	status_row.add_theme_constant_override("separation", _ui_i(6))
+	offer_col.add_child(status_row)
+	status_row.add_child(_board_filter_caption("SHOW"))
+	for pair in BOARD_STATUS_FILTERS:
+		var chip := _board_filter_chip("Status_%s" % pair[0])
+		chip.pressed.connect(_set_board_status_filter.bind(String(pair[0])))
+		status_row.add_child(chip)
+		_board_status_chips[String(pair[0])] = chip
+	_board_sauce_row = HBoxContainer.new()
+	_board_sauce_row.name = "SauceFilters"
+	_board_sauce_row.add_theme_constant_override("separation", _ui_i(6))
+	offer_col.add_child(_board_sauce_row)
+
 	_board_scroll = ScrollContainer.new()
 	_board_scroll.name = "BoardScroll"
 	_board_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -8642,7 +8699,18 @@ func _build_contract_board(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_board_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_board_scroll.add_child(_board_box)
 
+	_board_no_match = PanelContainer.new()
+	_board_no_match.name = "NoMatchingOffers"
+	_board_no_match.add_theme_stylebox_override("panel", _contract_card_style)
+	_board_no_match.visible = false
+	offer_col.add_child(_board_no_match)
+	_board_no_match_label = Label.new()
+	_board_no_match_label.label_settings = _contract_ink_settings
+	_board_no_match.add_child(_board_no_match_label)
+
 	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
+	# Chips first: the rows' mix text takes the chips' short names.
+	_rebuild_board_sauce_chips(econ.get("board", []))
 	_rebuild_board_rows(econ.get("board", []))
 	_rebuild_board_active_cards(econ.get("contracts", []))
 
@@ -8650,7 +8718,7 @@ func _build_contract_board(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	footer.label_settings = base_settings
 	# One line, not two: beside the running dockets a line of height is what
 	# decides whether a 720-high window shows one offer or two.
-	footer.text = "SIGN takes an order — one of each, never two  ·  miss its strikes in a row and it comes back here    C/ESC: close"
+	footer.text = "SIGN takes one of each  ·  🔒 opens as the sauce below sells  ·  a lost order comes back    C/ESC: close"
 	body.add_child(footer)
 
 	_position_contract_board()
@@ -8689,57 +8757,122 @@ func _position_contract_board() -> void:
 	_board_panel.position.y = max(8.0, (bounds.y - reserved - panel_size.y) * 0.5)
 
 
-## Gives every offer its terms on the mix's own line if the board can wear
+## Gives each offer its terms on the mix's own line if the board can wear
 ## them there, and breaks them onto a second line if it cannot — and, since
 ## the board has shared the window with the running dockets (2026-09-26),
 ## breaks the strike rule off the terms onto a third line if even that is
 ## too wide, at the " · " join the sentence already has, and last of all
-## puts each item of a many-item mix on a line of its own, at its ", ".
-## Returns whether it had to break at all.
+## puts each item of a many-item mix on a line of its own, at its ", ", and
+## after that breaks a long NAME at the space nearest its middle — a name
+## is one Label that no other break shortens, and beside four running
+## dockets "Burger Franchise Supply Deal" was 18px more than a 1280 window
+## had. Returns whether it had to break any offer at all.
 ##
 ## MEASURED rather than assumed, the way `_fit_staff_width` measures and for
 ## the same reason: the break is what fits the board in a 1280x720 window
 ## (`_build_contract_board_row`), and it is not free anywhere else. Every
-## break is a line of height on every card, and the board asks `snap_rows`
-## for the last WHOLE card — so one line too many cost 1600x900 its third
-## offer once, and 1280x720 its second (PR #195's review; the status line
-## moved under the SIGN button and the strike rule shortened to "N strikes"
-## to win it back). The window that has the width should show the sentence.
+## break is a line of height on a card, and the board asks `snap_rows` for
+## the last WHOLE card — so one line too many cost 1600x900 its third offer
+## once, and 1280x720 its second (PR #195's review). The window that has
+## the width should show the sentence.
+##
+## PER CARD since 2026-09-29: the board used to break every offer to the
+## level its widest one needed, so one three-product mustard order put every
+## one-line ketchup order's terms on three lines, and a 1280x720 window
+## showed one offer. Each card now breaks only as far as it must to fit the
+## width the rest of the panel leaves the offer column.
 func _fit_contract_board_split() -> bool:
 	if _board_panel == null or _board_rows.is_empty():
 		return false
 	var available: float = _modal_available_width()
-	for level in range(4):
-		_set_contract_board_split(level)
-		if _board_panel.get_combined_minimum_size().x <= available:
-			return level > 0
-	return true
+	_board_scroll.custom_minimum_size.x = 0.0
+	_board_no_match.custom_minimum_size.x = 0.0
+	_set_contract_board_split(0)
+	var offer_col: Control = _board_scroll.get_parent()
+	var room := available - (_board_panel.get_combined_minimum_size().x - offer_col.get_combined_minimum_size().x)
+	var broke := false
+	for row in _board_rows:
+		for level in range(5):
+			_set_offer_split(row, level)
+			if level > 0:
+				broke = true
+			if row["panel"].get_combined_minimum_size().x <= room:
+				break
+	# The column is as wide as the widest card on the WHOLE board, shown or
+	# filtered out: sized by the visible ones alone, the panel changed width
+	# and re-centred on every filter click.
+	var widest := 0.0
+	for row in _board_rows:
+		widest = maxf(widest, row["panel"].get_combined_minimum_size().x)
+	# Plus the scroll bar, which a long list shows and a short one does not;
+	# and the no-match card, shown in the list's place, takes the same width.
+	_board_scroll.custom_minimum_size.x = widest + _board_scroll.get_v_scroll_bar().get_combined_minimum_size().x
+	_board_no_match.custom_minimum_size.x = _board_scroll.custom_minimum_size.x
+	return broke
 
 
-## Breaks every offer to `level`: 0 is one line; 1 moves the terms onto a
-## line of their own; 2 also breaks the strike rule off the terms; 3 also
-## puts each item of the mix on its own line. The labels are always the same
+## `text` broken into two lines at the space nearest its middle, or as it is
+## if it has no space.
+func _split_at_middle_space(text: String) -> String:
+	var best := -1
+	for i in range(text.length()):
+		if text[i] == " " and (best < 0 or absi(i * 2 - text.length()) < absi(best * 2 - text.length())):
+			best = i
+	if best < 0:
+		return text
+	return text.substr(0, best) + "\n" + text.substr(best + 1)
+
+
+## Breaks every offer to `level` (`_set_offer_split`).
+func _set_contract_board_split(level: int) -> void:
+	for row in _board_rows:
+		_set_offer_split(row, level)
+
+
+## Breaks one offer to `level`: 0 is one line; 1 moves the terms onto a line
+## of their own; 2 also breaks the strike rule off the terms; 3 also puts
+## each item of the mix on its own line; 4 also breaks the name in two at
+## the space nearest its middle. The labels are always the same
 ## labels, so nothing is re-measured by the move; only which box holds the
 ## terms, and where the texts carry a line break, changes.
-func _set_contract_board_split(level: int) -> void:
+func _set_offer_split(row: Dictionary, level: int) -> void:
 	var split := level > 0
-	for row in _board_rows:
-		var terms: Label = row["terms_label"]
-		var halves: PackedStringArray = terms.get_meta("halves")
-		terms.text = ("\n" if level > 1 else BOARD_TERMS_JOIN).join(halves)
-		var mix: Label = row["mix_label"]
-		var parts: PackedStringArray = mix.get_meta("parts")
-		mix.text = (",\n" if level > 2 else ", ").join(parts)
-		var mix_row: Control = row["mix_label"].get_parent()
-		var text_col: Control = mix_row.get_parent()
-		var wanted: Control = text_col if split else mix_row
-		if terms.get_parent() == wanted:
-			continue
+	var terms: Label = row["terms_label"]
+	var halves: PackedStringArray = terms.get_meta("halves")
+	terms.text = ("\n" if level > 1 else BOARD_TERMS_JOIN).join(halves)
+	var mix: Label = row["mix_label"]
+	var parts: PackedStringArray = mix.get_meta("parts")
+	mix.text = (",\n" if level > 2 else ", ").join(parts)
+	var name_label: Label = row["name_label"]
+	var full_name: String = name_label.get_meta("full")
+	name_label.text = _split_at_middle_space(full_name) if level > 3 else full_name
+	var mix_row: Control = row["mix_label"].get_parent()
+	var text_col: Control = mix_row.get_parent()
+	var wanted: Control = text_col if split else mix_row
+	if terms.get_parent() != wanted:
 		terms.get_parent().remove_child(terms)
 		wanted.add_child(terms)
 		if split:
-			# Directly under the mix it continues, above the status line.
+			# Directly under the mix it continues.
 			text_col.move_child(terms, mix_row.get_index() + 1)
+	_apply_offer_fade(row)
+
+
+## Fades a locked offer's words, and only once each: a modulate multiplies
+## down the tree, and the terms sit inside the faded mix row unless a split
+## moved them out. So it runs where the terms get their parent
+## (`_set_offer_split`) as well as where the lock is read — set only on the
+## read, a resize that moved the terms drew them at 0.30 or 1.00 until the
+## next one.
+func _apply_offer_fade(row: Dictionary) -> void:
+	var faded := Color(1, 1, 1, 0.55) if String(row["status"]) == "locked" else Color(1, 1, 1, 1)
+	row["badge_icon"].modulate = faded
+	row["name_label"].modulate = faded
+	row["payout_label"].modulate = faded
+	var mix_row: Control = row["mix_label"].get_parent()
+	mix_row.modulate = faded
+	var terms: Label = row["terms_label"]
+	terms.modulate = Color(1, 1, 1, 1) if terms.get_parent() == mix_row else faded
 
 
 ## Rebuilds the offer rows from a `board` array. The board is content and
@@ -8798,8 +8931,18 @@ func _board_rows_match(board: Array) -> bool:
 
 ## One offer: a paper docket (the clipboard's card style — an offer is an
 ## order that is not yet yours) with the terms in words and one SIGN button.
-## Returns `{"id", "panel", "name_label", "terms_label", "status_label",
-## "sign_button"}` for `_update_contract_board` to drive.
+## Returns `{"id", "panel", "name_label", "payout_label", "mix_label",
+## "terms_label", "lock_row", "lock_meter", "lock_count",
+## "badge", "badge_icon", "badge_lock", "status_label", "sign_button",
+## "mix_ids", "status"}` for `_update_contract_board`
+## and the filters to drive.
+##
+## Read left to right the way a player scans a column of them: the product
+## badge with what it pays under it (what sauce, is it worth it), the name,
+## the mix and terms (can I serve it), and the button (what it costs). A
+## padlocked offer's button names its gate instead, with how far along that
+## gate is under it on the gate's own meter — the sim defines that ceiling,
+## so it is a meter.
 func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 	var panel := PanelContainer.new()
 	panel.name = "Offer_%s" % String(offer.get("id", "?"))
@@ -8807,8 +8950,60 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 	_board_box.add_child(panel)
 
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", _ui_i(12))
+	row.add_theme_constant_override("separation", _ui_i(10))
 	panel.add_child(row)
+
+	# The badge: the first product of the mix, large, on a darker square of
+	# the same paper, with the padlock over its corner when the offer is
+	# locked — the checkbox's own tones, so no third palette.
+	var mix: Array = offer.get("mix", [])
+	var badge := PanelContainer.new()
+	badge.name = "Badge"
+	var badge_style := StyleBoxFlat.new()
+	badge_style.bg_color = CONTRACT_METER_TRACK
+	badge_style.border_color = CONTRACT_METER_BORDER
+	badge_style.set_border_width_all(_ui_i(1))
+	badge_style.set_content_margin_all(_ui_px(3.0))
+	badge.add_theme_stylebox_override("panel", badge_style)
+	badge.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	# The badge and what one delivery pays stack in one column: what the
+	# order is for, and what it is worth, read as one thing — the number a
+	# player compares first, in the clipboard's own payout ink
+	# (`_contract_gain_settings`). It is not on the name's line, which made
+	# every card ~200px wider than a 1280 window's offer column, nor over
+	# the SIGN button, which made every card a line taller and left that
+	# window one offer; under the badge it costs neither.
+	var badge_col := VBoxContainer.new()
+	badge_col.name = "BadgeColumn"
+	badge_col.add_theme_constant_override("separation", _ui_i(2))
+	badge_col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(badge_col)
+	badge_col.add_child(badge)
+	var payout_label := Label.new()
+	payout_label.name = "OfferPayout"
+	payout_label.label_settings = _contract_gain_settings
+	payout_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	payout_label.text = "+%d" % int(offer.get("payout", 0))
+	badge_col.add_child(payout_label)
+	var badge_icon := TextureRect.new()
+	badge_icon.custom_minimum_size = _ui_v(BOARD_BADGE_SIZE)
+	badge_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	badge_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	if not mix.is_empty():
+		badge_icon.texture = _icon_for(String(mix[0][0]))
+	badge.add_child(badge_icon)
+	var badge_lock := Label.new()
+	badge_lock.name = "Locked"
+	var lock_settings := LabelSettings.new()
+	lock_settings.font_size = _ui_font(-2)
+	lock_settings.outline_size = _ui_i(4)
+	lock_settings.outline_color = Color(0, 0, 0, 0.9)
+	badge_lock.label_settings = lock_settings
+	badge_lock.text = "🔒"
+	badge_lock.visible = false
+	badge_lock.size_flags_horizontal = Control.SIZE_SHRINK_END
+	badge_lock.size_flags_vertical = Control.SIZE_SHRINK_END
+	badge.add_child(badge_lock)
 
 	var text_col := VBoxContainer.new()
 	text_col.add_theme_constant_override("separation", _ui_i(3))
@@ -8819,57 +9014,63 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 	name_label.name = "OfferName"
 	name_label.label_settings = _contract_name_settings
 	name_label.text = String(offer.get("name", offer.get("id", "?")))
+	# Kept for `_set_offer_split`, which may break a long name in two.
+	name_label.set_meta("full", name_label.text)
 	text_col.add_child(name_label)
 
 	# The mix, with the item's real icon (UI_UX.md §5) and its display name,
-	# then the cadence, the payout and the strike rule — every term a player
-	# is agreeing to, on the offer, before they click.
+	# then the cadence and the strike rule — every term a player is agreeing
+	# to, on the offer, before they click.
 	#
 	# Built on ONE line, which is how the sentence reads: what you deliver and
 	# on what terms. It does not always fit. A two-item mix ("3 × Boxed
-	# Ketchup, 2 × Boxed BBQ Sauce every 3000 ticks · pays +210 · lost after 2
-	# missed in a row") makes the card 1324px wide and the board 1380px —
-	# wider than a 1280x720 window, clipped on both edges, with SIGN off the
-	# right of the screen (issue #62). `_fit_contract_board_split` breaks it
-	# at the join the sentence already has when that happens, so the column is
-	# as wide as its LONGER half instead of as wide as both. It is a break at
-	# a fixed point, not a reflow — see `autowrap_mode` under
+	# Ketchup, 2 × Boxed BBQ Sauce every 1m 40s · 2 strikes") can make the
+	# board wider than a 1280x720 window, clipped on both edges, with SIGN off
+	# the right of the screen (issue #62). `_fit_contract_board_split` breaks
+	# it at the join the sentence already has when that happens, so the column
+	# is as wide as its LONGER half instead of as wide as both. It is a break
+	# at a fixed point, not a reflow — see `autowrap_mode` under
 	# MODAL_EDGE_MARGIN for why the difference matters here.
 	var mix_row := HBoxContainer.new()
 	mix_row.add_theme_constant_override("separation", _ui_i(6))
 	text_col.add_child(mix_row)
 	var parts: Array = []
-	for pair in offer.get("mix", []):
+	var mix_ids: Array = []
+	for pair in mix:
 		var item_id: String = String(pair[0])
+		mix_ids.append(item_id)
 		var icon := TextureRect.new()
 		icon.custom_minimum_size = _ui_v(Vector2(16, 16))
 		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		icon.texture = _icon_for(item_id)
 		mix_row.add_child(icon)
-		parts.append("%d × %s" % [int(pair[1]), _item_display_name(item_id)])
+		# The sauce chips' short name ("Ketchup", not "Boxed Ketchup"): the
+		# icon beside it is the box, and the shared word was what broke a
+		# two-product mix onto a line per item.
+		parts.append("%d × %s" % [int(pair[1]), String(_board_sauce_titles.get(item_id, _item_display_name(item_id)))])
 	var mix_label := Label.new()
 	mix_label.name = "OfferMix"
 	mix_label.label_settings = _contract_ink_settings
 	mix_label.text = ", ".join(PackedStringArray(parts))
-	# Kept for `_set_contract_board_split`, which may break the mix at ", ".
+	# Kept for `_set_offer_split`, which may break the mix at ", ".
 	mix_label.set_meta("parts", PackedStringArray(parts))
 	mix_row.add_child(mix_label)
 	var terms_label := Label.new()
 	terms_label.name = "OfferTerms"
-	terms_label.label_settings = _contract_ink_settings
-	# The two halves kept apart, so `_set_contract_board_split` can break at
+	terms_label.label_settings = _contract_meta_settings
+	# The two halves kept apart, so `_set_offer_split` can break at
 	# the join and put it back.
 	#
 	# The strike rule is "3 strikes", not "lost after 3 missed in a row": the
 	# long form is what broke the terms onto a second line beside the running
 	# dockets, and a fifth line on every card is what left a 1280x720 window
 	# one offer. The footer says what a strike is, and a signed docket spells
-	# the rule out in full beside its pips.
+	# the rule out in full beside its pips. The cadence is in seconds, as the
+	# running docket's is — never ticks on a player-facing clock.
 	var strikes := int(offer.get("strikes", 1))
 	var halves := PackedStringArray([
-		"every %d ticks%spays +%d" % [
-			int(offer.get("cadence_ticks", 0)), BOARD_TERMS_JOIN, int(offer.get("payout", 0))],
+		"every %s" % _format_remaining(int(offer.get("cadence_ticks", 0))),
 		"%d strike%s" % [strikes, "" if strikes == 1 else "s"],
 	])
 	terms_label.set_meta("halves", halves)
@@ -8902,27 +9103,234 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	sign_col.add_child(status_label)
 
+	# In the status's place while a gate holds the offer back: the gate's own
+	# meter, the button's width, with the count in words written ON it (never
+	# the bar alone, UI_UX.md §7), while the button names the gate. It lives
+	# in the button's column, not under the terms, and the words are inside
+	# the bar rather than under it: a padlock line under the terms made a
+	# locked card ~95px taller than an open one, a bar over a caption still
+	# 15px, and either left the LOCKED filter at 1280x720 one card. A bar
+	# one status line tall is exactly the status line it replaces.
+	var lock_row := CenterContainer.new()
+	lock_row.name = "UnlockRow"
+	lock_row.visible = false
+	sign_col.add_child(lock_row)
+	var lock_count := Label.new()
+	lock_count.name = "UnlockCount"
+	lock_count.label_settings = _contract_meta_settings
+	lock_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lock_count.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lock_count.text = "0"
+	var lock_meter := _build_meter(
+		lock_row, BOARD_UNLOCK_METER_WIDTH, METER_FILL_PROGRESS,
+		CONTRACT_METER_TRACK, CONTRACT_METER_BORDER,
+		lock_count.get_combined_minimum_size().y)
+	lock_meter.add_child(lock_count)
+	lock_count.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
 	return {
 		"id": String(offer.get("id", "")),
 		"panel": panel,
+		"badge": badge,
+		"badge_icon": badge_icon,
+		"badge_lock": badge_lock,
 		"name_label": name_label,
+		"payout_label": payout_label,
 		"mix_label": mix_label,
 		"terms_label": terms_label,
+		"lock_row": lock_row,
+		"lock_meter": lock_meter,
+		"lock_count": lock_count,
 		"status_label": status_label,
 		"sign_button": sign_button,
+		"mix_ids": mix_ids,
+		"status": "open",
 	}
+
+
+## Where one offer stands, as the filters sort it: "signed" (running now),
+## "locked" (a gate holds it back), or "open" (yours to sign, affordable or
+## not). Read straight off the wire's own flags — nothing is decided here.
+func _board_offer_status(offer: Dictionary) -> String:
+	if bool(offer.get("active", false)):
+		return "signed"
+	if bool(offer.get("locked", false)):
+		return "locked"
+	return "open"
+
+
+## A filter chip: the build menu's slot skin at chip size, toggled on the
+## hazard yellow the rest of the HUD uses for "this one". Pressed is the
+## selection, so the chosen filter is told by border, fill AND a tick in its
+## text, never colour alone (UI_UX.md §7).
+func _board_filter_chip(node_name: String) -> Button:
+	var chip := Button.new()
+	chip.name = node_name
+	chip.toggle_mode = true
+	chip.focus_mode = Control.FOCUS_NONE
+	chip.add_theme_font_size_override("font_size", _ui_font(-3))
+	chip.add_theme_constant_override("icon_max_width", _ui_i(18))
+	chip.add_theme_constant_override("h_separation", _ui_i(4))
+	for state in ["normal", "hover", "pressed", "hover_pressed", "disabled", "focus"]:
+		var style := _shop_slot_style("pressed" if state == "hover_pressed" else state)
+		style.set_border_width_all(_ui_i(2))
+		# 6, not 8: with every order running the dockets widen the left
+		# column, and the SAUCE row was the offer column's widest line —
+		# 7px past the modal margin at 1280.
+		style.content_margin_left = _ui_px(6.0)
+		style.content_margin_right = _ui_px(6.0)
+		style.content_margin_top = _ui_px(3.0)
+		style.content_margin_bottom = _ui_px(3.0)
+		chip.add_theme_stylebox_override(state, style)
+	chip.add_theme_color_override("font_pressed_color", Color(0.98, 0.85, 0.42))
+	chip.add_theme_color_override("font_hover_pressed_color", Color(0.98, 0.85, 0.42))
+	return chip
+
+
+func _board_filter_caption(text: String) -> Label:
+	var caption := Label.new()
+	var settings := LabelSettings.new()
+	settings.font_size = _ui_font(-3)
+	settings.font_color = Color(0.62, 0.64, 0.68)
+	caption.label_settings = settings
+	caption.text = text
+	caption.custom_minimum_size.x = _ui_px(52.0)
+	caption.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	return caption
+
+
+## Rebuilds the sauce chips from the products the board's mixes name, in the
+## order they first appear — file order, which is tier order. Only when that
+## set changes, the board rows' own guard.
+func _rebuild_board_sauce_chips(board: Array) -> void:
+	var ids: Array = []
+	for offer in board:
+		for pair in offer.get("mix", []):
+			var item_id := String(pair[0])
+			if not ids.has(item_id):
+				ids.append(item_id)
+	if ids == _board_sauce_ids and not _board_sauce_chips.is_empty():
+		return
+	for child in _board_sauce_row.get_children():
+		_board_sauce_row.remove_child(child)
+		child.queue_free()
+	_board_sauce_chips.clear()
+	_board_sauce_ids = ids
+	_board_sauce_titles = _shared_words_stripped(ids)
+	_board_sauce_row.add_child(_board_filter_caption("SAUCE"))
+	var every := _board_filter_chip("Sauce_all")
+	every.pressed.connect(_set_board_sauce_filter.bind(""))
+	_board_sauce_row.add_child(every)
+	_board_sauce_chips[""] = every
+	for item_id in ids:
+		var chip := _board_filter_chip("Sauce_%s" % item_id)
+		chip.icon = _icon_for(item_id)
+		chip.expand_icon = false
+		chip.pressed.connect(_set_board_sauce_filter.bind(String(item_id)))
+		_board_sauce_row.add_child(chip)
+		_board_sauce_chips[item_id] = chip
+	if not ids.has(_board_sauce_filter):
+		_board_sauce_filter = ""
+
+
+## Each item's display name without the leading words EVERY name shares:
+## "Boxed Ketchup", "Boxed BBQ Sauce" and "Boxed Mustard" become "Ketchup",
+## "BBQ Sauce" and "Mustard". A chip row of full names was wider than a
+## 1280 window's offer column, and the shared word told the player nothing
+## the icon beside it does not. Formatting, not content: no name is typed
+## here, and a lone item, or a set with nothing in common, keeps its full name.
+func _shared_words_stripped(item_ids: Array) -> Dictionary:
+	var words: Array = []
+	for item_id in item_ids:
+		words.append(_item_display_name(String(item_id)).split(" "))
+	var shared := 0
+	if words.size() > 1:
+		while true:
+			var ok := true
+			for w in words:
+				if w.size() <= shared + 1 or w[shared] != words[0][shared]:
+					ok = false
+			if not ok:
+				break
+			shared += 1
+	var out := {}
+	for i in range(item_ids.size()):
+		out[String(item_ids[i])] = " ".join(words[i].slice(shared))
+	return out
+
+
+func _set_board_status_filter(key: String) -> void:
+	_board_status_filter = key
+	_board_scroll.scroll_vertical = 0
+	_update_contract_board()
+
+
+## Clicking the sauce already chosen clears it, so a chip is a toggle as
+## well as a pick.
+func _set_board_sauce_filter(item_id: String) -> void:
+	_board_sauce_filter = "" if item_id == _board_sauce_filter else item_id
+	_board_scroll.scroll_vertical = 0
+	_update_contract_board()
+
+
+## Shows the rows both filters let through, and writes every chip's count:
+## how many offers that chip would show given the OTHER filter as it stands,
+## so a click never lands on an empty board by surprise.
+func _apply_board_filters() -> void:
+	var shown := 0
+	var status_counts := {}
+	var sauce_counts := {"": 0}
+	for row in _board_rows:
+		var status := String(row["status"])
+		var mix_ids: Array = row["mix_ids"]
+		var sauce_ok := _board_sauce_filter == "" or mix_ids.has(_board_sauce_filter)
+		var status_ok := _board_status_filter == "all" or status == _board_status_filter
+		if sauce_ok:
+			status_counts["all"] = int(status_counts.get("all", 0)) + 1
+			status_counts[status] = int(status_counts.get(status, 0)) + 1
+		if status_ok:
+			sauce_counts[""] += 1
+			for item_id in mix_ids:
+				sauce_counts[item_id] = int(sauce_counts.get(item_id, 0)) + 1
+		var show_row := sauce_ok and status_ok
+		row["panel"].visible = show_row
+		if show_row:
+			shown += 1
+	for pair in BOARD_STATUS_FILTERS:
+		var key := String(pair[0])
+		var chip: Button = _board_status_chips.get(key)
+		if chip == null:
+			continue
+		var chosen := key == _board_status_filter
+		chip.set_pressed_no_signal(chosen)
+		chip.text = "%s%s  %d" % ["✔ " if chosen else "", pair[1], int(status_counts.get(key, 0))]
+	for item_id in _board_sauce_chips:
+		var chip: Button = _board_sauce_chips[item_id]
+		var chosen := String(item_id) == _board_sauce_filter
+		chip.set_pressed_no_signal(chosen)
+		var title := "ALL" if item_id == "" else String(_board_sauce_titles.get(item_id, item_id))
+		chip.text = "%s%s  %d" % ["✔ " if chosen else "", title, int(sauce_counts.get(item_id, 0))]
+	_board_no_match.visible = shown == 0
+	_board_scroll.visible = shown > 0
+	if shown == 0:
+		# Two lines: on one it was the widest thing in the column, and
+		# widened the board past its cards.
+		_board_no_match_label.text = "No orders match these filters.\nPick ALL to see the whole board."
 
 
 ## Reads the board off the economy snapshot and drives every row: the button
 ## says what a click will do (SIGN · price), or why it will do nothing
-## (SIGNED — one of each; ✗ — the fee is more than the balance), with the
-## same three never-colour-alone signals the build menu uses.
+## (SIGNED — one of each; ✗ — the fee is more than the balance; 🔒 — a gate
+## has not opened), with the same three never-colour-alone signals the build
+## menu uses. Then the filters decide which rows are shown.
 func _update_contract_board(econ: Dictionary = {}) -> void:
 	if _board_panel == null:
 		return
 	if econ.is_empty():
 		econ = _read_economy()
 	var board: Array = econ.get("board", [])
+	# Chips first: the rows' mix text takes the chips' short names.
+	_rebuild_board_sauce_chips(board)
 	if not _board_rows_match(board):
 		_rebuild_board_rows(board)
 	_board_money_label.text = "Money: %.0f" % float(econ.get("money", 0.0))
@@ -8941,36 +9349,67 @@ func _update_contract_board(econ: Dictionary = {}) -> void:
 		var offer: Dictionary = board[i]
 		var row: Dictionary = _board_rows[i]
 		var price: int = int(offer.get("price", 0))
-		var active: bool = bool(offer.get("active", false))
 		var affordable: bool = bool(offer.get("affordable", false))
 		var lost: int = int(offer.get("times_lost", 0))
+		var status_key := _board_offer_status(offer)
+		row["status"] = status_key
 		var button: Button = row["sign_button"]
 		var status: Label = row["status_label"]
-		# Short, and on lines of their own: they sit under the SIGN button, so
-		# the button column is as wide as their widest line — and the button
-		# already carries the price.
+		var locked := status_key == "locked"
+		# A locked card is the carbon copy: its paper greys (the style), and
+		# its words and badge fade, but the padlock meter stays in full ink —
+		# it is the one thing on the card the player can act on now.
+		_apply_offer_fade(row)
+		row["badge_lock"].visible = locked
+		row["lock_row"].visible = locked
+		status.visible = not locked
+		# Short, and ONE line: they sit under the SIGN button, so the button
+		# column is as wide as their widest line, and a second line ("lost 2
+		# times before") made a signed card 24px taller than its neighbours —
+		# with the board full, the SIGNED view at 1280x720 one card (PR #208).
 		var lost_note := ""
 		if lost > 0:
-			lost_note = "\nlost %d time%s before" % [lost, "" if lost == 1 else "s"]
-		if active:
+			lost_note = " · lost ×%d" % lost
+		if locked:
+			var required := int(offer.get("unlock_boxes", 0))
+			var sold := int(offer.get("unlock_sold", 0))
+			var unlock_item := String(offer.get("unlock_item", ""))
+			row["lock_count"].text = "%d of %d %s sold" % [
+				sold, required, String(_board_sauce_titles.get(unlock_item, _item_display_name(unlock_item)))]
+			# A long item name widens the bar rather than spilling out of it.
+			row["lock_meter"].custom_minimum_size.x = maxf(
+				BOARD_UNLOCK_METER_WIDTH, row["lock_count"].get_combined_minimum_size().x + _ui_px(10.0))
+			_set_meter(row["lock_meter"], float(sold) / float(required) if required > 0 else 0.0)
+			# The gate's own name from `unlocks.ron`, where the price would be:
+			# what the click is waiting on, not what it would cost.
+			button.text = "🔒 %s" % String(offer.get("unlock_name", ""))
+			button.disabled = true
+			status.text = ""
+			row["panel"].add_theme_stylebox_override("panel", _contract_card_style_locked)
+		elif status_key == "signed":
 			button.text = "SIGNED"
 			button.disabled = true
-			status.text = "✔ running, on the left" + lost_note
+			status.text = ("✔ running" + lost_note) if lost > 0 else "✔ running, on the left"
 			row["panel"].add_theme_stylebox_override("panel", _contract_card_style_ready)
 		elif not affordable:
 			button.text = "✗ SIGN · %d" % price
 			button.disabled = true
-			status.text = "✗ can't afford it" + lost_note
+			status.text = ("✗ can't afford" + lost_note) if lost > 0 else "✗ can't afford it"
 			row["panel"].add_theme_stylebox_override("panel", _contract_card_style)
 		else:
 			button.text = "SIGN · %d" % price
 			button.disabled = false
 			if lost > 0:
-				status.text = "✗ LOST — sign again" + lost_note
+				# One line, the count folded into the word it counts: the
+				# payout under the badge made the badge column a card's
+				# height, and a second line here made a LOST card 28px taller
+				# than an open one — a 1280x720 window's second offer.
+				status.text = "✗ LOST%s — sign again" % ("" if lost == 1 else " ×%d" % lost)
 				row["panel"].add_theme_stylebox_override("panel", _contract_card_style_last_chance)
 			else:
 				status.text = "available"
 				row["panel"].add_theme_stylebox_override("panel", _contract_card_style)
+	_apply_board_filters()
 	_position_contract_board()
 
 

@@ -644,7 +644,7 @@ fn every_fact_the_guide_can_ask_for_is_answered_from_the_content_files() {
         "so the panel knows to look that id up rather than print it"
     );
 
-    // The orders the board is showing a brand-new factory, which is neither
+    // The orders a brand-new factory may sign, which is neither
     // the file's count nor the starters: a starter is one the game signs for
     // you, and the shipped board has none, while nine are simply ungated.
     let open_now = contracts

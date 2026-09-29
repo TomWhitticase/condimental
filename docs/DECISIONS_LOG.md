@@ -18,6 +18,19 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-09-29 **The contracts board lists every offer and padlocks the gated
+  ones; its filters are presentation.** A contract a gate holds back is ON
+  the board, flagged: `ContractOfferSnapshot` carries `locked`,
+  `unlock_name`, `unlock_item`, `unlock_boxes`, `unlock_sold` — the shape
+  `ContentsChoice` already gives a gated ingredient (§5g) — filled by
+  `Economy::contract_gate`, and `SignContract` still returns
+  `SignRefusal::Locked`. The card draws the flag (locked paper, 🔒 on the badge,
+  the button naming the gate, its meter with the count in words on it, the
+  height of an open card) and decides
+  nothing. The SHOW (all/open/signed/locked) and SAUCE (one chip per product
+  the mixes name) filters only hide rows the wire sent, count what each chip
+  would show, and live in `main.gd`. The ingredient market still hides
+  gated raws; only the board changed. Full record in `docs/DECISIONS.md`.
 - 2026-09-29 **A splitter has a mode: left, right, T junction or three way.**
   Click a splitter and its configuration panel's SPLITS picker sets
   `SetSplitterMode { tile, mode }` (`set_splitter_mode`). A splitter has three

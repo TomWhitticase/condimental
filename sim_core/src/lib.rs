@@ -607,7 +607,9 @@ impl SimBridge {
     ///   {"id": "corner_shop", "name": "Corner Shop Standing Order",
     ///    "mix": [["boxed_ketchup", 2]], "cadence_ticks": 1000,
     ///    "payout": 50.0, "price": 40.0, "strikes": 3, "starter": false,
-    ///    "active": false, "affordable": true, "times_lost": 0},
+    ///    "active": false, "affordable": true, "times_lost": 0,
+    ///    "locked": false, "unlock_name": "", "unlock_item": "",
+    ///    "unlock_boxes": 0, "unlock_sold": 0},
     ///   ...
     /// ]
     /// ```
@@ -646,14 +648,18 @@ impl SimBridge {
     /// board — counts, not lists, so the announcement can name the halves of
     /// the game that changed without assuming every gate touches both.
     ///
-    /// **`board` is filtered by those gates**, and so is
-    /// `ingredients_snapshot_json`'s `entries`: an offer behind a closed
-    /// gate is simply absent, the way a lost contract is absent from
-    /// `contracts`. Do not re-derive that filter in GDScript — the
-    /// simulation refuses `sign_contract` and `buy_ingredient` for a locked
-    /// id too, so the wire and the rules already agree. Like a contract
-    /// loss, an unlock raises no event: a UI that wants to announce one
-    /// diffs `unlocks[].open` between two polls.
+    /// **`board` padlocks what those gates hold back** (since 2026-09-29;
+    /// before that it left it out): an offer behind a closed gate is listed
+    /// with `"locked": true` and the gate's `unlock_name`, `unlock_item`,
+    /// `unlock_boxes` and `unlock_sold` — the contents picker's four fields,
+    /// meaning the same thing — so the board can show what is coming and
+    /// what opens it. `ingredients_snapshot_json`'s `entries` is still
+    /// filtered: a locked ingredient is simply absent from the market. Do
+    /// not re-derive either answer in GDScript — the simulation refuses
+    /// `sign_contract` and `buy_ingredient` for a locked id, so the wire and
+    /// the rules already agree. Like a contract loss, an unlock raises no
+    /// event: a UI that wants to announce one diffs `unlocks[].open` between
+    /// two polls.
     #[func]
     fn economy_snapshot_json(&self) -> GString {
         let snapshot = self.world.economy_snapshot();

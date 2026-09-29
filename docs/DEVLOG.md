@@ -253,6 +253,21 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-29 — The contracts board shows what is coming, and filters
+
+The owner asked for orders a factory cannot make yet to show as locked, for
+the board to be filterable, and for it to look better. A new game's board
+now lists all seventeen orders: the nine ketchup ones to sign, and eight BBQ
+and mustard ones on greyed paper with a padlock, the gate's name on the
+button and a meter under it of how many boxes of the sauce below have sold. The simulation flags each
+one and still refuses the signature; the card only draws it. Two chip rows
+filter by status (all / open / signed / locked) and by sauce, each chip
+counting what it would show. Each card was redrawn around a product badge,
+with the payout under it and the cadence in seconds. The fit pass now breaks
+each card only as far as that card needs, so one long mixed order no longer
+puts every card on three lines, and a 1280x720 window still shows two whole
+offers — under every filter, locked ones included. No save-format change.
+
 ### 2026-09-29 — A splitter can split left, right, as a T or three ways
 
 The owner reported that splitters only ever split left, and asked to click one
