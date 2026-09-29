@@ -253,6 +253,24 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-29 — A splitter can split left, right, as a T or three ways
+
+The owner reported that splitters only ever split left, and asked to click one
+and choose. The simulation's branch had always been the facing turned
+clockwise, which the mirrored renderer draws on the player's left, so a right
+split meant facing the splitter backwards. A splitter now has a mode —
+**left** (the default, and every splitter before this), **right**, **T
+junction** (left and right, nothing straight on) and **three way** — set from
+the configuration panel's SPLITS picker. It deals round robin over the mode's
+sides, with the same same-tick fallback as before. The sides are still derived
+from the facing, so rotating a splitter turns all of them, and the mode is the
+only thing stored. Each mode has its own body model with exactly its exits
+open and a groove for each, and the arrow turns right as well as left.
+
+The mode is saved, so the save format is version 7, and
+`scripts/migrate-save-v6-to-v7.py` converts a v6 save exactly: every old
+splitter becomes `left`.
+
 ### 2026-09-29 — the `--bbq` shot renders again, and the mustard gate is re-measured
 
 `scripts/screenshot-scene.sh --bbq` had been refused by its own health check

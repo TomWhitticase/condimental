@@ -1141,7 +1141,10 @@ one that does: click a hopper or a fluid tank and it opens beside that
 building carrying its level, a **FILL** button, an **AUTO-FILL** toggle and
 a **CONTENTS** picker of everything the simulation will let that vessel
 hold. Machines get the same panel with a different middle — a state line and
-the **MOTHBALL** toggle. It had no section here for a long time and it
+the **MOTHBALL** toggle. A splitter gets the picker alone, headed **SPLITS**:
+its four modes (left, right, T junction, three way), each slot pictured by
+that mode's own body so the slot shows the exits it opens, the current one
+ticked (2026-09-29). It had no section here for a long time and it
 should have had the first one, because §5a's ghost paragraph was describing
 a **Q** key that had already been deleted in its favour (issue #116).
 

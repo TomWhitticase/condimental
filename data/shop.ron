@@ -113,7 +113,7 @@
             price: 8,
             category: "logistics",
         ),
-        // Epic B's conveyor splitter — one belt in, two belts out. Listed
+        // Epic B's conveyor splitter — one belt in, up to three out. Listed
         // with the infrastructure rather than with the buildings because
         // that is what it is: a tile you drop into a line, the same size and
         // the same speed as the belt tile it stands in place of (it holds

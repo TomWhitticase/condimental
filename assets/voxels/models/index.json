@@ -260,6 +260,21 @@
     "metal",
     "emissive"
   ],
+  "machine_splitter_right": [
+    "matte",
+    "metal",
+    "emissive"
+  ],
+  "machine_splitter_t_junction": [
+    "matte",
+    "metal",
+    "emissive"
+  ],
+  "machine_splitter_three_way": [
+    "matte",
+    "metal",
+    "emissive"
+  ],
   "pipe": [
     "metal"
   ],

@@ -427,7 +427,7 @@ static func build_machines_fixture(sim) -> void:
 ## splitter with only its straight output built.
 ##
 ## The second one is the point of the fixture as much as the first: a
-## splitter whose branch was never laid reports `next_output: "branch"`
+## splitter whose left belt was never laid reports `next_output: "left"`
 ## forever while every item goes straight through it (`splitter.rs`'s
 ## fallback rule), so it is the case where a readout driven straight off that
 ## field would point at bare floor. Having both in one world means the
@@ -435,9 +435,9 @@ static func build_machines_fixture(sim) -> void:
 ## screenshot.
 ##
 ## The geometry is the simulation's own rule, not a guess: a splitter's
-## straight output is the tile it faces and its branch is one quarter turn
-## CLOCKWISE from that, so an EAST-facing splitter at (2, 0) hands straight
-## to (3, 0) and branches SOUTH to (2, -1).
+## straight output is the tile it faces and its left (the default mode's
+## other side) is one quarter turn CLOCKWISE from that, so an EAST-facing
+## splitter at (2, 0) hands straight to (3, 0) and left, SOUTH, to (2, -1).
 static func build_splitter_line(sim) -> void:
 	place(sim, "hopper", Vector2i(-1, 0), "east", "tomato")
 	place(sim, "belt", Vector2i(0, 0), "east")
@@ -448,11 +448,46 @@ static func build_splitter_line(sim) -> void:
 	place(sim, "belt", Vector2i(4, 0), "east")
 	place(sim, "belt", Vector2i(2, -1), "south")
 	place(sim, "belt", Vector2i(2, -2), "south")
-	# The second splitter: straight output built, branch (6, -1) deliberately
+	# The second splitter: straight output built, left (6, -1) deliberately
 	# left as bare floor.
 	place(sim, "belt", Vector2i(5, 0), "east")
 	place(sim, "splitter", Vector2i(6, 0), "east")
 	place(sim, "belt", Vector2i(7, 0), "east")
+
+
+## THE FOUR SPLIT MODES (2026-09-29), side by side: four copies of one
+## small fork — a hopper, a feed belt, an east-facing splitter — each set to
+## a different mode, left to right `left`, `right`, `t_junction`,
+## `three_way`, with a belt laid only on the exits that mode deals to. A belt
+## on every exit hid the difference: at play zoom the belts, not the body,
+## are what reads, and four identical crosses told the reviewer nothing.
+const SPLITTER_MODE_ORIGINS := [Vector2i(0, 0), Vector2i(5, 0), Vector2i(10, 0), Vector2i(15, 0)]
+
+
+static func build_splitter_modes(sim) -> void:
+	# The mode, then its open exits: straight (1, 0), left (0, -1), right
+	# (0, 1) of an east-facing splitter.
+	var modes := [
+		["left", [true, true, false]],
+		["right", [true, false, true]],
+		["t_junction", [false, true, true]],
+		["three_way", [true, true, true]],
+	]
+	for i in modes.size():
+		var at: Vector2i = SPLITTER_MODE_ORIGINS[i]
+		var exits: Array = modes[i][1]
+		place(sim, "hopper", at + Vector2i(-2, 0), "east", "tomato")
+		place(sim, "belt", at + Vector2i(-1, 0), "east")
+		place(sim, "splitter", at, "east")
+		if exits[0]:
+			place(sim, "belt", at + Vector2i(1, 0), "east")
+		if exits[1]:
+			place(sim, "belt", at + Vector2i(0, -1), "south")
+		if exits[2]:
+			place(sim, "belt", at + Vector2i(0, 1), "north")
+		sim.issue_command_json(JSON.stringify({
+			"type": "set_splitter_mode", "tile": [at.x, at.y], "mode": modes[i][0],
+		}))
 
 
 ## THE WHOLE SHIPPED LINE, bought and placed like anything else — the
@@ -755,8 +790,8 @@ static func any_unlock_open(sim) -> bool:
 ##
 ## THE ROUTE, and why the splitter faces NORTH rather than along the run it
 ## sits in. A splitter carries one direction: its placement's facing is the
-## STRAIGHT output and the second output is one quarter turn clockwise from
-## it (`sim::splitter`'s one direction rule). The branch runs east, the
+## STRAIGHT output and, in the default `left` mode, the second output is one
+## quarter turn clockwise from it (`sim::splitter`'s one direction rule). The branch runs east, the
 ## ketchup line is NORTH of it (`Direction::North` is +y, so row -3 is below
 ## row 0), and clockwise from east is south — the wrong way. Faced north, the
 ## two outputs land exactly where this fixture wants them with no second

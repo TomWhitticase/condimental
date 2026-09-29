@@ -25,6 +25,67 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-29: **A splitter has a mode: left, right, T junction or three
+  way.** (Owner's ask: "Currently splitters only let us split to the left. I
+  want splitters to be configurable. so we click on the splitter an in its
+  menu we can decide wether it splits left, right, or both", then "lets have
+  all of them, so left, right, t junction, and three way".)
+
+  **Why it only ever split left.** The 2026-09-08 rule made the branch the
+  facing turned by `Direction::rotate_cw`. The renderer mirrors the sim's
+  +Y onto the screen, so the sim's clockwise quarter turn is drawn as the
+  player's LEFT, and the only way to put a branch on the right was to face
+  the splitter backwards and let the straight run take the corner. That
+  rule's own argument ("the four facings reach all four L-shapes") was true
+  of geometry and false of play: it cost a re-lay of the run to get a right
+  split, and it could not express a T or a three-way at all.
+
+  (1) **Three derived sides and one stored mode, not a second stored
+  facing.** `Side` is straight / left / right, each still derived from the
+  placement's one `direction` (left = `rotate_cw`, right = its opposite), so
+  the 2026-09-08 property that one `Rotate` turns every output together
+  survives untouched. What is stored is `SplitMode`, and `SplitMode::sides()`
+  is the single table of which sides a mode deals to, in dealing order.
+  `left` is the default and is exactly every splitter that existed before,
+  so the change is invisible until a player asks for it.
+
+  (2) **Round robin over the mode's sides, same-tick fallback round the same
+  rotation.** The 2026-09-08 rule generalised from two sides to N: the due
+  side gets first refusal, the rest are offered in rotation order in the
+  same tick, and the cursor moves to the side after whichever took it. With
+  three sides this still cannot starve one: a blocked side stays due and
+  takes the first item after it clears. `set_mode` keeps the cursor when it
+  is still a side of the new mode and resets it to the mode's first side
+  otherwise, so switching under load loses nothing
+  (`switching_mode_under_load_conserves_every_unit`).
+
+  (3) **A mode switch is a topology change.** The side a mode does not deal
+  to is not linked at all, not merely skipped, so the belt beside it is not
+  drawn as fed and `links.output` (the wire's straight side) is absent on a
+  T. So `try_set_splitter_mode` runs `recompute_topology`, and Godot sends
+  the command through `_issue_world_command` (a full rebuild) rather than
+  the config panel's buffer-only path.
+
+  (4) **The snapshot says which sides the mode uses** (`sides`), beside the
+  three `outputs`. A null output meant "not built"; with modes it can also
+  mean "this mode does not go that way", and the tooltip must not tell a
+  player a T's missing straight exit is "not connected". Reporting the sides
+  keeps the modes table in Rust. The arrow needs no table: walking straight,
+  left, right from the due side over non-null outputs IS the mode's
+  rotation, because a side outside the mode reports null.
+
+  (5) **One body model per mode.** Each opens exactly the exits its mode
+  deals to and rails the others shut, with an arrow groove at every open
+  exit — the readout stays a choice of visible positions (UI_UX.md §7). A
+  right exit leaves through the near (-Y) rail, so the drive cabinet moves
+  into the near +X corner on those bodies. The `left` body is byte-identical
+  to the pre-mode model.
+
+  (6) **Saved, so schema v7.** `SavedSplitter::mode` has no serde default
+  (the loader never guesses), the old cursor names `branch` → `left`, and
+  `scripts/migrate-save-v6-to-v7.py` rewrites a v6 save exactly (every old
+  splitter was `left`), keeping a `.v6.ron.bak`.
+
 - 2026-09-28: **A warehouse rack may be reserved for one raw ingredient.**
   (Owner's ask: "click on a warehouse rack and then select one item so that
   for that specific warehouse rack it will only allow holding of the
