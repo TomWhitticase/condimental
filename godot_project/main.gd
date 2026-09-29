@@ -1966,7 +1966,7 @@ const BOARD_TERMS_JOIN := "  ·  "
 const BOARD_STATUS_FILTERS := [
 	["all", "ALL"],
 	["open", "OPEN"],
-	["signed", "✔ SIGNED"],
+	["signed", "SIGNED"],
 	["locked", "🔒 LOCKED"],
 ]
 var _board_status_filter := "all"
@@ -1985,7 +1985,7 @@ var _board_no_match_label: Label
 ## payout under it, this column is what sets a card's height; at 40 a card
 ## was 5px too tall for a 1280x720 window to show two whole offers.
 const BOARD_BADGE_SIZE := Vector2(34, 34)
-const BOARD_UNLOCK_METER_WIDTH := 72.0 * UI_SCALE
+const BOARD_UNLOCK_METER_WIDTH := 128.0 * UI_SCALE
 
 # --- The staff panel (the staff pools MVP, ticket 3, 2026-09-12) -----------
 # `data/staff.ron`'s four categories, read off `staff_snapshot_json`: how
@@ -8674,6 +8674,8 @@ func _build_contract_board(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_board_no_match.add_child(_board_no_match_label)
 
 	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
+	# Chips first: the rows' mix text takes the chips' short names.
+	_rebuild_board_sauce_chips(econ.get("board", []))
 	_rebuild_board_rows(econ.get("board", []))
 	_rebuild_board_active_cards(econ.get("contracts", []))
 
@@ -8866,7 +8868,7 @@ func _board_rows_match(board: Array) -> bool:
 ## One offer: a paper docket (the clipboard's card style — an offer is an
 ## order that is not yet yours) with the terms in words and one SIGN button.
 ## Returns `{"id", "panel", "name_label", "payout_label", "mix_label",
-## "terms_label", "lock_row", "lock_label", "lock_meter", "lock_count",
+## "terms_label", "lock_row", "lock_meter", "lock_count",
 ## "badge", "badge_icon", "badge_lock", "status_label", "sign_button",
 ## "mix_ids", "status"}` for `_update_contract_board`
 ## and the filters to drive.
@@ -8874,9 +8876,9 @@ func _board_rows_match(board: Array) -> bool:
 ## Read left to right the way a player scans a column of them: the product
 ## badge with what it pays under it (what sauce, is it worth it), the name,
 ## the mix and terms (can I serve it), and the button (what it costs). A
-## padlocked offer names its gate beside the name and carries one more line,
-## how far along that gate is, on the gate's own meter — the sim defines
-## that ceiling, so it is a meter.
+## padlocked offer's button names its gate instead, with how far along that
+## gate is under it on the gate's own meter — the sim defines that ceiling,
+## so it is a meter.
 func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 	var panel := PanelContainer.new()
 	panel.name = "Offer_%s" % String(offer.get("id", "?"))
@@ -8944,25 +8946,13 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 	text_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(text_col)
 
-	# The name, and beside it on a locked offer the gate that opens it —
-	# "🔒 BBQ Sauce", the tier's own name from `unlocks.ron` — so the first
-	# line of every card says what it is AND whether it can be had.
-	var head := HBoxContainer.new()
-	head.add_theme_constant_override("separation", _ui_i(10))
-	text_col.add_child(head)
 	var name_label := Label.new()
 	name_label.name = "OfferName"
 	name_label.label_settings = _contract_name_settings
 	name_label.text = String(offer.get("name", offer.get("id", "?")))
 	# Kept for `_set_offer_split`, which may break a long name in two.
 	name_label.set_meta("full", name_label.text)
-	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	head.add_child(name_label)
-	var lock_label := Label.new()
-	lock_label.name = "UnlockGate"
-	lock_label.label_settings = _contract_ink_settings
-	lock_label.visible = false
-	head.add_child(lock_label)
+	text_col.add_child(name_label)
 
 	# The mix, with the item's real icon (UI_UX.md §5) and its display name,
 	# then the cadence and the strike rule — every term a player is agreeing
@@ -8991,18 +8981,21 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		icon.texture = _icon_for(item_id)
 		mix_row.add_child(icon)
-		parts.append("%d × %s" % [int(pair[1]), _item_display_name(item_id)])
+		# The sauce chips' short name ("Ketchup", not "Boxed Ketchup"): the
+		# icon beside it is the box, and the shared word was what broke a
+		# two-product mix onto a line per item.
+		parts.append("%d × %s" % [int(pair[1]), String(_board_sauce_titles.get(item_id, _item_display_name(item_id)))])
 	var mix_label := Label.new()
 	mix_label.name = "OfferMix"
 	mix_label.label_settings = _contract_ink_settings
 	mix_label.text = ", ".join(PackedStringArray(parts))
-	# Kept for `_set_contract_board_split`, which may break the mix at ", ".
+	# Kept for `_set_offer_split`, which may break the mix at ", ".
 	mix_label.set_meta("parts", PackedStringArray(parts))
 	mix_row.add_child(mix_label)
 	var terms_label := Label.new()
 	terms_label.name = "OfferTerms"
 	terms_label.label_settings = _contract_meta_settings
-	# The two halves kept apart, so `_set_contract_board_split` can break at
+	# The two halves kept apart, so `_set_offer_split` can break at
 	# the join and put it back.
 	#
 	# The strike rule is "3 strikes", not "lost after 3 missed in a row": the
@@ -9019,25 +9012,6 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 	terms_label.set_meta("halves", halves)
 	terms_label.text = BOARD_TERMS_JOIN.join(halves)
 	mix_row.add_child(terms_label)
-
-	# The padlock line, shown only while a gate holds the offer back: the
-	# gate's own meter and the count in words beside it (never the bar alone,
-	# UI_UX.md §7). The gate's NAME is on the head line, not here: all three
-	# on one line was the widest thing a locked card had, ~70px past what a
-	# 1280 window's offer column can give it.
-	var lock_row := HBoxContainer.new()
-	lock_row.name = "UnlockRow"
-	lock_row.add_theme_constant_override("separation", _ui_i(8))
-	lock_row.visible = false
-	text_col.add_child(lock_row)
-	var lock_meter := _build_meter(
-		lock_row, BOARD_UNLOCK_METER_WIDTH, METER_FILL_PROGRESS,
-		CONTRACT_METER_TRACK, CONTRACT_METER_BORDER, CONTRACT_METER_HEIGHT)
-	lock_meter.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	var lock_count := Label.new()
-	lock_count.name = "UnlockCount"
-	lock_count.label_settings = _contract_meta_settings
-	lock_row.add_child(lock_count)
 
 	# The button and the word on where this offer stands share a column, the
 	# status UNDER the button: it is the button's own reason, and the space
@@ -9065,6 +9039,31 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	sign_col.add_child(status_label)
 
+	# In the status's place while a gate holds the offer back: the gate's own
+	# meter, the button's width, with the count in words written ON it (never
+	# the bar alone, UI_UX.md §7), while the button names the gate. It lives
+	# in the button's column, not under the terms, and the words are inside
+	# the bar rather than under it: a padlock line under the terms made a
+	# locked card ~95px taller than an open one, a bar over a caption still
+	# 15px, and either left the LOCKED filter at 1280x720 one card. A bar
+	# one status line tall is exactly the status line it replaces.
+	var lock_row := CenterContainer.new()
+	lock_row.name = "UnlockRow"
+	lock_row.visible = false
+	sign_col.add_child(lock_row)
+	var lock_count := Label.new()
+	lock_count.name = "UnlockCount"
+	lock_count.label_settings = _contract_meta_settings
+	lock_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lock_count.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lock_count.text = "0"
+	var lock_meter := _build_meter(
+		lock_row, BOARD_UNLOCK_METER_WIDTH, METER_FILL_PROGRESS,
+		CONTRACT_METER_TRACK, CONTRACT_METER_BORDER,
+		lock_count.get_combined_minimum_size().y)
+	lock_meter.add_child(lock_count)
+	lock_count.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
 	return {
 		"id": String(offer.get("id", "")),
 		"panel": panel,
@@ -9076,7 +9075,6 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 		"mix_label": mix_label,
 		"terms_label": terms_label,
 		"lock_row": lock_row,
-		"lock_label": lock_label,
 		"lock_meter": lock_meter,
 		"lock_count": lock_count,
 		"status_label": status_label,
@@ -9238,7 +9236,7 @@ func _apply_board_filters() -> void:
 			continue
 		var chosen := key == _board_status_filter
 		chip.set_pressed_no_signal(chosen)
-		chip.text = "%s%s  %d" % ["✔ " if chosen and key != "signed" else "", pair[1], int(status_counts.get(key, 0))]
+		chip.text = "%s%s  %d" % ["✔ " if chosen else "", pair[1], int(status_counts.get(key, 0))]
 	for item_id in _board_sauce_chips:
 		var chip: Button = _board_sauce_chips[item_id]
 		var chosen := String(item_id) == _board_sauce_filter
@@ -9262,9 +9260,10 @@ func _update_contract_board(econ: Dictionary = {}) -> void:
 	if econ.is_empty():
 		econ = _read_economy()
 	var board: Array = econ.get("board", [])
+	# Chips first: the rows' mix text takes the chips' short names.
+	_rebuild_board_sauce_chips(board)
 	if not _board_rows_match(board):
 		_rebuild_board_rows(board)
-	_rebuild_board_sauce_chips(board)
 	_board_money_label.text = "Money: %.0f" % float(econ.get("money", 0.0))
 
 	# The left column: what is running, the clipboard's dockets at board size.
@@ -9295,11 +9294,14 @@ func _update_contract_board(econ: Dictionary = {}) -> void:
 		row["badge_icon"].modulate = faded
 		row["name_label"].modulate = faded
 		row["payout_label"].modulate = faded
-		row["mix_label"].get_parent().modulate = faded
-		row["terms_label"].modulate = faded
+		# The mix row holds the terms unless a split moved them out, and a
+		# modulate multiplies down the tree: fading both faded the terms twice.
+		var mix_row: Control = row["mix_label"].get_parent()
+		mix_row.modulate = faded
+		row["terms_label"].modulate = Color(1, 1, 1, 1) if row["terms_label"].get_parent() == mix_row else faded
 		row["badge_lock"].visible = locked
 		row["lock_row"].visible = locked
-		row["lock_label"].visible = locked
+		status.visible = not locked
 		# Short, and on lines of their own: they sit under the SIGN button, so
 		# the button column is as wide as their widest line — and the button
 		# already carries the price.
@@ -9309,13 +9311,18 @@ func _update_contract_board(econ: Dictionary = {}) -> void:
 		if locked:
 			var required := int(offer.get("unlock_boxes", 0))
 			var sold := int(offer.get("unlock_sold", 0))
-			row["lock_label"].text = "🔒 %s" % String(offer.get("unlock_name", ""))
+			var unlock_item := String(offer.get("unlock_item", ""))
 			row["lock_count"].text = "%d of %d %s sold" % [
-				sold, required, _item_display_name(String(offer.get("unlock_item", "")))]
+				sold, required, String(_board_sauce_titles.get(unlock_item, _item_display_name(unlock_item)))]
+			# A long item name widens the bar rather than spilling out of it.
+			row["lock_meter"].custom_minimum_size.x = maxf(
+				BOARD_UNLOCK_METER_WIDTH, row["lock_count"].get_combined_minimum_size().x + _ui_px(10.0))
 			_set_meter(row["lock_meter"], float(sold) / float(required) if required > 0 else 0.0)
-			button.text = "🔒 %d" % price
+			# The gate's own name from `unlocks.ron`, where the price would be:
+			# what the click is waiting on, not what it would cost.
+			button.text = "🔒 %s" % String(offer.get("unlock_name", ""))
 			button.disabled = true
-			status.text = "%d more to sell" % maxi(0, required - sold)
+			status.text = ""
 			row["panel"].add_theme_stylebox_override("panel", _contract_card_style_locked)
 		elif status_key == "signed":
 			button.text = "SIGNED"

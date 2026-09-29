@@ -36,11 +36,14 @@
 #     with nothing running, and the empty card keeps the left column to its
 #     pinned width;
 #   * every offer is listed, and the ones a gate holds back are padlocked —
-#     locked paper, a 🔒 on the badge and the button, the gate named with its
+#     locked paper, a 🔒 on the badge, the button naming the gate over its
 #     own meter and count — and a signature on one is refused by the sim;
-#   * the SHOW and sauce filters show exactly the offers they name, count
-#     them on their chips, clear on a second click, and a filter that matches
-#     nothing shows a card saying so.
+#   * the SHOW and sauce filters show exactly the offers they name, every
+#     chip counts what it would show given the other filter (checked against
+#     the wire under every combination), only the chosen chip is ticked, a
+#     sauce chip clears on a second click, a filter that matches nothing
+#     shows a card saying so, and every filtered view at 1280x720 still shows
+#     two whole offers when it has two.
 extends SceneTree
 
 
@@ -121,6 +124,49 @@ func _shown_ids(main) -> Array:
 		if row["panel"].visible:
 			out.append(String(row["id"]))
 	return out
+
+
+## The number a chip ends with ("✔ ALL  17" -> 17).
+func _chip_count(chip: Button) -> int:
+	var parts: PackedStringArray = chip.text.split("  ")
+	return int(parts[parts.size() - 1])
+
+
+## "" if every chip reads what the WIRE says it should under the filters as
+## they stand — each status chip counting the offers the sauce filter lets
+## through, each sauce chip the offers the status filter does — and only the
+## chosen chip in each row pressed and ticked; otherwise what is wrong.
+func _chip_error(main, board: Array) -> String:
+	var status_want := {"all": 0, "open": 0, "signed": 0, "locked": 0}
+	var sauce_want := {"": 0}
+	for offer in board:
+		var status := "signed" if bool(offer["active"]) else ("locked" if bool(offer["locked"]) else "open")
+		var ids: Array = []
+		for pair in offer["mix"]:
+			if not ids.has(String(pair[0])):
+				ids.append(String(pair[0]))
+		if main._board_sauce_filter == "" or ids.has(main._board_sauce_filter):
+			status_want["all"] += 1
+			status_want[status] += 1
+		if main._board_status_filter == "all" or main._board_status_filter == status:
+			sauce_want[""] += 1
+			for item_id in ids:
+				sauce_want[item_id] = int(sauce_want.get(item_id, 0)) + 1
+	for key in status_want:
+		var chip: Button = main._board_status_chips[key]
+		if _chip_count(chip) != status_want[key]:
+			return "status chip '%s' reads '%s', the wire says %d" % [key, chip.text, status_want[key]]
+		var chosen: bool = key == main._board_status_filter
+		if chip.button_pressed != chosen or chip.text.begins_with("✔") != chosen:
+			return "status chip '%s' reads '%s' pressed=%s, but chosen=%s" % [key, chip.text, chip.button_pressed, chosen]
+	for key in main._board_sauce_chips:
+		var chip: Button = main._board_sauce_chips[key]
+		if _chip_count(chip) != int(sauce_want.get(key, 0)):
+			return "sauce chip '%s' reads '%s', the wire says %d" % [key, chip.text, int(sauce_want.get(key, 0))]
+		var chosen: bool = key == main._board_sauce_filter
+		if chip.button_pressed != chosen or chip.text.begins_with("✔") != chosen:
+			return "sauce chip '%s' reads '%s' pressed=%s, but chosen=%s" % [key, chip.text, chip.button_pressed, chosen]
+	return ""
 
 
 func _row_for(main, id: String) -> Dictionary:
@@ -251,8 +297,11 @@ func _run_checks(main) -> void:
 		if not row["lock_row"].visible or not row["badge_lock"].visible:
 			_fail("locked offer '%s' must show its padlock line and the badge padlock" % id)
 			return
-		if not String(row["lock_label"].text).contains(String(offer["unlock_name"])):
-			_fail("locked offer '%s' must name its gate '%s', got '%s'" % [id, offer["unlock_name"], row["lock_label"].text])
+		if String(row["sign_button"].text) != "🔒 %s" % String(offer["unlock_name"]):
+			_fail("locked offer '%s' button must name its gate '%s', got '%s'" % [id, offer["unlock_name"], row["sign_button"].text])
+			return
+		if row["status_label"].visible:
+			_fail("locked offer '%s' shows its gate count in the status's place, not both" % id)
 			return
 		if not String(row["lock_count"].text).contains("%d of %d" % [int(offer["unlock_sold"]), int(offer["unlock_boxes"])]):
 			_fail("locked offer '%s' must say how far along its gate is, got '%s'" % [id, row["lock_count"].text])
@@ -272,7 +321,15 @@ func _run_checks(main) -> void:
 	# --- The filters: status and sauce, counted, never silently empty ------
 	main._update_contract_board()
 	var all_count: int = main._board_rows.size()
+	var chip_error := _chip_error(main, board)
+	if chip_error != "":
+		_fail("ALL/ALL: " + chip_error)
+		return
 	main._set_board_status_filter("locked")
+	chip_error = _chip_error(main, board)
+	if chip_error != "":
+		_fail("LOCKED: " + chip_error)
+		return
 	if _shown_ids(main) != locked_offers:
 		_fail("LOCKED should show exactly the padlocked offers %s, shows %s" % [str(locked_offers), str(_shown_ids(main))])
 		return
@@ -307,6 +364,15 @@ func _run_checks(main) -> void:
 		if _shown_ids(main) != expected:
 			_fail("the '%s' chip should show %s, shows %s" % [item_id, str(expected), str(_shown_ids(main))])
 			return
+		# Every chip's count under this sauce, and under it with each status:
+		# a count is what the chip WOULD show given the other filter.
+		for status_key in ["all", "open", "signed", "locked"]:
+			main._set_board_status_filter(status_key)
+			chip_error = _chip_error(main, board)
+			if chip_error != "":
+				_fail("%s + '%s': %s" % [status_key, item_id, chip_error])
+				return
+		main._set_board_status_filter("all")
 	var last_sauce: String = main._board_sauce_ids[-1]
 	main._set_board_sauce_filter(last_sauce)
 	if main._board_sauce_filter != "" or _shown_ids(main).size() != all_count:
@@ -327,6 +393,13 @@ func _run_checks(main) -> void:
 		return
 	main._set_board_status_filter("open")
 	main._set_board_sauce_filter(gated_only)
+	chip_error = _chip_error(main, board)
+	if chip_error != "":
+		_fail("OPEN + '%s': %s" % [gated_only, chip_error])
+		return
+	if _chip_count(main._board_sauce_chips[gated_only]) != 0:
+		_fail("under OPEN the '%s' chip must count 0, reads '%s'" % [gated_only, main._board_sauce_chips[gated_only].text])
+		return
 	if not _shown_ids(main).is_empty() or not main._board_no_match.visible:
 		_fail("OPEN + '%s' on a new game should match nothing, shows %s" % [gated_only, str(_shown_ids(main))])
 		return
@@ -369,6 +442,24 @@ func _run_checks(main) -> void:
 	if fresh_whole < 2:
 		_fail("at 1280x720 a new game's board shows %d whole offer(s) — it must show at least 2 to compare" % fresh_whole)
 		return
+	# And under every filter: a padlocked card used to carry one more line
+	# than an open one, and the LOCKED view at 1280x720 showed one (PR #208's
+	# review). A filter showing fewer than two offers owes as many as it has.
+	var filter_views: Array = [["locked", ""], ["open", ""]]
+	for item_id in main._board_sauce_ids:
+		filter_views.append(["all", String(item_id)])
+	for view in filter_views:
+		main._set_board_status_filter(view[0])
+		main._set_board_sauce_filter(view[1])
+		var owed := mini(2, _shown_ids(main).size())
+		var whole := _whole_offers_at_small(main)
+		if whole < owed:
+			_fail("at 1280x720 the %s + '%s' view shows %d whole offer(s) of %d — it owes %d" % [
+				view[0], view[1], whole, _shown_ids(main).size(), owed])
+			return
+		if view[1] != "":
+			main._set_board_sauce_filter(view[1])
+	main._set_board_status_filter("all")
 	_key(main, KEY_C)
 	if main._board_open or board_panel.visible:
 		_fail("a second C should close the board")

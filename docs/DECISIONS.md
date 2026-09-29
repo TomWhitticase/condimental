@@ -66,6 +66,18 @@ matches what code comments and data files cite.
   18px too wide). A LOST offer's status folded onto one line for the same
   height reason. `test_contract_board.gd` pins two whole offers at 1280x720.
 
+  **Then the filtered views (PR #208's review).** A locked card still had
+  one line more than an open one — the gate's meter under the terms — and a
+  mixed locked order ("3 × Boxed Ketchup, 2 × Boxed BBQ") broke one item a
+  line, so a padlocked card was 215px against an open one's 116–120 and the
+  LOCKED filter at 1280x720 showed one card. The gate's name moved onto the
+  disabled button (where a price nobody can pay yet was), the meter took the
+  status line's place under it, one line tall with the count written on it,
+  and the mix uses the sauce chips' short names. Every card is now 116–120px
+  and the test pins two whole offers under LOCKED, OPEN and each sauce too.
+  The SIGNED chip's label lost its built-in ✔, which had made the selection
+  tick meaningless on that one chip.
+
 - 2026-09-28: **A warehouse rack may be reserved for one raw ingredient.**
   (Owner's ask: "click on a warehouse rack and then select one item so that
   for that specific warehouse rack it will only allow holding of the

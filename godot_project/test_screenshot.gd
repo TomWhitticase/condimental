@@ -790,6 +790,13 @@ func _initialize() -> void:
 		)
 		_refuse()
 		return
+	if _board_filter != "" and not _board:
+		printerr(
+			"SCREENSHOT_FAIL: --board-filter %s needs --board — the filters are " % _board_filter
+			+ "the contracts board's, and with it closed there is nothing to filter."
+		)
+		_refuse()
+		return
 	_contracts = args.has("--contracts")
 	if _contracts:
 		_pick_fixture("chain", "--contracts")

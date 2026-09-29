@@ -24,8 +24,9 @@ See [WORKFLOW.md](WORKFLOW.md).
   `unlock_name`, `unlock_item`, `unlock_boxes`, `unlock_sold` — the shape
   `ContentsChoice` already gives a gated ingredient (§5g) — filled by
   `World::contract_gate`, and `SignContract` still returns
-  `SignRefusal::Locked`. The card draws the flag (locked paper, 🔒 on badge
-  and button, the gate's name, its meter and count in words) and decides
+  `SignRefusal::Locked`. The card draws the flag (locked paper, 🔒 on the badge,
+  the button naming the gate, its meter with the count in words on it, the
+  height of an open card) and decides
   nothing. The SHOW (all/open/signed/locked) and SAUCE (one chip per product
   the mixes name) filters only hide rows the wire sent, count what each chip
   would show, and live in `main.gd`. The ingredient market still hides
