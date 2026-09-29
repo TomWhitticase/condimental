@@ -28,7 +28,10 @@
 #     tile behind the camera — the `t < 0` guard `_tile_under_screen_pos`
 #     added specifically for this case,
 #   * `_crosshair`'s visibility tracks `_view_mode` (shown in FIRST_PERSON,
-#     hidden in ISOMETRIC).
+#     hidden in ISOMETRIC),
+#   * the tooltip is its own height on the first frame after a taller one,
+#     and its own width on the second — a belt hovered straight after the
+#     crusher (issue #173).
 #
 # `_tile_under_screen_pos` calls `Camera3D.project_ray_origin`/
 # `project_ray_normal`, which (like `unproject_position`) require the camera
@@ -272,5 +275,54 @@ func _run_checks() -> void:
 		_fail("crosshair should be hidden in ISOMETRIC mode")
 		return
 
-	print("HOVER_OK: screen-to-tile resolution finds the right machine in both view modes, every placed kind answers through one entry point and names itself the way the rest of the UI does, a machine reports buffers and a progress meter while a belt reports neither, a rotated tile reports its facing, open floor finds none, looking up in first-person finds no tile, crosshair visibility tracks view mode")
+	# --- The tooltip shrinks back to shorter content (issue #173) -----------
+	# A free-standing Control grows to its minimum and never shrinks back, and
+	# `_panel_draw_size` takes the larger of minimum and current size — so a
+	# belt hovered straight after the crusher was measured, placed and yielded
+	# at the crusher's height. The layout pass that grows the panel between
+	# frames never runs here, so it is done by hand: the crusher's size, then
+	# the belt, on the very next call.
+	var tall_pos: Vector2 = main._camera.unproject_position(
+		main._tile_origin(machine_tile.x, machine_tile.y, main.BELT_SURFACE_Y))
+	var short_pos: Vector2 = main._camera.unproject_position(
+		main._tile_origin(1, 0, main.BELT_SURFACE_Y))
+	main._pointer_override = tall_pos
+	main._update_hover_tooltip()
+	main._hover_tooltip.size = main._hover_tooltip.get_combined_minimum_size()
+	var tall_height: float = main._hover_tooltip.size.y
+	var tall_width: float = main._hover_tooltip.size.x
+	main._pointer_override = short_pos
+	main._update_hover_tooltip()
+	main._pointer_override = null
+	if not main._hover_tooltip.visible:
+		_fail("hovering the belt at %s should show the tooltip" % str(short_pos))
+		return
+	var short_min: float = main._hover_tooltip.get_combined_minimum_size().y
+	if short_min >= tall_height:
+		_fail("the belt's hover (%.0fpx) should be shorter than the crusher's (%.0fpx) for this check to mean anything" % [short_min, tall_height])
+		return
+	if main._hover_tooltip.size.y != short_min or main._panel_draw_size(main._hover_tooltip).y != short_min:
+		_fail("the belt's hover kept the crusher's height: size %.0fpx, drawn as %.0fpx, its own is %.0fpx" % [
+			main._hover_tooltip.size.y, main._panel_draw_size(main._hover_tooltip).y, short_min,
+		])
+		return
+	# The width is kept on that first frame, while the Label's minimum width
+	# may still be the crusher's text, and dropped on the next one.
+	if main._hover_tooltip.size.x != tall_width:
+		_fail("the belt's first frame should keep the crusher's width (%.0fpx) to cover the Label's lag, not %.0fpx" % [tall_width, main._hover_tooltip.size.x])
+		return
+	var short_min_width: float = main._hover_tooltip.get_combined_minimum_size().x
+	if short_min_width >= tall_width:
+		_fail("the belt's hover (%.0fpx wide) should be narrower than the crusher's (%.0fpx) for this check to mean anything" % [short_min_width, tall_width])
+		return
+	main._pointer_override = short_pos
+	main._update_hover_tooltip()
+	main._pointer_override = null
+	if main._hover_tooltip.size.x != short_min_width or main._panel_draw_size(main._hover_tooltip).x != short_min_width:
+		_fail("the belt's hover kept the crusher's width on its second frame: size %.0fpx, drawn as %.0fpx, its own is %.0fpx" % [
+			main._hover_tooltip.size.x, main._panel_draw_size(main._hover_tooltip).x, short_min_width,
+		])
+		return
+
+	print("HOVER_OK: screen-to-tile resolution finds the right machine in both view modes, every placed kind answers through one entry point and names itself the way the rest of the UI does, a machine reports buffers and a progress meter while a belt reports neither, a rotated tile reports its facing, open floor finds none, looking up in first-person finds no tile, crosshair visibility tracks view mode, a shorter hover sheds the taller one's height on its first frame and its width on the next")
 	quit(0)

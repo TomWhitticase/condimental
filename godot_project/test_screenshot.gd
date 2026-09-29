@@ -184,6 +184,15 @@
 # `hover_targets.gd`, one table, read by the one loop in
 # `_apply_hover_flags`.
 #
+# `--after-machine-hover` puts the cursor over the first placed machine
+# first, lets main.gd lay that tooltip out for a few frames, and only then
+# aims the --hover* flag. So the frame shows a hover taken straight after a
+# taller, wider one — the case issue #173 was about, which a hover from a
+# fresh state cannot show. Isometric only, and it needs a --hover* flag and a
+# machine in the world; without them it refuses. It also refuses when the
+# --hover* flag lands on that same machine, which would photograph the first
+# hover again rather than a second one.
+#
 # A HOVER FLAG THAT CANNOT FIND ITS TARGET REFUSES. Each of these used to be
 # its own little function guarded by `if tile != HOVER_NONE`, so a flag whose
 # target was not in the world aimed at nothing and the run photographed the
@@ -310,6 +319,11 @@ const FIXED_DELTA_EPSILON := 1e-6
 ## shutter, so main.gd has frames left to lay the tooltip out with it.
 const CURSOR_SETTLE_FRAME := WARMUP_FRAMES - 3
 
+## The frame `--after-machine-hover` moves the cursor from the machine to the
+## --hover* target on: enough frames over the machine for main.gd's layout
+## pass to have grown the tooltip to the machine's size.
+const AFTER_MACHINE_HOVER_FRAME := 12
+
 ## Spawn attempts, and simulation ticks between them, used by `--populate`.
 ## Driven straight through the scene's real input and tick path rather than
 ## poking at simulation state — this is a screenshot of the actual game.
@@ -393,6 +407,11 @@ var _cursor_park_noise_tile := Vector2i(-999999, -999999)
 ## dead. The one frame that can show a DEAD run and a merely EMPTY one side
 ## by side, with the hover saying which is which.
 var _stalled_run := false
+## `--after-machine-hover`: see the header.
+var _after_machine_hover := false
+## The machine `--after-machine-hover` hovered first, so the --hover* flag
+## can be refused for landing on it again.
+var _first_hover_tile := HOVER_NONE
 var _shop := false
 var _shop_search := ""
 ## `--config TX,TY` clicks the building standing on that tile once
@@ -750,6 +769,7 @@ func _initialize() -> void:
 		_populate = true
 	_first_person = args.has("--first-person")
 	_hover_flags = HoverTargets.requested_flags(args)
+	_after_machine_hover = args.has("--after-machine-hover")
 	_shop_search = _string_arg(args, "--shop-search")
 	_shop = args.has("--shop") or _shop_search != ""
 	_payday_warning = args.has("--payday-warning")
@@ -1613,6 +1633,32 @@ func _apply_hover_flags() -> void:
 			return
 
 
+## `--after-machine-hover`: the cursor over the first machine until
+## `AFTER_MACHINE_HOVER_FRAME`, when `_apply_hover_flags` moves it on. Refuses
+## rather than photographing a fresh hover under a flag that promised a
+## second one.
+func _hover_machine_first() -> void:
+	if _hover_flags.is_empty() or _first_person:
+		printerr("SCREENSHOT_FAIL: --after-machine-hover needs a --hover* flag to move on to, in the isometric view")
+		_refuse()
+		return
+	var tile := _first_machine_tile()
+	if tile == HOVER_NONE:
+		printerr("SCREENSHOT_FAIL: --after-machine-hover found no machine in this world to hover first")
+		_refuse()
+		return
+	_first_hover_tile = tile
+	_hover_over_tile(tile)
+
+
+## Whether the --hover* flag landed on the very machine
+## `--after-machine-hover` hovered first. Compared as placements, not tiles:
+## a vat's four tiles are one hover.
+func _hovered_first_machine_again() -> bool:
+	var first: Dictionary = _main._placement_at_tile(_first_hover_tile)
+	return not first.is_empty() and _main._placement_at_tile(_cursor_tile) == first
+
+
 ## Screen positions `_park_cursor` tries, in this order, as fractions of the
 ## viewport: the four corners first, then the edge midpoints. Corners first
 ## because the factory is framed in the middle, so a corner is the likeliest
@@ -2460,12 +2506,22 @@ func _process(delta: float) -> bool:
 		_enter_closeup()
 	if _frames == 2 and _item_gallery:
 		_stand_item_gallery()
-	if _frames == 2 and not _hover_flags.is_empty():
+	if _frames == 2 and _after_machine_hover:
+		_hover_machine_first()
+		if _refused:
+			return true
+	var hover_frame := AFTER_MACHINE_HOVER_FRAME if _after_machine_hover else 2
+	if _frames == hover_frame and not _hover_flags.is_empty():
 		_apply_hover_flags()
 		# Straight out, rather than letting the rest of this frame set up a
 		# shot nothing will be written from: a refusal's own message is the
 		# only output a refused run should have to be read for.
 		if _refused:
+			return true
+		if _after_machine_hover and _hovered_first_machine_again():
+			printerr("SCREENSHOT_FAIL: --after-machine-hover hovered %s first and the --hover* flag aimed at the same machine, so the frame would show one hover, not a second — pick a flag whose target is something else"
+				% str(_first_hover_tile))
+			_refuse()
 			return true
 	if _frames == 2 and _ghost_kind != "":
 		_enter_ghost_mode()

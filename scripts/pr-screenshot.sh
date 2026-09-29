@@ -68,7 +68,10 @@ EOF
     | gh api "repos/$repo/git/refs" --input - >/dev/null
 fi
 
-branch=$(git branch --show-current 2>/dev/null || echo detached)
+# `--show-current` prints nothing (and exits 0) on a detached HEAD, which made
+# the upload path start with a slash and GitHub refuse it.
+branch=$(git branch --show-current 2>/dev/null || true)
+[ -n "$branch" ] || branch="detached-$(git rev-parse --short HEAD)"
 slug=$(printf '%s' "$branch" | tr '/' '-' | tr -c 'A-Za-z0-9._-' '-' | sed 's/-*$//')
 stamp=$(date -u +%Y%m%d-%H%M%S)
 

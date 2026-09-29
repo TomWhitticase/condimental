@@ -298,6 +298,10 @@
 # hover flag keeps the pose it was given and simply reports what the
 # crosshair found.
 #
+# Add --after-machine-hover to a --hover* flag to hover the first machine
+# first and move on to the target a few frames later, so the shot shows a
+# hover straight after a taller, wider one (issue #173).
+#
 # Pass --ghost KIND to enter placement mode with the ghost over open ground
 # (the VALID state), or --ghost-blocked KIND with it over something already
 # placed (the INVALID state), or --remove-mode to enter remove mode over a

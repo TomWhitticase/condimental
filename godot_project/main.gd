@@ -2442,6 +2442,9 @@ static var _printed_saves_dir := false
 # _crosshair is drawn), since the mouse is captured/hidden there.
 var _hover_tooltip: PanelContainer
 var _hover_label: Label
+## The full hover text the previous frame showed, so `_update_hover_tooltip`
+## knows when the Label's minimum width has caught up with it (issue #173).
+var _hover_last_text := ""
 ## The bar under the tooltip's words, shown only for a tile that HAS a
 ## quantity with a ceiling (`_hover_panel_state`), and the two buffer rows
 ## that replaced the `in: tomato x8` text. See `_build_hover_tooltip`.
@@ -18603,6 +18606,18 @@ func _update_hover_tooltip() -> void:
 	_hover_label.text = text
 	var state := _hover_panel_state(tile)
 	_apply_hover_panel_state(state)
+	# Drop the size the previous hover left behind (issue #173). A
+	# free-standing Control grows to its minimum but never shrinks back, so
+	# after a tall, wide machine a short, narrow dock was measured, placed and
+	# laddered at the machine's size. The height goes at once: every line's
+	# height is known the moment the text is set. The width goes one frame
+	# later: a Label's minimum WIDTH lags a frame behind new text, and the
+	# current width is what `_panel_draw_size` trusts to cover that lag, so it
+	# is kept only on the frame the text changed. Setting a size below the
+	# minimum clamps up to it.
+	var width := _hover_tooltip.size.x if text != _hover_last_text else 0.0
+	_hover_last_text = text
+	_hover_tooltip.size = Vector2(width, 0.0)
 	# Too tall to stand anywhere clear of the HUD? Shed lines until it is
 	# (issue #99). Measured every frame from the full panel, so a folded
 	# legend or a bigger window gives the lines straight back.
