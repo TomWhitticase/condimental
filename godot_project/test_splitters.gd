@@ -14,8 +14,8 @@
 #     straight to and its left belt — are plain straights (each is fed
 #     from behind), and the feeding belt's tooltip names the splitter,
 #   * the next-output arrow exists, points along the placement's own facing
-#     when the straight side is due, and turns exactly one quarter turn
-#     CLOCKWISE — the simulation's own `rotate_cw` — when the left is,
+#     when the straight side is due, and turns a quarter turn to the
+#     traveller's LEFT when the left is (and the other way for a right),
 #   * a splitter whose left belt was never built shows the arrow pointing
 #     STRAIGHT even though `next_output` says "left", because that is where
 #     the item actually goes (`splitter.rs`'s fallback rule), and one with
@@ -166,8 +166,8 @@ func _run_checks() -> void:
 
 	# --- the left side, driven by the real simulation ---------------------
 	# The hopper meters tomatoes onto the line; once one has crossed the
-	# splitter the cursor flips and the arrow must turn a quarter turn
-	# clockwise from the placement's own facing.
+	# splitter the cursor flips and the arrow must turn a quarter turn to
+	# the left of the placement's own facing.
 	main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
 	var branch_yaw := east_yaw + PI * 0.5
 	if not _tick_until(2000, func(): return is_equal_approx(_arrow(FORKED).rotation.y, branch_yaw)):
@@ -288,7 +288,7 @@ func _run_checks() -> void:
 		_fail("hovering a splitter says '%s'" % forked_text)
 		return
 	var lonely_text: String = main._hover_text_at_tile(STRAIGHT_ONLY)
-	for needle in ["straight:", "left:", "next:", "left"]:
+	for needle in ["straight:", "left:", "next:"]:
 		if not lonely_text.contains(needle):
 			_fail("the splitter tooltip is missing '%s': '%s'" % [needle, lonely_text])
 			return
@@ -303,8 +303,8 @@ func _run_checks() -> void:
 		return
 
 	print("SPLITTERS_OK: a bespoke model at the sim's tile, the feeding belt still plain, the")
-	print("  next-output arrow pointing along the facing and one quarter turn clockwise for the")
-	print("  branch, an unbuilt branch falling back to straight and a dead end hiding the arrow,")
+	print("  next-output arrow pointing along the facing and a quarter turn left or right for a")
+	print("  side exit, an unbuilt side falling back to straight and a dead end hiding the arrow,")
 	print("  items drawn crossing the tile, hover naming the mode's outputs, and the")
 	print("  configuration panel switching the mode, the body and the arrow's side")
 	quit(0)
