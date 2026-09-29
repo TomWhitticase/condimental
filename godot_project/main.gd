@@ -8814,13 +8814,30 @@ func _set_offer_split(row: Dictionary, level: int) -> void:
 	var mix_row: Control = row["mix_label"].get_parent()
 	var text_col: Control = mix_row.get_parent()
 	var wanted: Control = text_col if split else mix_row
-	if terms.get_parent() == wanted:
-		return
-	terms.get_parent().remove_child(terms)
-	wanted.add_child(terms)
-	if split:
-		# Directly under the mix it continues, above the padlock line.
-		text_col.move_child(terms, mix_row.get_index() + 1)
+	if terms.get_parent() != wanted:
+		terms.get_parent().remove_child(terms)
+		wanted.add_child(terms)
+		if split:
+			# Directly under the mix it continues.
+			text_col.move_child(terms, mix_row.get_index() + 1)
+	_apply_offer_fade(row)
+
+
+## Fades a locked offer's words, and only once each: a modulate multiplies
+## down the tree, and the terms sit inside the faded mix row unless a split
+## moved them out. So it runs where the terms get their parent
+## (`_set_offer_split`) as well as where the lock is read — set only on the
+## read, a resize that moved the terms drew them at 0.30 or 1.00 until the
+## next one.
+func _apply_offer_fade(row: Dictionary) -> void:
+	var faded := Color(1, 1, 1, 0.55) if String(row["status"]) == "locked" else Color(1, 1, 1, 1)
+	row["badge_icon"].modulate = faded
+	row["name_label"].modulate = faded
+	row["payout_label"].modulate = faded
+	var mix_row: Control = row["mix_label"].get_parent()
+	mix_row.modulate = faded
+	var terms: Label = row["terms_label"]
+	terms.modulate = Color(1, 1, 1, 1) if terms.get_parent() == mix_row else faded
 
 
 ## Rebuilds the offer rows from a `board` array. The board is content and
@@ -9122,8 +9139,11 @@ func _board_filter_chip(node_name: String) -> Button:
 	for state in ["normal", "hover", "pressed", "hover_pressed", "disabled", "focus"]:
 		var style := _shop_slot_style("pressed" if state == "hover_pressed" else state)
 		style.set_border_width_all(_ui_i(2))
-		style.content_margin_left = _ui_px(8.0)
-		style.content_margin_right = _ui_px(8.0)
+		# 6, not 8: with every order running the dockets widen the left
+		# column, and the SAUCE row was the offer column's widest line —
+		# 7px past the modal margin at 1280.
+		style.content_margin_left = _ui_px(6.0)
+		style.content_margin_right = _ui_px(6.0)
 		style.content_margin_top = _ui_px(3.0)
 		style.content_margin_bottom = _ui_px(3.0)
 		chip.add_theme_stylebox_override(state, style)
@@ -9323,26 +9343,19 @@ func _update_contract_board(econ: Dictionary = {}) -> void:
 		var status: Label = row["status_label"]
 		var locked := status_key == "locked"
 		# A locked card is the carbon copy: its paper greys (the style), and
-		# its words and badge fade, but the padlock line stays in full ink —
+		# its words and badge fade, but the padlock meter stays in full ink —
 		# it is the one thing on the card the player can act on now.
-		var faded := Color(1, 1, 1, 0.55) if locked else Color(1, 1, 1, 1)
-		row["badge_icon"].modulate = faded
-		row["name_label"].modulate = faded
-		row["payout_label"].modulate = faded
-		# The mix row holds the terms unless a split moved them out, and a
-		# modulate multiplies down the tree: fading both faded the terms twice.
-		var mix_row: Control = row["mix_label"].get_parent()
-		mix_row.modulate = faded
-		row["terms_label"].modulate = Color(1, 1, 1, 1) if row["terms_label"].get_parent() == mix_row else faded
+		_apply_offer_fade(row)
 		row["badge_lock"].visible = locked
 		row["lock_row"].visible = locked
 		status.visible = not locked
-		# Short, and on lines of their own: they sit under the SIGN button, so
-		# the button column is as wide as their widest line — and the button
-		# already carries the price.
+		# Short, and ONE line: they sit under the SIGN button, so the button
+		# column is as wide as their widest line, and a second line ("lost 2
+		# times before") made a signed card 24px taller than its neighbours —
+		# with the board full, the SIGNED view at 1280x720 one card (PR #208).
 		var lost_note := ""
 		if lost > 0:
-			lost_note = "\nlost %d time%s before" % [lost, "" if lost == 1 else "s"]
+			lost_note = " · lost ×%d" % lost
 		if locked:
 			var required := int(offer.get("unlock_boxes", 0))
 			var sold := int(offer.get("unlock_sold", 0))
@@ -9362,12 +9375,12 @@ func _update_contract_board(econ: Dictionary = {}) -> void:
 		elif status_key == "signed":
 			button.text = "SIGNED"
 			button.disabled = true
-			status.text = "✔ running, on the left" + lost_note
+			status.text = ("✔ running" + lost_note) if lost > 0 else "✔ running, on the left"
 			row["panel"].add_theme_stylebox_override("panel", _contract_card_style_ready)
 		elif not affordable:
 			button.text = "✗ SIGN · %d" % price
 			button.disabled = true
-			status.text = "✗ can't afford it" + lost_note
+			status.text = ("✗ can't afford" + lost_note) if lost > 0 else "✗ can't afford it"
 			row["panel"].add_theme_stylebox_override("panel", _contract_card_style)
 		else:
 			button.text = "SIGN · %d" % price

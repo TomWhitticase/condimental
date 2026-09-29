@@ -42,8 +42,11 @@
 #     chip counts what it would show given the other filter (checked against
 #     the wire under every combination), only the chosen chip is ticked, a
 #     sauce chip clears on a second click, a filter that matches nothing
-#     shows a card saying so, and every filtered view at 1280x720 still shows
-#     two whole offers when it has two.
+#     shows a card saying so, and every filtered view at 1280x720 — on a new
+#     game, with one order running and with every order running — shows two
+#     whole offers when it has two, keeps the offer column's width and stays
+#     inside the modal margin;
+#   * a locked card's terms are faded once, whichever line they sit on.
 extends SceneTree
 
 
@@ -194,6 +197,10 @@ func _filter_views_error(main) -> String:
 		if whole < owed:
 			return "at 1280x720 the %s + '%s' view shows %d whole offer(s) of %d — it owes %d" % [
 				view[0], view[1], whole, _shown_ids(main).size(), owed]
+		var panel_width: float = main._board_panel.get_combined_minimum_size().x
+		if panel_width > main._modal_available_width() + 0.5:
+			return "the %s + '%s' view makes the board %.0fpx wide, past the %.0fpx a 1280 window leaves a modal" % [
+				view[0], view[1], panel_width, main._modal_available_width()]
 		var view_width: float = main._board_scroll.get_parent().get_combined_minimum_size().x
 		if absf(view_width - board_width) > 0.5:
 			return "the %s + '%s' view makes the offer column %.0fpx wide, ALL makes it %.0fpx — a filter must not move it" % [
@@ -338,16 +345,6 @@ func _run_checks(main) -> void:
 		if row["status_label"].visible:
 			_fail("locked offer '%s' shows its gate count in the status's place, not both" % id)
 			return
-		# Faded ONCE: a modulate multiplies down the tree, and the terms sit
-		# inside the faded mix row unless a split moved them out.
-		var alpha := 1.0
-		var node: Node = row["terms_label"]
-		while node != row["panel"]:
-			alpha *= (node as CanvasItem).modulate.a
-			node = node.get_parent()
-		if absf(alpha - 0.55) > 0.01:
-			_fail("locked offer '%s' terms are drawn at %.2f alpha, not faded once to 0.55" % [id, alpha])
-			return
 		if not String(row["lock_count"].text).contains("%d of %d" % [int(offer["unlock_sold"]), int(offer["unlock_boxes"])]):
 			_fail("locked offer '%s' must say how far along its gate is, got '%s'" % [id, row["lock_count"].text])
 			return
@@ -357,6 +354,33 @@ func _run_checks(main) -> void:
 		if row["panel"].get_theme_stylebox("panel") != main._contract_card_style_locked:
 			_fail("locked offer '%s' must be on the locked paper" % id)
 			return
+	# Faded ONCE, at real window sizes: a modulate multiplies down the tree,
+	# and the terms sit inside the faded mix row unless a split moved them
+	# out. The default headless window is 64x64, where every card splits and
+	# the double fade cannot happen, so this is checked at 1600x900 (terms on
+	# the mix's line) and 1280x720 (some moved out), and both placements must
+	# have been seen or the check proved nothing.
+	var seen := {}
+	for window in [Vector2i(1600, 900), SMALL]:
+		root.size = window
+		main._position_contract_board()
+		for id in locked_offers:
+			var row := _row_for(main, id)
+			var inside: bool = row["terms_label"].get_parent() == row["mix_label"].get_parent()
+			seen[inside] = true
+			var alpha := 1.0
+			var node: Node = row["terms_label"]
+			while node != row["panel"]:
+				alpha *= (node as CanvasItem).modulate.a
+				node = node.get_parent()
+			if absf(alpha - 0.55) > 0.01:
+				_fail("at %s locked offer '%s' terms are drawn at %.2f alpha (inside the mix row: %s), not faded once to 0.55" % [
+					str(window), id, alpha, inside])
+				return
+	if seen.size() != 2:
+		_fail("the single-fade check saw the terms only %s the mix row — it must see both placements" % (
+			"inside" if seen.has(true) else "outside"))
+		return
 	var econ_locked: String = main.sim.economy_snapshot_json()
 	main._do_sign_contract(String(locked_offers[0]))
 	if _active_ids(main).has(locked_offers[0]) or main.sim.economy_snapshot_json() != econ_locked:
@@ -761,6 +785,17 @@ func _run_checks(main) -> void:
 		return
 	if main._contract_empty_label.visible or main._contract_cards.size() != 1:
 		_fail("signing an offer again should bring one docket back and hide the empty line")
+		return
+
+	# With every offer the sim accepts signed, the dockets are at their widest
+	# and the SAUCE chip row can be the offer column's widest line — the case
+	# the chips' figure-space padding exists for.
+	for id in main._board_row_ids:
+		main._do_sign_contract(String(id))
+	main._update_contract_board()
+	views_error = _filter_views_error(main)
+	if views_error != "":
+		_fail("with %d contracts running: %s" % [_active_ids(main).size(), views_error])
 		return
 
 	print("CONTRACT_BOARD_OK: no docket on a new game, %d offers on the board in file order, C/E/ESC modal rules, SIGN debits once and refuses twice, ready/ok/risk/last-chance read four ways, a lost contract leaves the clipboard, is announced, and is re-signed at its price; an empty clipboard names the key; the board's left column holds the running dockets, gains a signature at once and has an empty card held to its pinned width; at 1280x720 the board shows %d whole offers on a new game and %d with nothing running" % [board.size(), fresh_whole, empty_whole])

@@ -99,6 +99,19 @@ matches what code comments and data files cite.
   size drew "BBQ 4" wider than the ALL view ever does, 12px past a 1280
   window.)
 
+  **And with the board full (the third review).** Signing every order the
+  sim accepts found two more: a signed order that had been lost before
+  carried "lost 2 times before" on a second status line (144px, the SIGNED
+  view one card), now folded as "✔ running · lost ×2"; and the SAUCE chip
+  row beside eight wide dockets made the board 1271px against the 1264 a
+  1280 window leaves a modal, so the chips' side margins went from 8 to 6.
+  A locked card's fade is applied where its terms get their parent
+  (`_apply_offer_fade`, called from `_set_offer_split`), not only when the
+  lock is read. `test_contract_board.gd` runs the filtered-views check on a
+  new game, with one order running and with every order running, and
+  checks the single fade at 1600x900 and 1280x720, requiring it to have
+  seen the terms both inside and outside the mix row.
+
 - 2026-09-28: **A warehouse rack may be reserved for one raw ingredient.**
   (Owner's ask: "click on a warehouse rack and then select one item so that
   for that specific warehouse rack it will only allow holding of the
