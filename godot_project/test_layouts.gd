@@ -643,11 +643,11 @@ const BBQ_BRANCH_PLACEMENTS := 70
 ## 15 000 ticks is chosen between two walls, and it is counted from the
 ## moment the branch is PLACED rather than from tick zero. Below about 9 000
 ## the branch is still priming its two new pipe runs and the ketchup bottler
-## is starved, so the shot shows one sauce; past about 30 000 a dock
-## fills its places and the packers back up, so the shot shows a stalled
-## factory. In between, both lines run at the 3:2 split
-## `data/contracts.ron`'s mixed orders are written against and there are
-## boxes of both sauces on the floor.
+## is starved, so the shot shows one sauce; much past it the BBQ dock
+## fills too. In between, both lines run and there are boxes of both sauces
+## on the floor. The ketchup dock is already full when the branch goes in
+## (see `build_bbq_running_line`), and its FULL warning in the shot is the
+## honest state of a factory that has just reached the BBQ gate.
 const BBQ_SETTLE_TICKS := 15000
 
 ## How long the ketchup line is allowed to run on its own before the fixture
@@ -668,6 +668,13 @@ const BBQ_GATE_TICK_CEILING := 90000
 ## dominate the run; the gate is checked on the same 250-tick grid the
 ## balance measurements in `docs/DECISIONS.md` were taken on.
 const BBQ_GATE_POLL_TICKS := 250
+
+## How many boxes of BBQ the branch makes before its orders are signed, and
+## how long it gets to make them. Two is what one `grill_pub` window asks for.
+## The ceiling is about twice the priming-plus-two-crafts it measures
+## (~4 000 ticks), and reaching it is a hard failure, like the gate's.
+const BBQ_PRIMED_BOXES := 2
+const BBQ_PRIME_TICK_CEILING := 10000
 
 
 ## The complaint of the first fixture failure this run, or "" while nothing
@@ -720,6 +727,17 @@ static func fail_fixture(marker: String, message: String) -> void:
 ## ceiling and then build anyway. It latches a fixture failure instead, and
 ## the caller must stop on it: `false` is still returned because this returns
 ## a bool, and it is `fixture_failure()` that says which kind of false it is.
+## How many `item` the factory has made in all, off the production snapshot.
+static func boxes_made(sim, item: String) -> int:
+	var production = JSON.parse_string(sim.production_snapshot_json())
+	if not (production is Dictionary):
+		return 0
+	for entry in production.get("items", []):
+		if String(entry.get("id", "")) == item:
+			return int(entry.get("produced_total", 0))
+	return 0
+
+
 static func any_unlock_open(sim) -> bool:
 	var economy = JSON.parse_string(sim.economy_snapshot_json())
 	if not (economy is Dictionary):
@@ -811,8 +829,9 @@ const MIXED_BELT := Vector2i(23, 0)
 ## Shop order struck out. Measured (`docs/DECISIONS.md`, the BBQ gate
 ## ruling), that transient costs a one-line factory about 8 500 ticks of
 ## ketchup — but a factory that has reached the gate serving the corner_shop
-## order alone has banked about 22 boxes by then, and the order draws two per
-## 1 000 ticks from that bank without missing a window. The gate is what buys
+## order alone has filled its dock by then (the gate is ~52 000 ticks of a
+## line that makes about twice what that order takes), and the order draws
+## two per 1 000 ticks from that bank without missing a window. The gate is what buys
 ## the slack; the re-sign was papering over a fixture that built in the wrong
 ## order.
 ##
@@ -895,12 +914,36 @@ static func build_bbq_running_line(sim) -> void:
 	# which would quietly turn this into a photograph of the staffing
 	# mechanic instead of of the branch.
 	hire_until_staffed(sim)
-	# Both BBQ contracts that ask for one sauce, plus the mixed order: the
-	# clipboard in the shot then shows what the epic added to the board. Both
-	# signatures are accepted now and would have been REFUSED at tick zero —
-	# a BBQ contract is behind the same gate its ingredients are.
-	for id in ["smokehouse_trial", "grill_pub"]:
-		sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": id}))
+	# A second ketchup order, signed as the branch goes in. By now the
+	# ketchup dock holds a full bank: it carries the orders through the
+	# branch's priming (#93), and it backs up the belt the mixed exit merges
+	# onto. This order spends some of that bank.
+	sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": "diner_supply"}))
+	# The BBQ order is signed once the branch is shipping, as a player who
+	# had read #92 would. Signed the moment the branch is placed, its first
+	# windows close while the new pipe runs are still priming, and
+	# `grill_pub`'s two strikes are gone before its first box of BBQ exists.
+	var primed := 0
+	while boxes_made(sim, "boxed_bbq") < BBQ_PRIMED_BOXES:
+		if primed >= BBQ_PRIME_TICK_CEILING:
+			fail_fixture(
+				"BBQ_FIXTURE_FAIL",
+				"the branch made fewer than %d boxed_bbq in %d ticks — it is not running"
+				% [BBQ_PRIMED_BOXES, BBQ_PRIME_TICK_CEILING]
+			)
+			return
+		if primed % RESTOCK_EVERY == 0:
+			restock(sim)
+		sim.tick()
+		primed += 1
+	# The mixed order alone. The signature is accepted now and would have
+	# been REFUSED at tick zero, because a BBQ contract is behind the same gate
+	# its ingredients are. `smokehouse_trial` is NOT signed beside it: the
+	# BBQ boxes routed to the mixed side sit in the ketchup jam, so the few
+	# that reach the BBQ dock go to whichever order settles first, and
+	# `grill_pub` struck out waiting for its two (the health check in
+	# `test_screenshot.gd` refused the shot for it).
+	sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": "grill_pub"}))
 
 	# 4. Both lines running.
 	for i in range(BBQ_SETTLE_TICKS):
