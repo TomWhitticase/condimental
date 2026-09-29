@@ -984,7 +984,7 @@ const UNLOCK_NOTICE_GLYPH := "★"
 ## A fixture buys, places, hires, signs and runs tens of thousands of ticks
 ## inside frame 1, so main.gd's contract notices fire for things that — in the
 ## world this shot claims to photograph — happened long before the shutter.
-## `--bbq` signs two orders as it builds, and its frames came back with
+## `--bbq` signed two orders as it built, and its frames came back with
 ## `✔ SIGNED: smokehouse_trial` hanging over a factory that had been running
 ## for 27,000 ticks.
 ##

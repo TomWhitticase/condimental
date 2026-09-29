@@ -253,6 +253,18 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-29 — the `--bbq` shot renders again, and the mustard gate is re-measured
+
+`scripts/screenshot-scene.sh --bbq` had been refused by its own health check
+since #194 made that check able to fire: under #201's boxes-sold gate,
+`smokehouse_trial` took the few boxes of BBQ that reached the BBQ dock, and
+`grill_pub` struck out. The fixture now signs `grill_pub` alone. That moves
+`measure_gate_ticks.gd`, which builds on the fixture, so the mustard gate's
+recorded figure is now tick 155 000 (~86 min, 103 000 ticks after the BBQ
+gate), not 141 000; `data/unlocks.ron` and `docs/DECISIONS.md` carry the new
+number. Whether the mixed exit still suits a ketchup dock that is already full
+when BBQ unlocks is left with #92/#93.
+
 ### 2026-09-28 — A warehouse rack can be told what to hold
 
 The owner asked to click a rack and pick one item so that rack holds nothing

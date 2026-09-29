@@ -643,11 +643,12 @@ const BBQ_BRANCH_PLACEMENTS := 70
 ## 15 000 ticks is chosen between two walls, and it is counted from the
 ## moment the branch is PLACED rather than from tick zero. Below about 9 000
 ## the branch is still priming its two new pipe runs and the ketchup bottler
-## is starved, so the shot shows one sauce; past about 30 000 a dock
-## fills its places and the packers back up, so the shot shows a stalled
-## factory. In between, both lines run at the 3:2 split
-## `data/contracts.ron`'s mixed orders are written against and there are
-## boxes of both sauces on the floor.
+## is starved, so the shot shows one sauce; much past it the BBQ dock
+## fills too. In between, both lines run and there are boxes of both sauces
+## on the floor. The ketchup dock is already full when the branch goes in
+## (the gate is ~52 000 ticks of a line that makes more than its one order
+## takes), and its FULL warning in the shot is the honest state of a factory
+## that has just reached the BBQ gate.
 const BBQ_SETTLE_TICKS := 15000
 
 ## How long the ketchup line is allowed to run on its own before the fixture
@@ -811,7 +812,7 @@ const MIXED_BELT := Vector2i(23, 0)
 ## Shop order struck out. Measured (`docs/DECISIONS.md`, the BBQ gate
 ## ruling), that transient costs a one-line factory about 8 500 ticks of
 ## ketchup — but a factory that has reached the gate serving the corner_shop
-## order alone has banked about 22 boxes by then, and the order draws two per
+## order alone has filled its dock by then, and the order draws two per
 ## 1 000 ticks from that bank without missing a window. The gate is what buys
 ## the slack; the re-sign was papering over a fixture that built in the wrong
 ## order.
@@ -895,12 +896,15 @@ static func build_bbq_running_line(sim) -> void:
 	# which would quietly turn this into a photograph of the staffing
 	# mechanic instead of of the branch.
 	hire_until_staffed(sim)
-	# Both BBQ contracts that ask for one sauce, plus the mixed order: the
-	# clipboard in the shot then shows what the epic added to the board. Both
-	# signatures are accepted now and would have been REFUSED at tick zero —
-	# a BBQ contract is behind the same gate its ingredients are.
-	for id in ["smokehouse_trial", "grill_pub"]:
-		sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": id}))
+	# The mixed order, the kind of contract the epic added to the board. The
+	# signature is accepted now and would have been REFUSED
+	# at tick zero: a BBQ contract is behind the same gate its ingredients
+	# are. `smokehouse_trial` is deliberately NOT signed beside it. Both
+	# orders draw on one pool of BBQ, and when the branch goes in under the
+	# boxes-sold gate (#201) smokehouse settled first and took the only
+	# boxes shipped, so `grill_pub` struck out and `test_screenshot.gd`'s
+	# health check refused the shot.
+	sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": "grill_pub"}))
 
 	# 4. Both lines running.
 	for i in range(BBQ_SETTLE_TICKS):
@@ -1028,8 +1032,8 @@ static func unlock_open(sim, id: String) -> bool:
 ## it.** `build_bbq_running_line` runs a ketchup line until BBQ's hundredth
 ## box of ketchup sells, and that is right for a fixture whose subject IS the
 ## unlock. Mustard then wants a hundred boxes of BBQ on top, which is another
-## 89 000 ticks — measured, by `measure_gate_ticks.gd`, which earns both gates
-## from a new game and reaches mustard at tick 141 000 — and this fixture's
+## 103 000 ticks — measured, by `measure_gate_ticks.gd`, which earns both gates
+## from a new game and reaches mustard at tick 155 000 — and this fixture's
 ## subject is the line, so it uses
 ## `open_every_gate` — the same door `test_ingredient_models.gd` and
 ## `test_screenshot.gd` already cross gates through. What stays real is
@@ -1166,16 +1170,18 @@ const MUSTARD_SETTLE_TICKS := 15000
 ## splits the branch's BBQ onto the ketchup line's exit, so the ketchup dock
 ## at (26, 0) takes both sauces while the branch's own dock at (31, -3) takes
 ## BBQ alone. Contracts draw on the docks in topology order and (31, -3)
-## comes first, so the BBQ orders keep that dock nearly empty and the BBQ
-## they cannot absorb piles up on (26, 0). At tick 71 733 that dock holds 3
-## ketchup and 29 BBQ, every place taken, and (31, -3) holds 2. The Rust
-## fixture has no mixed exit, which is why its full dock is the BBQ one.
+## comes first, so the BBQ order keeps that dock nearly empty. Under the
+## boxes-sold gate (#201) the ketchup line has filled (26, 0) before the
+## branch is even built, so the disagreement is there the moment
+## `build_bbq_running_line` hands back: measured 2026-09-29 at tick 67 129,
+## (26, 0) holds 32 ketchup, every place taken, and (31, -3) holds 2 BBQ.
+## The Rust fixture has no mixed exit, which is why its full dock is the BBQ
+## one.
 ##
-## The wait is long, and has to be: the board keeps BUYING, and BBQ outruns
-## what the two BBQ orders take only slowly, so the ceiling arrives somewhere
-## past tick 70 000. That gap is the point of the shot rather than an
-## inconvenience: stock outruns its demand on one dock and not the other,
-## and only one dock should say so.
+## The ceiling stays long for a balance pass that empties that bank: then
+## the board keeps BUYING and stock outruns demand only slowly. Either way
+## the point of the shot is that stock outruns its demand on one dock and
+## not the other, and only one dock should say so.
 ##
 ## Returns with the docks disagreeing, or having run out of patience — the
 ## caller checks `split_dock_lamps_found` rather than trusting the frame.
