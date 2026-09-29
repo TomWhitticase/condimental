@@ -189,7 +189,9 @@
 # aims the --hover* flag. So the frame shows a hover taken straight after a
 # taller, wider one — the case issue #173 was about, which a hover from a
 # fresh state cannot show. Isometric only, and it needs a --hover* flag and a
-# machine in the world; without them it refuses.
+# machine in the world; without them it refuses. It also refuses when the
+# --hover* flag lands on that same machine, which would photograph the first
+# hover again rather than a second one.
 #
 # A HOVER FLAG THAT CANNOT FIND ITS TARGET REFUSES. Each of these used to be
 # its own little function guarded by `if tile != HOVER_NONE`, so a flag whose
@@ -407,6 +409,9 @@ var _cursor_park_noise_tile := Vector2i(-999999, -999999)
 var _stalled_run := false
 ## `--after-machine-hover`: see the header.
 var _after_machine_hover := false
+## The machine `--after-machine-hover` hovered first, so the --hover* flag
+## can be refused for landing on it again.
+var _first_hover_tile := HOVER_NONE
 var _shop := false
 var _shop_search := ""
 ## `--config TX,TY` clicks the building standing on that tile once
@@ -1642,7 +1647,16 @@ func _hover_machine_first() -> void:
 		printerr("SCREENSHOT_FAIL: --after-machine-hover found no machine in this world to hover first")
 		_refuse()
 		return
+	_first_hover_tile = tile
 	_hover_over_tile(tile)
+
+
+## Whether the --hover* flag landed on the very machine
+## `--after-machine-hover` hovered first. Compared as placements, not tiles:
+## a vat's four tiles are one hover.
+func _hovered_first_machine_again() -> bool:
+	var first: Dictionary = _main._placement_at_tile(_first_hover_tile)
+	return not first.is_empty() and _main._placement_at_tile(_cursor_tile) == first
 
 
 ## Screen positions `_park_cursor` tries, in this order, as fractions of the
@@ -2503,6 +2517,11 @@ func _process(delta: float) -> bool:
 		# shot nothing will be written from: a refusal's own message is the
 		# only output a refused run should have to be read for.
 		if _refused:
+			return true
+		if _after_machine_hover and _hovered_first_machine_again():
+			printerr("SCREENSHOT_FAIL: --after-machine-hover hovered %s first and the --hover* flag aimed at the same machine, so the frame would show one hover, not a second — pick a flag whose target is something else"
+				% str(_first_hover_tile))
+			_refuse()
 			return true
 	if _frames == 2 and _ghost_kind != "":
 		_enter_ghost_mode()
