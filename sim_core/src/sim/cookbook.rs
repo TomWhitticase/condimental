@@ -755,8 +755,9 @@ fn guide_facts(
     let first_gate = input.unlocks.ordered().first();
 
     // Orders open to sign right now: no gate, or a gate that has opened.
-    // The board lists the gated rest too, padlocked. This is what "open to a brand-new factory" means in the
-    // guide's prose, and it is not `starters()` — a starter is one the game
+    // The board lists the gated rest too, padlocked. This is what "open to a
+    // brand-new factory" means in the guide's prose, and it is not
+    // `starters()` — a starter is one the game
     // signs for you, and since 2026-09-26 `data/contracts.ron` marks none,
     // so `starters()` is empty while this list is not.
     let open_contracts = input
