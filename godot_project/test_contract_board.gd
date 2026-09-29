@@ -788,8 +788,9 @@ func _run_checks(main) -> void:
 		return
 
 	# With every offer the sim accepts signed, the dockets are at their widest
-	# and the SAUCE chip row can be the offer column's widest line — the case
-	# the chips' figure-space padding exists for.
+	# and the chip counts at their longest. The chip rows must still be
+	# narrower than the offer column, so a filter click cannot move the board,
+	# and the board must still fit the modal limit.
 	for id in main._board_row_ids:
 		main._do_sign_contract(String(id))
 	main._update_contract_board()
