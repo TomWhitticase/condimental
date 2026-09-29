@@ -1194,6 +1194,18 @@ sounds refused; the panel does not grey the button out and swallow the click,
 because the glyph, the dimming and the cue together say more than a dead
 control does (2026-09-21, issue #90).
 
+**A rack's panel reserves it instead of filling it** (2026-09-28). A
+warehouse rack opens the same panel with FILL and AUTO-FILL hidden — its
+stock is the larder's, bought at the market — and the picker headed
+**RESERVED FOR**: "Any", drawn with the rack's own icon, then every raw the
+INGREDIENTS snapshot lists, padlocks and all by the rule above. A pick the
+simulation would refuse because stock on those shelves would have nowhere
+else to go is dimmed and carries a ✗ where the padlock would sit, and a line
+under the row names it; the list is the snapshot's `blocked_filters`, not a
+sum the panel does. The title says what the rack is for ("Stock Shelving —
+Tomato only"), and so does the hover. Record in `docs/DECISIONS.md`,
+2026-09-28.
+
 **And the panel is never wider than the constant that names its width.** The
 positioning arithmetic above is written against `CONFIG_PANEL_WIDTH`; a
 single unpinned footer Label made the real panel 99px wider than that, which

@@ -448,7 +448,11 @@ func _run_checks() -> void:
 	if not main._market_storage_label.visible:
 		_fail("the market says nothing about the warehouse, with a rack standing")
 		return
-	for phrase in ["1 shelving unit", "bays %d / %d" % [used_bays, total_bays], "%d free" % (total_bays - used_bays)]:
+	var free_bays := int(main._storage_state.get("free_bays", -1))
+	if free_bays != total_bays - used_bays:
+		_fail("with no rack reserved every empty bay is free, but the wire says %d of %d" % [free_bays, total_bays - used_bays])
+		return
+	for phrase in ["1 shelving unit", "bays %d / %d" % [used_bays, total_bays], "%d free" % free_bays]:
 		if not main._market_storage_label.text.contains(phrase):
 			_fail("the market's warehouse line does not say '%s':\n%s" % [phrase, main._market_storage_label.text])
 			return
@@ -527,10 +531,10 @@ func _run_checks() -> void:
 		"quantity": slot_stack * int(rack.get("bays", 0)),
 	}))
 	main._refresh_buffers()
-	var bay_count := int(main._rack_states.get(key, {}).get("bays", 0))
-	if not main._rack_removal_refused(bay_count):
-		_fail("a rack whose every bay is holding stock is not reported as refused — used_bays %s of total_bays %s" % [
+	if not main._rack_removal_refused(key):
+		_fail("a rack whose every bay is holding stock is not reported as refused — used_bays %s of total_bays %s, removal_refused %s" % [
 			str(main._storage_state.get("used_bays", "?")), str(main._storage_state.get("total_bays", "?")),
+			str(main._rack_states.get(key, {}).get("removal_refused", "?")),
 		])
 		return
 	main._remove_mode = true
@@ -578,8 +582,8 @@ func _run_checks() -> void:
 	if fresh_bays <= 0:
 		_fail("the second world's rack reports no bays at all")
 		return
-	if fresh._rack_removal_refused(fresh_bays):
-		_fail("a rack in a factory holding nothing is refused — the refusal is not reading `used_bays` at all")
+	if fresh._rack_removal_refused(key):
+		_fail("a rack in a factory holding nothing is refused — the refusal is not reading the rack's `removal_refused` at all")
 		return
 	var layout_before: int = JSON.parse_string(fresh.sim.world_layout_json()).size()
 	fresh.sim.issue_command_json(JSON.stringify({"type": "remove", "tile": [tile.x, tile.y]}))

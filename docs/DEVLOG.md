@@ -89,6 +89,12 @@ below is history and should only ever be appended to.)*
   fits, says `AT CAPACITY` when nothing does, and a header meters the racks'
   shared bays; the STOCK plate marks a full row `FULL` and says how many rows
   it is hiding when the column cuts its list. See the log entries below.
+- **A rack can be reserved for one ingredient (2026-09-28).** Click a rack
+  and pick a raw under RESERVED FOR; that rack's bays then take nothing
+  else, and the pick is refused (✗, in words) while stock on its shelves
+  would have nowhere to go. Saves are **version 6**; a v5 save is refused
+  until `scripts/migrate-save-v5-to-v6.py --apply` rewrites it. See the log
+  entry below.
 - **The lighting post-passes mean something now (2026-09-20).** Glow is
   `1.0 / 0.0 / 1.2 / SCREEN` and SSAO is `0.45 / 16.0 / 1.6`
   (`factory_environment.gd`). Both sets of old numbers were chosen where they
@@ -261,6 +267,30 @@ and `--after-machine-hover` lets a screenshot show a hover taken straight
 after a machine's. Not fixed here: at 1280x720 the dock's hover still sheds
 its crew line even from a fresh hover, since the per-dock places grid made it
 taller.
+
+### 2026-09-28 — A warehouse rack can be told what to hold
+
+The owner asked to click a rack and pick one item so that rack holds nothing
+else. It does now: the rack opens the configuration panel hoppers and tanks
+already use, with FILL and AUTO-FILL hidden and the picker headed RESERVED
+FOR. The simulation keeps the warehouse's founding rule — bays are derived
+from the ledger, never assigned — and adds only a reservation: a filtered
+rack's bays form a pool of their own that its ingredient fills first, and
+everything else shares what is left. The pick itself is persisted, so the
+save format is version 6, and a one-off script converts a v5 save exactly
+(every old rack was open to everything).
+
+The simulation answers the panel's questions ahead of the click rather than
+the panel working them out: which picks it would refuse right now
+(`blocked_filters`, drawn ✗ and named in a line) and whether the rack could
+be picked up (`removal_refused`, which replaced the ghost's own bay sum).
+`test_rack_filter.gd` drives all of it headlessly, and `tests/storage.rs`
+gained a section proving the ceilings, the fill order, the refusals and the
+round trip.
+
+One thing it surfaced and does not fix: at 1280x720 the configuration panel
+runs off the bottom of the window, for a hopper as much as for a rack. That
+is filed rather than patched for one kind.
 
 ### 2026-09-27 — `--admin` is the owner's override, and now it is written down
 

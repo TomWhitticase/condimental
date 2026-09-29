@@ -43,6 +43,18 @@
 // room — and `base_cap` is the guarantee that it can never become a
 // deadlock.
 //
+// A RACK MAY BE RESERVED (2026-09-28). Clicking a rack and picking one raw
+// moves that rack's bays out of the shared pool into a pool only that raw
+// may stand in, so the rule above becomes
+//
+//     cap(id) = base_cap + slot_stack * (reserved(id) + shared bays not
+//               needed by anything else)
+//
+// with an id filling its own reserved bays before it draws on the shared
+// ones. Still derived: only the player's pick is saved, never which bay
+// holds what. This file has no field for it — which rack is reserved for
+// what is the player's choice, not content.
+//
 // NUMBERS ARE PLACEHOLDERS, like every other price in this repo
 // (GAMEPLAY.md §10 puts exact balance in a later pass). The shape they
 // encode: `base_cap` is under a hopper's 64-unit capacity, so an

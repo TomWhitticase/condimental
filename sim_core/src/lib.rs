@@ -853,13 +853,16 @@ impl SimBridge {
     ///
     /// ```json
     /// {"base_cap": 20, "slot_stack": 50, "total_bays": 12, "used_bays": 7,
+    ///  "free_bays": 1,
     ///  "racks": [
     ///    {"tile": [0, -8], "kind": "warehouse_rack", "direction": "east",
     ///     "footprint": {"width_tiles": 1, "height_tiles": 2}, "bays": 6,
     ///     "contents": [{"bay": 0, "item": "tomato", "units": 50,
     ///                   "capacity": 50},
     ///                  {"bay": 1, "item": "tomato", "units": 30,
-    ///                   "capacity": 50}]}
+    ///                   "capacity": 50}],
+    ///     "filter": "tomato", "blocked_filters": [],
+    ///     "removal_refused": false}
     ///  ]}
     /// ```
     ///
@@ -874,13 +877,24 @@ impl SimBridge {
     /// empty rack reports `[]` rather than six nulls. A bay's `units` is at
     /// most `capacity` and the last bay an item occupies is usually part
     /// full. Which bay holds what is **derived** from the ledger rather
-    /// than stored — ingredients fill the bays in sorted id order, racks in
-    /// tile order — so it can change under a renderer that caches it;
-    /// re-read after any buy or fill.
+    /// than stored — a reserved rack's own raw fills it first, then the
+    /// rest fills the open racks in sorted id order, racks in tile order —
+    /// so it can change under a renderer that caches it; re-read after any
+    /// buy or fill.
+    ///
+    /// `filter` is the one raw a rack is reserved for (`set_rack_filter`),
+    /// `null` when any raw may stand in it. `blocked_filters` lists the raws
+    /// that command would refuse because some stock would be left with no
+    /// bay, and `removal_refused` whether `remove` would refuse the rack for
+    /// the same reason — both answered here so the panel dims a choice
+    /// rather than redoing the arithmetic.
     ///
     /// `base_cap` is the free, unconditional ceiling every raw ingredient
-    /// has with no warehouse at all, and `total_bays - used_bays` is the
-    /// shared pool of room above it. Per-ingredient capacity is on
+    /// has with no warehouse at all, and `free_bays` the room above it that
+    /// any raw may still take. With a rack reserved, `total_bays - used_bays`
+    /// is more than that by the reserved racks' empty bays, which only their
+    /// own raw may use (above: tomato stands in two of its rack's six, so
+    /// four of the five empty bays are tomato's). Per-ingredient capacity is on
     /// `ingredients_snapshot_json`'s entries, because it moves with what
     /// else is held.
     #[func]

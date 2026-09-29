@@ -193,6 +193,20 @@
 //! still written and still restored, because it still drives the HUD's
 //! delivery count — it simply no longer opens anything.
 //!
+//! # Version 6: a rack remembers what it is reserved for
+//!
+//! [`SavedRack::filter`] is why version 5 became version 6 (2026-09-28, the
+//! owner's request that a warehouse rack can be told to hold one
+//! ingredient — `super::storage`'s module doc). A rack's body stopped being
+//! an empty marker, so the `WarehouseRack` record changed shape, and a
+//! field addition is a bump (above).
+//!
+//! Unlike version 5 there is nothing to reconstruct: every rack in a
+//! version 5 file was open to every raw, which is exactly `filter: None`.
+//! The loader still refuses the older file by number, as every loader in
+//! this crate does, and `scripts/migrate-save-v5-to-v6.py` rewrites one
+//! outside the game — a change of text, not of meaning.
+//!
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -210,14 +224,14 @@ use super::recipe::RecipeRegistry;
 use super::splitter::{SPLITTER_KIND, Side, Splitter};
 use super::staff::{StaffPools, StaffRestore, StaffRestoreError};
 use super::stats::{ItemStats, ProductionLedger, STAT_BUCKETS, STAT_WINDOW_COUNT, StatKind};
-use super::storage::WAREHOUSE_RACK_KIND;
+use super::storage::{BayPool, WAREHOUSE_RACK_KIND, WarehouseRack};
 use super::types::{Direction, Fx, ItemId, Money, RecipeId, TileCoord};
 use super::world::{BELT_KIND, PIPE_KIND, PlayerCommand, World};
 
 /// The save format's version. Bumped whenever the shape below changes;
 /// a file naming any other version is rejected, never migrated — see the
 /// module doc, and every other loader in this crate.
-pub const SAVE_SCHEMA_VERSION: u32 = 5;
+pub const SAVE_SCHEMA_VERSION: u32 = 6;
 
 /// A fixed-point value as its raw `I16F16` bits — see the module doc for why
 /// a save never stores one as decimal text.
@@ -426,20 +440,19 @@ pub enum SavedBody {
     Hopper(SavedHopper),
     FluidTank(SavedTank),
     Dock(SavedDock),
-    /// A warehouse stock rack — **no payload, deliberately**.
+    /// A warehouse stock rack, and the one choice the player made about
+    /// it — see [`SavedRack`].
     ///
-    /// A rack holds nothing of its own: the bays it supplies are a property
-    /// of its kind in `data/storage.ron`, and the stock standing in them is
-    /// rows of `owned_ingredients`, which this file already saves. Which
-    /// bay draws which ingredient is derived on read (see
-    /// [`super::storage`]), so there is nothing here to persist and nothing
-    /// that could load back inconsistent with the ledger.
+    /// A rack holds no stock of its own: the bays it supplies are a
+    /// property of its kind in `data/storage.ron`, and the stock standing
+    /// in them is rows of `owned_ingredients`, which this file already
+    /// saves. Which bay draws which ingredient is derived on read (see
+    /// [`super::storage`]), so none of that is persisted and none of it
+    /// could load back inconsistent with the ledger.
     ///
-    /// Added without moving [`SAVE_SCHEMA_VERSION`], the same additive rule
-    /// [`SavedHopper::auto_fill`] followed: no save written before racks
-    /// existed can contain one, and every field of every other variant is
-    /// untouched.
-    WarehouseRack,
+    /// It was an empty marker until version 6; the filter is what gave it a
+    /// payload, and is why the version moved.
+    WarehouseRack(SavedRack),
 }
 
 impl SavedBody {
@@ -454,9 +467,18 @@ impl SavedBody {
             SavedBody::Hopper(_) => "hopper",
             SavedBody::FluidTank(_) => "fluid_tank",
             SavedBody::Dock(_) => "dock",
-            SavedBody::WarehouseRack => "warehouse_rack",
+            SavedBody::WarehouseRack(_) => "warehouse_rack",
         }
     }
+}
+
+/// A warehouse rack's own state: which raw ingredient it is reserved for
+/// (`sim::storage::WarehouseRack::filter`), or `None` for a rack any raw
+/// may stand in. No `#[serde(default)]`: the field is why the format is at
+/// version 6, and the version is the guard (see the module doc).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedRack {
+    pub filter: Option<ItemId>,
 }
 
 /// A belt tile's contents: each item and how far along the tile it is, front
@@ -730,6 +752,15 @@ pub enum SaveError {
         tile: TileCoord,
         raw: Vec<String>,
     },
+    /// A rack reserved for something that is not a raw ingredient of this
+    /// build's recipes, solid or fluid — `UnknownHopperItem`'s twin, and
+    /// refused for its reason. `PlayerCommand::SetRackFilter` would not
+    /// have accepted it either.
+    UnknownRackFilter {
+        item: String,
+        tile: TileCoord,
+        raw: Vec<String>,
+    },
     /// A machine whose in-flight craft names a recipe its *kind* cannot
     /// run — `data/recipes.ron` changed under this save, either dropping
     /// the recipe or moving it to another machine.
@@ -810,6 +841,12 @@ pub enum SaveError {
 /// development build whose change nobody has to explain any more.
 fn why_the_version_moved(found: u32) -> &'static str {
     match found {
+        5 => {
+            ". Version 6 lets a warehouse rack be reserved for one ingredient, which \
+             changed how a rack is written. Nothing is lost: \
+             scripts/migrate-save-v5-to-v6.py rewrites a version 5 save with every rack \
+             open to every ingredient, which is what every rack in it was"
+        }
         4 => {
             ". Version 5 changed what unlocks a sauce: a tier used to open after a \
              number of delivery windows, and now opens after a number of boxes of a \
@@ -880,6 +917,13 @@ impl std::fmt::Display for SaveError {
                 "the tank at {tile:?} is declared to hold '{fluid}', which is not a raw fluid \
                  of this build's recipes (raw: {}) — a tank is how fluid enters the graph from \
                  outside, and only raws come in",
+                raw.join(", ")
+            ),
+            SaveError::UnknownRackFilter { item, tile, raw } => write!(
+                f,
+                "the warehouse rack at {tile:?} is reserved for '{item}', which is not a raw \
+                 ingredient of this build's recipes (raw: {}) — only raws are held in the \
+                 warehouse",
                 raw.join(", ")
             ),
             SaveError::UnknownMachineRecipe {
@@ -1055,7 +1099,15 @@ impl World {
                         mothballed: dock.mothballed(),
                     })
                 }
-                WAREHOUSE_RACK_KIND => SavedBody::WarehouseRack,
+                WAREHOUSE_RACK_KIND => {
+                    let rack = self
+                        .ecs()
+                        .get::<&WarehouseRack>(entity)
+                        .expect("a rack placement carries a WarehouseRack");
+                    SavedBody::WarehouseRack(SavedRack {
+                        filter: rack.filter.clone(),
+                    })
+                }
                 _ => {
                     let machine = self
                         .ecs()
@@ -1328,7 +1380,24 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
                     });
                 }
             }
-            SavedBody::Pipe(_) | SavedBody::WarehouseRack => {}
+            SavedBody::WarehouseRack(rack) => {
+                if let Some(item) = &rack.filter
+                    && !world.raw_items().contains(item)
+                    && !world.raw_fluids().contains(item)
+                {
+                    return Err(SaveError::UnknownRackFilter {
+                        item: item.clone(),
+                        tile: placement.tile,
+                        raw: world
+                            .raw_items()
+                            .iter()
+                            .chain(world.raw_fluids().iter())
+                            .cloned()
+                            .collect(),
+                    });
+                }
+            }
+            SavedBody::Pipe(_) => {}
         }
     }
 
@@ -1349,17 +1418,23 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
     // storage invariant gets checked on the load path. Counted off
     // `data.placements` rather than the half-built world because validation
     // runs before anything is placed.
-    let bays = data
-        .placements
-        .iter()
-        .map(|placement| world.storage().bays_of_kind(&placement.kind))
-        .fold(0u32, u32::saturating_add);
+    // A filtered rack's bays are counted as its filter's, exactly as
+    // `World::bay_pool` counts them on a live floor.
+    let mut pool = BayPool::default();
+    for placement in &data.placements {
+        let filter = match &placement.body {
+            SavedBody::WarehouseRack(rack) => rack.filter.as_deref(),
+            _ => None,
+        };
+        pool.add_rack(world.storage().bays_of_kind(&placement.kind), filter);
+    }
+    let bays = pool.total();
     let mut owned = super::ingredients::OwnedIngredients::new();
     for (id, count) in &data.owned_ingredients {
         owned.add(id, *count);
     }
     for (id, count) in &data.owned_ingredients {
-        if *count > world.storage().cap_for(id, &owned, bays) {
+        if *count > world.storage().cap_for(id, &owned, &pool) {
             return Err(SaveError::StockOverCapacity {
                 id: id.clone(),
                 held: *count,
@@ -1689,11 +1764,25 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                     )
                     .expect("the entity was just placed");
             }
-            // Nothing to write back: a rack's body is a marker component
-            // `rebuild_structure`'s `Place` already spawned, and its
-            // contents are `owned_ingredients`, restored by
-            // `restore_ledgers` further down.
-            SavedBody::WarehouseRack => {}
+            // Only the filter to write back: `rebuild_structure`'s `Place`
+            // spawned the rack open to every raw, and its contents are
+            // `owned_ingredients`, restored by `restore_ledgers` further
+            // down. Written straight in rather than through
+            // `SetRackFilter`, which would refuse a filter whose gate has
+            // not opened in the half-restored world (the ledger that opens
+            // it is restored after this) and would judge the room against
+            // a ledger that is still empty.
+            SavedBody::WarehouseRack(saved) => {
+                world
+                    .ecs_mut()
+                    .insert_one(
+                        entity,
+                        WarehouseRack {
+                            filter: saved.filter.clone(),
+                        },
+                    )
+                    .expect("the entity was just placed");
+            }
         }
     }
     Ok(())
