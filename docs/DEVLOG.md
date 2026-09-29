@@ -247,6 +247,21 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-09-29 — The hover tooltip is its own size after a bigger one
+
+Hovering a short, narrow thing straight after a tall, wide machine left the
+tooltip at the machine's size (issue #173): a free-standing Control grows to its
+minimum and never shrinks back, and `_panel_draw_size` trusts the larger of the
+two. At 1280x720 a dock hovered after the crusher was drawn 456px wide against
+its own 319, over the legend, on every frame. `_update_hover_tooltip` now drops
+the height on the first frame and the width on the next — the width is kept
+only on the frame the text changed, because that is the one frame a Label's
+minimum width can still be the old text's. `test_hover.gd` pins both halves,
+and `--after-machine-hover` lets a screenshot show a hover taken straight
+after a machine's. Not fixed here: at 1280x720 the dock's hover still sheds
+its crew line even from a fresh hover, since the per-dock places grid made it
+taller.
+
 ### 2026-09-27 — `--admin` is the owner's override, and now it is written down
 
 GitHub refused to start any job in the repository on an account billing error,

@@ -29,8 +29,9 @@
 #     added specifically for this case,
 #   * `_crosshair`'s visibility tracks `_view_mode` (shown in FIRST_PERSON,
 #     hidden in ISOMETRIC),
-#   * the tooltip is its own height on the first frame after a taller one —
-#     a belt hovered straight after the crusher (issue #173).
+#   * the tooltip is its own height on the first frame after a taller one,
+#     and its own width on the second — a belt hovered straight after the
+#     crusher (issue #173).
 #
 # `_tile_under_screen_pos` calls `Camera3D.project_ray_origin`/
 # `project_ray_normal`, which (like `unproject_position`) require the camera
@@ -289,6 +290,7 @@ func _run_checks() -> void:
 	main._update_hover_tooltip()
 	main._hover_tooltip.size = main._hover_tooltip.get_combined_minimum_size()
 	var tall_height: float = main._hover_tooltip.size.y
+	var tall_width: float = main._hover_tooltip.size.x
 	main._pointer_override = short_pos
 	main._update_hover_tooltip()
 	main._pointer_override = null
@@ -304,6 +306,23 @@ func _run_checks() -> void:
 			main._hover_tooltip.size.y, main._panel_draw_size(main._hover_tooltip).y, short_min,
 		])
 		return
+	# The width is kept on that first frame, while the Label's minimum width
+	# may still be the crusher's text, and dropped on the next one.
+	if main._hover_tooltip.size.x != tall_width:
+		_fail("the belt's first frame should keep the crusher's width (%.0fpx) to cover the Label's lag, not %.0fpx" % [tall_width, main._hover_tooltip.size.x])
+		return
+	var short_min_width: float = main._hover_tooltip.get_combined_minimum_size().x
+	if short_min_width >= tall_width:
+		_fail("the belt's hover (%.0fpx wide) should be narrower than the crusher's (%.0fpx) for this check to mean anything" % [short_min_width, tall_width])
+		return
+	main._pointer_override = short_pos
+	main._update_hover_tooltip()
+	main._pointer_override = null
+	if main._hover_tooltip.size.x != short_min_width or main._panel_draw_size(main._hover_tooltip).x != short_min_width:
+		_fail("the belt's hover kept the crusher's width on its second frame: size %.0fpx, drawn as %.0fpx, its own is %.0fpx" % [
+			main._hover_tooltip.size.x, main._panel_draw_size(main._hover_tooltip).x, short_min_width,
+		])
+		return
 
-	print("HOVER_OK: screen-to-tile resolution finds the right machine in both view modes, every placed kind answers through one entry point and names itself the way the rest of the UI does, a machine reports buffers and a progress meter while a belt reports neither, a rotated tile reports its facing, open floor finds none, looking up in first-person finds no tile, crosshair visibility tracks view mode, a shorter hover sheds the taller one's height on its first frame")
+	print("HOVER_OK: screen-to-tile resolution finds the right machine in both view modes, every placed kind answers through one entry point and names itself the way the rest of the UI does, a machine reports buffers and a progress meter while a belt reports neither, a rotated tile reports its facing, open floor finds none, looking up in first-person finds no tile, crosshair visibility tracks view mode, a shorter hover sheds the taller one's height on its first frame and its width on the next")
 	quit(0)
