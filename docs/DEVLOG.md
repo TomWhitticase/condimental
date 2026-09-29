@@ -268,6 +268,51 @@ after a machine's. Not fixed here: at 1280x720 the dock's hover still sheds
 its crew line even from a fresh hover, since the per-dock places grid made it
 taller.
 
+### 2026-09-29 — The contracts board shows what is coming, and filters
+
+The owner asked for orders a factory cannot make yet to show as locked, for
+the board to be filterable, and for it to look better. A new game's board
+now lists all seventeen orders: the nine ketchup ones to sign, and eight BBQ
+and mustard ones on greyed paper with a padlock, the gate's name on the
+button and a meter under it of how many boxes of the sauce below have sold. The simulation flags each
+one and still refuses the signature; the card only draws it. Two chip rows
+filter by status (all / open / signed / locked) and by sauce, each chip
+counting what it would show. Each card was redrawn around a product badge,
+with the payout under it and the cadence in seconds. The fit pass now breaks
+each card only as far as that card needs, so one long mixed order no longer
+puts every card on three lines, and a 1280x720 window still shows two whole
+offers — under every filter, locked ones included. No save-format change.
+
+### 2026-09-29 — A splitter can split left, right, as a T or three ways
+
+The owner reported that splitters only ever split left, and asked to click one
+and choose. The simulation's branch had always been the facing turned
+clockwise, which the mirrored renderer draws on the player's left, so a right
+split meant facing the splitter backwards. A splitter now has a mode —
+**left** (the default, and every splitter before this), **right**, **T
+junction** (left and right, nothing straight on) and **three way** — set from
+the configuration panel's SPLITS picker. It deals round robin over the mode's
+sides, with the same same-tick fallback as before. The sides are still derived
+from the facing, so rotating a splitter turns all of them, and the mode is the
+only thing stored. Each mode has its own body model with exactly its exits
+open and a groove for each, and the arrow turns right as well as left.
+
+The mode is saved, so the save format is version 7, and
+`scripts/migrate-save-v6-to-v7.py` converts a v6 save exactly: every old
+splitter becomes `left`.
+
+### 2026-09-29 — the `--bbq` shot renders again, and the mustard gate is re-measured
+
+`scripts/screenshot-scene.sh --bbq` had been refused by its own health check
+since #194 made that check able to fire: under #201's boxes-sold gate,
+`smokehouse_trial` took the few boxes of BBQ that reached the BBQ dock, and
+`grill_pub` struck out. The fixture now signs `grill_pub` alone. That moves
+`measure_gate_ticks.gd`, which builds on the fixture, so the mustard gate's
+recorded figure is now tick 155 000 (~86 min, 103 000 ticks after the BBQ
+gate), not 141 000; `data/unlocks.ron` and `docs/DECISIONS.md` carry the new
+number. Whether the mixed exit still suits a ketchup dock that is already full
+when BBQ unlocks is left with #92/#93.
+
 ### 2026-09-28 — A warehouse rack can be told what to hold
 
 The owner asked to click a rack and pick one item so that rack holds nothing

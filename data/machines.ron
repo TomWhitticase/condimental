@@ -152,7 +152,7 @@
             blurb: "The hopper's fluid twin: you fill it, and it discharges into the pipe run off the face it points at. Nothing refills it but you.",
             icon: "fluid_tank",
         ),
-        // A conveyor splitter (Epic B) — one belt in, two belts out, and
+        // A conveyor splitter (Epic B) — one belt in, up to three out, and
         // the FOURTH kind in this file with no recipe behind it. Like the
         // hopper, the tank and the dock it moves product without changing
         // it, so it is a placed building with a footprint rather than a
@@ -166,14 +166,17 @@
         // rotation convention as everything else here with one addition
         // that is stated in `splitter.rs` rather than invented per call
         // site — the placement's `direction` is the straight-through
-        // output, and the second output is one quarter turn CLOCKWISE from
-        // it, so rotating the building turns both outputs together and no
-        // second facing field exists to drift out of step with the first.
+        // output, and the left and right outputs are the two quarter turns
+        // from it, so rotating the building turns every output together and
+        // no second facing field exists to drift out of step with the first.
+        // Which of the three it deals to is the splitter's mode (left,
+        // right, T junction, three way — `SplitMode` in `splitter.rs`), set
+        // from its panel, not a field here.
         MachineKind(
             id: "splitter",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
             staff: [],
-            blurb: "One belt in, two belts out. It stands in place of an ordinary belt tile and does not change what it carries — the straight-through output is the way it faces, and the second is a quarter turn clockwise from it.",
+            blurb: "One belt in, up to three out. It stands in place of an ordinary belt tile and does not change what it carries. Click it to choose which way it splits: straight on and left, straight on and right, left and right as a T, or all three ways.",
             icon: "machine_splitter",
         ),
         // GAMEPLAY.md §2 tier 1's raw-ingredient prep: crushes whole

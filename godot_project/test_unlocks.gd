@@ -11,12 +11,13 @@
 # says? It proves, through the same entry points a real session reaches:
 #
 #   * a new game's market and larder list only the ungated ingredients, and
-#     the board only the ungated offers — no panel re-derives the filter,
-#     they simply draw what `ingredients_snapshot_json` and
-#     `economy_snapshot_json` gave them;
-#   * crossing the threshold GROWS all three lists in place, so a panel
-#     built at `_ready()` does not stay three crates wide forever
-#     (`_market_slots_match` / `_larder_rows_match` / `_board_rows_match`);
+#     the board lists EVERY offer with the gated ones padlocked (2026-09-29)
+#     — no panel re-derives a gate, they simply draw what
+#     `ingredients_snapshot_json` and `economy_snapshot_json` gave them;
+#   * crossing the threshold GROWS the market and larder in place, so a
+#     panel built at `_ready()` does not stay three crates wide forever
+#     (`_market_slots_match` / `_larder_rows_match`), and lifts the padlock
+#     off the board's rows in place — the same rows, now signable;
 #   * the crossing is announced once, on the existing one-line notice, in
 #     words that name the tier and both halves of the game that changed;
 #   * a save loaded already past the gate is NOT announced — the priming
@@ -46,10 +47,21 @@ func _market_ids(main) -> Array:
 	return out
 
 
+## The offers a player may sign — the board lists the rest too, padlocked.
 func _board_ids(main) -> Array:
 	var out: Array = []
 	for offer in _econ(main).get("board", []):
-		out.append(String(offer.get("id", "")))
+		if not bool(offer.get("locked", false)):
+			out.append(String(offer.get("id", "")))
+	return out
+
+
+## The board rows the HUD draws WITHOUT a padlock, in board order.
+func _open_row_ids(main) -> Array:
+	var out: Array = []
+	for row in main._board_rows:
+		if String(row["status"]) != "locked":
+			out.append(String(row["id"]))
 	return out
 
 
@@ -101,8 +113,14 @@ func _initialize() -> void:
 	if main._market_slots.size() != locked_market.size():
 		_fail("expected %d market crate(s), found %d" % [locked_market.size(), main._market_slots.size()])
 		return
-	if main._board_rows.size() != locked_board.size():
-		_fail("expected %d board row(s), found %d" % [locked_board.size(), main._board_rows.size()])
+	if main._board_rows.size() != _econ(main)["board"].size():
+		_fail("the board must draw a row for every offer, locked or not: %d row(s) for %d" % [
+			main._board_rows.size(), _econ(main)["board"].size()])
+		return
+	main._update_contract_board()
+	if _open_row_ids(main) != locked_board:
+		_fail("the rows without a padlock must be exactly the open offers %s, got %s" % [
+			str(locked_board), str(_open_row_ids(main))])
 		return
 
 	# The notice starts empty, and the first poll only primes the diff.
@@ -157,15 +175,10 @@ func _initialize() -> void:
 	if main._larder_ids != open_market:
 		_fail("the larder still lists %s for a market of %s" % [str(main._larder_ids), str(open_market)])
 		return
-	if main._board_rows.size() != open_board.size():
-		_fail("the board still shows %d row(s) for %d offer(s)" % [
-			main._board_rows.size(), open_board.size()])
+	if _open_row_ids(main) != open_board:
+		_fail("the padlocks did not lift in place: unlocked rows %s for open offers %s" % [
+			str(_open_row_ids(main)), str(open_board)])
 		return
-	for i in range(open_board.size()):
-		if String(main._board_rows[i]["id"]) != open_board[i]:
-			_fail("board row %d is '%s', the wire's offer %d is '%s'" % [
-				i, main._board_rows[i]["id"], i, open_board[i]])
-			return
 
 	# --- ...and it was announced, once, in words --------------------------
 	var notice: String = String(main._contract_notice.text)
@@ -199,7 +212,7 @@ func _initialize() -> void:
 		_fail("a save loaded past the gate must still have the tier on sale")
 		return
 
-	print("UNLOCKS_OK: '%s' gates %d ingredient(s) and %d contract(s) behind %d boxes of %s sold; a new game lists %d/%d market, %d/%d board, crossing grows market, larder and board in place and is announced once by name; a save already past it is not re-announced" % [
+	print("UNLOCKS_OK: '%s' gates %d ingredient(s) and %d contract(s) behind %d boxes of %s sold; a new game lists %d/%d market and %d/%d board offers open, crossing grows market and larder and unpadlocks board rows in place and is announced once by name; a save already past it is not re-announced" % [
 		String(_gate["name"]), int(_gate["ingredients"]), int(_gate["contracts"]), threshold, product,
 		locked_market.size(), open_market.size(), locked_board.size(), open_board.size()])
 	quit(0)

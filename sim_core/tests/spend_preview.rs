@@ -74,7 +74,7 @@ fn unsigned_offer() -> String {
         .economy_snapshot()
         .board
         .iter()
-        .find(|o| !o.active)
+        .find(|o| !o.active && !o.locked)
         .expect("data/contracts.ron ships more than the fixture signs")
         .id
         .clone()
@@ -263,7 +263,7 @@ fn a_contract_fee_warns_and_an_already_signed_offer_costs_nothing() {
         .economy_snapshot()
         .board
         .iter()
-        .find(|o| !o.active)
+        .find(|o| !o.active && !o.locked)
         .expect("data/contracts.ron ships more than the fixture signs")
         .clone();
     assert!(offer.price > 0.0, "a contract charges a fee to sign");

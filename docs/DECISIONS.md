@@ -25,6 +25,153 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-09-29: **The contracts board lists every offer and padlocks the gated
+  ones; its filters are presentation.** (Owner's ask: "I want contracts that
+  are for items that i cant make to be locked (e.g. at the start i can only
+  make ketchup so anything that isnt just ketchup should be locked) Also make
+  the contract menu filterable".)
+
+  **Shown and refused, rather than hidden.** The gate (2026-09-21) held gated
+  contracts "back from the board" by leaving them out of the snapshot, so a
+  new player saw nine ketchup orders and no sign that BBQ or mustard orders
+  existed or what would open them — the only hint was a cookbook page. A
+  padlocked row answers both on the screen where the decision is made, and
+  the gate becomes something to aim at. Enforcement did not move: the sim
+  still refuses a signature on a locked id (`SignRefusal::Locked`), and the
+  lock is decided in Rust (`Economy::contract_gate`, off
+  `UnlockRegistry::gate_for_contract` and the boxes-sold ledger), never in
+  GDScript. The wire shape copies `ContentsChoice` (`locked`, `unlock_name`,
+  `unlock_item`, `unlock_boxes`, `unlock_sold`) so a padlock reads the same
+  field names wherever it appears. The market keeps hiding gated raws: that
+  was not asked for, and the rack picker already padlocks them where a
+  choice is made.
+
+  **Filters are Godot's.** Which rows show is sorting, which CLAUDE.md gives
+  to the presentation layer; the wire already carries `active`, `locked` and
+  the mix, so nothing new crosses it. Status chips (all / open / signed /
+  locked) and one sauce chip per product the mixes name, derived from the
+  wire rather than typed, each counting what it would show against the
+  other row so no click lands on an empty board by surprise; an empty
+  combination shows a card saying so.
+
+  **The card, and what 1280x720 cost.** The first cut put the payout on the
+  name line and the gate on a line of its own: 1492px of board in a 1280
+  window. What won the width back: the payout moved under the badge, the
+  gate's name onto the name line, sauce chips drop the words every product
+  name shares ("Boxed"), and `_fit_contract_board_split` breaks PER CARD —
+  it used to break every offer to the level its widest one needed, so one
+  three-product order put every ketchup order on three lines and the window
+  showed one offer. A fifth break level splits a long name at its middle
+  space (beside four running dockets, "Burger Franchise Supply Deal" was
+  18px too wide). A LOST offer's status folded onto one line for the same
+  height reason. `test_contract_board.gd` pins two whole offers at 1280x720.
+
+  **Then the filtered views (PR #208's review).** A locked card still had
+  one line more than an open one — the gate's meter under the terms — and a
+  mixed locked order ("3 × Boxed Ketchup, 2 × Boxed BBQ") broke one item a
+  line, so a padlocked card was 215px against an open one's 116–120 and the
+  LOCKED filter at 1280x720 showed one card. The gate's name moved onto the
+  disabled button (where a price nobody can pay yet was), the meter took the
+  status line's place under it, one line tall with the count written on it,
+  and the mix uses the sauce chips' short names. On a new game every card is
+  now 116–120px. With a docket running the offer column is narrower and a
+  two-product order can still break one item a line (~185px), but the list
+  is file order and those orders sit below the fold, so from the top two
+  whole offers still show. The test pins that under LOCKED, OPEN, SIGNED
+  and each sauce, on a new game AND with a contract running. The SIGNED
+  chip's label lost its built-in ✔, which had made the selection tick
+  meaningless on that one chip.
+
+  **The disabled button is the board's rule, not §5g's.** The configuration
+  panel's picker keeps a padlocked slot clickable and lets the sim refuse it
+  with a sound (§5g). The board already disabled every button it will not
+  honour (✗ can't afford, SIGNED), and a locked order follows that. What the
+  board takes from §5g is the rest: listed rather than hidden, dimmed, a
+  glyph, and the gate named with its distance.
+
+  **The offer column keeps one width through every filter.** Sized by the
+  cards it showed, it changed width on each click and the board re-centred
+  under the cursor (~6-11px). The column is pinned to the widest card on the
+  whole board plus the scroll bar, and the no-match card takes the same
+  width. The chip rows are narrower than that column in every state the
+  test drives (the chips' side margins are 6, not 8), so the chips' own
+  width changes, a count going from 17 to 8 or the ✔ moving to the chosen
+  chip, do not reach the board.
+
+  **And with the board full (the third review).** Signing every order the
+  sim accepts found two more: a signed order that had been lost before
+  carried "lost 2 times before" on a second status line (144px, the SIGNED
+  view one card), now folded as "✔ running · lost ×2"; and the SAUCE chip
+  row beside eight wide dockets made the board 1271px against the 1264 a
+  1280 window leaves a modal, so the chips' side margins went from 8 to 6.
+  A locked card's fade is applied where its terms get their parent
+  (`_apply_offer_fade`, called from `_set_offer_split`), not only when the
+  lock is read. `test_contract_board.gd` runs the filtered-views check on a
+  new game, with one order running and with every order running, and
+  checks the single fade at 1600x900 and 1280x720, requiring it to have
+  seen the terms both inside and outside the mix row.
+
+- 2026-09-29: **A splitter has a mode: left, right, T junction or three
+  way.** (Owner's ask: "Currently splitters only let us split to the left. I
+  want splitters to be configurable. so we click on the splitter an in its
+  menu we can decide wether it splits left, right, or both", then "lets have
+  all of them, so left, right, t junction, and three way".)
+
+  **Why it only ever split left.** The 2026-09-08 rule made the branch the
+  facing turned by `Direction::rotate_cw`. The renderer mirrors the sim's
+  +Y onto the screen, so the sim's clockwise quarter turn is drawn as the
+  player's LEFT, and the only way to put a branch on the right was to face
+  the splitter backwards and let the straight run take the corner. That
+  rule's own argument ("the four facings reach all four L-shapes") was true
+  of geometry and false of play: it cost a re-lay of the run to get a right
+  split, and it could not express a T or a three-way at all.
+
+  (1) **Three derived sides and one stored mode, not a second stored
+  facing.** `Side` is straight / left / right, each still derived from the
+  placement's one `direction` (left = `rotate_cw`, right = its opposite), so
+  the 2026-09-08 property that one `Rotate` turns every output together
+  survives untouched. What is stored is `SplitMode`, and `SplitMode::sides()`
+  is the single table of which sides a mode deals to, in dealing order.
+  `left` is the default and is exactly every splitter that existed before,
+  so the change is invisible until a player asks for it.
+
+  (2) **Round robin over the mode's sides, same-tick fallback round the same
+  rotation.** The 2026-09-08 rule generalised from two sides to N: the due
+  side gets first refusal, the rest are offered in rotation order in the
+  same tick, and the cursor moves to the side after whichever took it. With
+  three sides this still cannot starve one: a blocked side stays due and
+  takes the first item after it clears. `set_mode` keeps the cursor when it
+  is still a side of the new mode and resets it to the mode's first side
+  otherwise, so switching under load loses nothing
+  (`switching_mode_under_load_conserves_every_unit`).
+
+  (3) **A mode switch is a topology change.** The side a mode does not deal
+  to is not linked at all, not merely skipped, so the belt beside it is not
+  drawn as fed and `links.output` (the wire's straight side) is absent on a
+  T. So `try_set_splitter_mode` runs `recompute_topology`, and Godot sends
+  the command through `_issue_world_command` (a full rebuild) rather than
+  the config panel's buffer-only path.
+
+  (4) **The snapshot says which sides the mode uses** (`sides`), beside the
+  three `outputs`. A null output meant "not built"; with modes it can also
+  mean "this mode does not go that way", and the tooltip must not tell a
+  player a T's missing straight exit is "not connected". Reporting the sides
+  keeps the modes table in Rust. The arrow needs no table: walking straight,
+  left, right from the due side over non-null outputs IS the mode's
+  rotation, because a side outside the mode reports null.
+
+  (5) **One body model per mode.** Each opens exactly the exits its mode
+  deals to and rails the others shut, with an arrow groove at every open
+  exit — the readout stays a choice of visible positions (UI_UX.md §7). A
+  right exit leaves through the near (-Y) rail, so the drive cabinet moves
+  into the near +X corner on those bodies. The `left` body is byte-identical
+  to the pre-mode model.
+
+  (6) **Saved, so schema v7.** `SavedSplitter::mode` has no serde default
+  (the loader never guesses), the old cursor names `branch` → `left`, and
+  `scripts/migrate-save-v6-to-v7.py` rewrites a v6 save exactly (every old
+  splitter was `left`), keeping a `.v6.ron.bak`.
+
 - 2026-09-28: **A warehouse rack may be reserved for one raw ingredient.**
   (Owner's ask: "click on a warehouse rack and then select one item so that
   for that specific warehouse rack it will only allow holding of the
@@ -332,12 +479,15 @@ matches what code comments and data files cite.
   gate was ten windows — minutes, not half an hour. The second gate is worse,
   and it is now measured from zero rather than estimated: a factory that earns
   the first gate, builds the BBQ branch and signs every order the board will
-  take crosses the mustard gate at **tick 141 000 — 78 minutes at 30
-  ticks/sec**, which is **89 000 ticks (~49 min) after the BBQ gate opened at
-  tick 52 000**. The tool's own "74 000 ticks" line counts from where it starts
+  take crosses the mustard gate at **tick 155 000 — 86 minutes at 30
+  ticks/sec**, which is **103 000 ticks (~57 min) after the BBQ gate opened at
+  tick 52 000**. (It was 141 000 until 2026-09-29, when the fixture it builds
+  on stopped signing `smokehouse_trial` during its settle — PR #209 — so the
+  tool starts from only 8 boxes of BBQ sold.) The tool's
+  own "88 000 ticks" line counts from where it starts
   measuring — the fixture's hand-off at tick 67 000, once the BBQ branch is
   built and settled — so the two figures are the same run seen from two
-  reference points, and the one a player feels is the 89 000.
+  reference points, and the one a player feels is the 103 000.
   `godot_project/measure_gate_ticks.gd` is that measurement, kept in the tree
   so the figure can be re-run rather than believed; it earns both gates
   instead of patching the ledger the way every shipped fixture does. **The
@@ -345,11 +495,11 @@ matches what code comments and data files cite.
   keys that do not exist (`available_contracts`/`active_contracts` rather than
   `board`/`contracts`), so its "sign everything" step was a silent no-op, only
   the two orders the fixture signs for itself were ever running, and it
-  reported 181 000. With the whole board signed the figure is 141 000, and the
+  reported 181 000. With the whole board signed the figure is 155 000, and the
   tool now refuses rather than measuring a world it did not build. The cause
   is not the factory: with all four BBQ orders signed the board asks ~4.5
-  boxes per 1 000 ticks, and the branch put 90 boxes into paid windows over the
-  74 000 ticks that were measured — about **1.2 per 1 000 ticks**, a quarter of
+  boxes per 1 000 ticks, and the branch put 92 boxes into paid windows over the
+  88 000 ticks that were measured — about **1.0 per 1 000 ticks**, under a quarter of
   what is asked for. **The numbers are the owner's and were not changed**, but the
   consequence is recorded here: the 2026-09-20 measurement behind issue #55
   ("the bank at the moment of building decides whether the BBQ branch costs

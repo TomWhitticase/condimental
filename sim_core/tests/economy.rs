@@ -398,19 +398,19 @@ fn the_economy_snapshot_reports_one_entry_per_shipped_contract() {
         snapshot.board.len() >= 2,
         "several contracts must ship, to be signed"
     );
-    // Every offer a progression gate is not holding back (`data/unlocks.ron`),
-    // in contracts.ron order: the board lists what may actually be signed.
+    // Every offer in contracts.ron order, the gated ones included and
+    // flagged: `locked` is exactly "a progression gate is holding it back".
     let offered: Vec<&str> = snapshot.board.iter().map(|o| o.id.as_str()).collect();
-    let unlocked: Vec<&str> = board
-        .ordered()
-        .iter()
-        .filter(|c| world.contract_unlocked(&c.id))
-        .map(|c| c.id.as_str())
-        .collect();
-    assert_eq!(
-        offered, unlocked,
-        "board order must match contracts.ron order"
-    );
+    let every: Vec<&str> = board.ordered().iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(offered, every, "board order must match contracts.ron order");
+    for offer in &snapshot.board {
+        assert_eq!(
+            offer.locked,
+            !world.contract_unlocked(&offer.id),
+            "'{}' reads locked exactly when the sim would refuse to sign it",
+            offer.id
+        );
+    }
     for offer in &snapshot.board {
         assert_eq!(
             offer.active,

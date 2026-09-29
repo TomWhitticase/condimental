@@ -575,6 +575,19 @@ fn a_save_from_another_build_and_a_file_that_is_not_a_save_are_both_refused() {
         "unhelpful: {error}"
     );
 
+    // A v6 file is every save written before a splitter could be set to split
+    // right, both ways or three ways — refused, naming its script, for v5's
+    // reason.
+    let from_v6 = text.replace(&current, "schema_version: 6");
+    let Err(error) = World::from_save_ron(&from_v6, recipes()) else {
+        panic!("a save predating splitter modes must be refused, never migrated");
+    };
+    let error = error.to_string();
+    assert!(
+        error.contains("schema_version 6") && error.contains("migrate-save-v6-to-v7.py"),
+        "unhelpful: {error}"
+    );
+
     let Err(error) = World::from_save_ron("this is not a save file", recipes()) else {
         panic!("garbage must be refused");
     };

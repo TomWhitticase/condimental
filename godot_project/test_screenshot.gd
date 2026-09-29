@@ -55,7 +55,8 @@
 # `--fixture <name>` picks a different one: `machines` (hopper, machine and
 # dock, i.e. one of each sort of building), `fluids` (a tank, a pipe run and
 # the machine that taps it), `vat` (the 2x2 cooking vat, alone), `splitter` (a
-# line that forks) or `chain` (THE WHOLE SHIPPED LINE, bought and placed out
+# line that forks), `splitter_modes` (one splitter in each of the four
+# modes) or `chain` (THE WHOLE SHIPPED LINE, bought and placed out
 # of a new game's own balance — test_layouts.gd's `build_reference_line`).
 #
 # `--contracts` builds that full line and then runs it until the contract
@@ -336,7 +337,7 @@ const FIXTURE_NAMES: PackedStringArray = [
 	"demo", "machines", "fluids", "vat", "splitter", "chain", "stress",
 	"pipes", "gallery", "items", "fluid_gallery", "bottleneck", "bbq",
 	"stalled_run", "understaffed", "shortfall", "payday_warning", "full_dock",
-	"unclerked_dock", "warehouse", "split_docks", "mustard",
+	"unclerked_dock", "warehouse", "split_docks", "mustard", "splitter_modes",
 ]
 
 ## The fixtures whose whole claim is a factory that is WORKING, and which are
@@ -482,6 +483,11 @@ var _board := false
 ## unscrolled board. A player reaches it with the wheel; this reaches it
 ## through the same ScrollContainer, and does nothing without `--board`.
 var _board_end := false
+## `--board-filter <key>` presses one of that board's filter chips before the
+## shutter, through the chip's own setter: a status (`open`, `signed`,
+## `locked`) or a product id from the mixes (`boxed_bbq`). A value that is
+## neither is REFUSED, not shot as the unfiltered board it would look like.
+var _board_filter := ""
 var _staff := false
 ## `--production` opens the PRODUCTION panel (P) over the settled bottleneck
 ## line — the fixture with every stage counted and a contract paid, so the
@@ -773,6 +779,7 @@ func _initialize() -> void:
 	_market = args.has("--market")
 	_board = args.has("--board")
 	_board_end = args.has("--board-end")
+	_board_filter = _string_arg(args, "--board-filter")
 	_unlocked = args.has("--unlocked")
 	_unlock_toast = args.has("--unlock-toast")
 	_no_hud = args.has("--no-hud")
@@ -796,6 +803,13 @@ func _initialize() -> void:
 			"SCREENSHOT_FAIL: --contents-refill needs --config TX,TY and "
 			+ "--contents N — it refills the fluid a picker slot just declared, "
 			+ "so with no slot pressed there is nothing for it to refill."
+		)
+		_refuse()
+		return
+	if _board_filter != "" and not _board:
+		printerr(
+			"SCREENSHOT_FAIL: --board-filter %s needs --board — the filters are " % _board_filter
+			+ "the contracts board's, and with it closed there is nothing to filter."
 		)
 		_refuse()
 		return
@@ -999,7 +1013,7 @@ const UNLOCK_NOTICE_GLYPH := "★"
 ## A fixture buys, places, hires, signs and runs tens of thousands of ticks
 ## inside frame 1, so main.gd's contract notices fire for things that — in the
 ## world this shot claims to photograph — happened long before the shutter.
-## `--bbq` signs two orders as it builds, and its frames came back with
+## `--bbq` signed two orders as it built, and its frames came back with
 ## `✔ SIGNED: smokehouse_trial` hanging over a factory that had been running
 ## for 27,000 ticks.
 ##
@@ -1064,6 +1078,8 @@ func _build_fixture() -> void:
 			Layouts.build_multi_tile(_main.sim)
 		"splitter":
 			Layouts.build_splitter_line(_main.sim)
+		"splitter_modes":
+			Layouts.build_splitter_modes(_main.sim)
 		"chain":
 			Layouts.build_reference_line(_main.sim)
 		"stress":
@@ -2525,6 +2541,16 @@ func _process(delta: float) -> bool:
 	# A frame later than the open, deliberately: the offers are built and the
 	# ScrollContainer sized in the same update that opens the board, and its
 	# scroll ceiling is whatever the layout pass has settled on by then.
+	if _frames == 3 and _board and _board_filter != "":
+		if _main._board_status_chips.has(_board_filter):
+			_main._set_board_status_filter(_board_filter)
+		elif _main._board_sauce_chips.has(_board_filter):
+			_main._set_board_sauce_filter(_board_filter)
+		else:
+			printerr("SCREENSHOT_FAIL: --board-filter '%s' names no chip; status %s, products %s" % [
+				_board_filter, str(_main._board_status_chips.keys()), str(_main._board_sauce_ids)])
+			_refuse()
+			return true
 	if _frames == 3 and _board and _board_end:
 		_scroll_board_to_end()
 	if _frames == 2 and _staff:

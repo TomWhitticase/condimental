@@ -207,6 +207,20 @@
 //! this crate does, and `scripts/migrate-save-v5-to-v6.py` rewrites one
 //! outside the game — a change of text, not of meaning.
 //!
+//! # Version 7: a splitter remembers which way it splits
+//!
+//! [`SavedSplitter::mode`] is why version 6 became version 7 (2026-09-29,
+//! the owner's request that a splitter can split left, right, both ways as a
+//! T, or three ways — `super::splitter`'s module doc). The same change
+//! renamed the cursor's second side: `next_output: branch` is
+//! `next_output: left` now, because a splitter has two sides it can branch
+//! to and the old one is the left.
+//!
+//! Version 6's precedent holds exactly: every splitter in a version 6 file
+//! was what is now `mode: left`, so there is nothing to reconstruct. The
+//! loader refuses the older file by number, and
+//! `scripts/migrate-save-v6-to-v7.py` rewrites one outside the game.
+//!
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -221,7 +235,7 @@ use super::inventory::Inventory;
 use super::machine::{LOAD_BUCKETS, LoadBucket, LoadWindow, Machine, TimedProcess};
 use super::machines::MachineRegistry;
 use super::recipe::RecipeRegistry;
-use super::splitter::{SPLITTER_KIND, Side, Splitter};
+use super::splitter::{SPLITTER_KIND, Side, SplitMode, Splitter};
 use super::staff::{StaffPools, StaffRestore, StaffRestoreError};
 use super::stats::{ItemStats, ProductionLedger, STAT_BUCKETS, STAT_WINDOW_COUNT, StatKind};
 use super::storage::{BayPool, WAREHOUSE_RACK_KIND, WarehouseRack};
@@ -231,7 +245,7 @@ use super::world::{BELT_KIND, PIPE_KIND, PlayerCommand, World};
 /// The save format's version. Bumped whenever the shape below changes;
 /// a file naming any other version is rejected, never migrated — see the
 /// module doc, and every other loader in this crate.
-pub const SAVE_SCHEMA_VERSION: u32 = 6;
+pub const SAVE_SCHEMA_VERSION: u32 = 7;
 
 /// A fixed-point value as its raw `I16F16` bits — see the module doc for why
 /// a save never stores one as decimal text.
@@ -508,11 +522,16 @@ pub struct SavedBelt {
     pub moved_ticks: u64,
 }
 
-/// A splitter carries a belt tile's worth of product plus the one thing a
-/// belt has no equivalent of: which output is due next.
+/// A splitter carries a belt tile's worth of product plus the two things a
+/// belt has no equivalent of: which outputs it deals to, and which is due
+/// next.
+///
+/// No `#[serde(default)]` on `mode`: the field is why the format is at
+/// version 7, and the version is the guard (see the module doc).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedSplitter {
     pub belt: SavedBelt,
+    pub mode: SplitMode,
     pub next_output: Side,
 }
 
@@ -841,6 +860,12 @@ pub enum SaveError {
 /// development build whose change nobody has to explain any more.
 fn why_the_version_moved(found: u32) -> &'static str {
     match found {
+        6 => {
+            ". Version 7 lets a splitter split left, right, both ways or three ways, \
+             which changed how a splitter is written. Nothing is lost: \
+             scripts/migrate-save-v6-to-v7.py rewrites a version 6 save with every \
+             splitter splitting left, which is what every splitter in it did"
+        }
         5 => {
             ". Version 6 lets a warehouse rack be reserved for one ingredient, which \
              changed how a rack is written. Nothing is lost: \
@@ -1049,14 +1074,17 @@ impl World {
             let kind = placement.kind.as_str();
             let body = match kind {
                 BELT_KIND => SavedBody::Belt(saved_belt(self, entity)),
-                SPLITTER_KIND => SavedBody::Splitter(SavedSplitter {
-                    belt: saved_belt(self, entity),
-                    next_output: self
+                SPLITTER_KIND => {
+                    let splitter = *self
                         .ecs()
                         .get::<&Splitter>(entity)
-                        .expect("a splitter placement carries a Splitter")
-                        .due(),
-                }),
+                        .expect("a splitter placement carries a Splitter");
+                    SavedBody::Splitter(SavedSplitter {
+                        belt: saved_belt(self, entity),
+                        mode: splitter.mode(),
+                        next_output: splitter.due(),
+                    })
+                }
                 PIPE_KIND => SavedBody::Pipe(SavedPipe {
                     volume_bits: FxBits::of(
                         self.pipe_volume_at(tile)
@@ -1621,7 +1649,10 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                 restore_belt(world, entity, &splitter.belt, data.tick_count);
                 world
                     .ecs_mut()
-                    .insert_one(entity, Splitter::restore(splitter.next_output))
+                    .insert_one(
+                        entity,
+                        Splitter::restore(splitter.mode, splitter.next_output),
+                    )
                     .expect("the entity was just placed");
             }
             SavedBody::Pipe(pipe) => {
