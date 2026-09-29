@@ -896,8 +896,8 @@ static func build_bbq_running_line(sim) -> void:
 	# which would quietly turn this into a photograph of the staffing
 	# mechanic instead of of the branch.
 	hire_until_staffed(sim)
-	# The mixed order, which shows on the clipboard what the epic added to
-	# the board. The signature is accepted now and would have been REFUSED
+	# The mixed order, the kind of contract the epic added to the board. The
+	# signature is accepted now and would have been REFUSED
 	# at tick zero: a BBQ contract is behind the same gate its ingredients
 	# are. `smokehouse_trial` is deliberately NOT signed beside it. Both
 	# orders draw on one pool of BBQ, and when the branch goes in under the
