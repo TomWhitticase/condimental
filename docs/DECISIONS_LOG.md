@@ -1220,7 +1220,9 @@ See [WORKFLOW.md](WORKFLOW.md).
   measured, and contrary to both `world.rs`'s module doc and GAMEPLAY §9,
   so the code is the outlier (`tests/links.rs` pins it on purpose). The
   fix is one condition (`belt.direction == sink.direction`) but it is a
-  gameplay change that breaks `build_demo_line` and existing saves. Also
+  gameplay change that breaks `build_demo_line` and existing saves.
+  **Superseded 2026-10-01 (#1):** the owner chose the documented rule, and
+  a belt now feeds a machine or dock only through its inlet face. Also
   reported not fixed: nobody has watched the belt animation live
   (`BELT_FRAMES`), `_read_world_layout` is ~40 of a rebuild's 80 ms
   (milestone 8), and every perf figure is off a debug build. Full record
