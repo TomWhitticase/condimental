@@ -4267,7 +4267,10 @@ matches what code comments and data files cite.
      a **gameplay change, not a bug fix**: it breaks `test_layouts.gd`'s
      `build_demo_line`, the shipped demo saves, and any layout a player has
      built against the current rule. Tightening a connection rule after
-     players have built against it is the owner's call. Two more items are
+     players have built against it is the owner's call. *(Superseded on
+     2026-10-01 by "A belt feeds a machine or dock only through its inlet
+     face" at the top of Part A: the owner chose the documented rule.)*
+     Two more items are
      reported rather than fixed for the same class of reason: nobody has
      watched the belt animation run live at speed (`BELT_FRAMES` is a
      judgement no headless run can make), and `_read_world_layout` is ~40 ms
@@ -6900,7 +6903,9 @@ matches what code comments and data files cite.
   the decision is ticket 7's. Note the asymmetry: the *input* side is
   already face-correct (`source_to_belt` uses `outlet_neighbours`), so a
   belt that both points at and stands off a 1x1 machine reads as fed by
-  and feeding the same machine.
+  and feeding the same machine. *(Superseded on 2026-10-01 by "A belt
+  feeds a machine or dock only through its inlet face" at the top of
+  Part A: the fix was taken, issue #1.)*
 
   **Topology gaps that had to be filled**, all in the same pass: the
   machine *input* tap kept only `(network, segment)` and was found with a
