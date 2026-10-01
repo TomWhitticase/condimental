@@ -1,24 +1,37 @@
 # CONDIMENTAL — Tech debt
 
-**Changes since last overview audit: 1** · last audit: none yet (counter
-started 2026-10-01) · **Debt total: 0 points**
+**Changes since last overview audit: 1** · **Debt total: 0 points**
+
+Last audit: none yet (the counter started 2026-10-01).
+Audit baseline: `cb7d24e` — the `main` commit the change count runs from.
 
 | Gauge | Threshold | What happens |
 |---|---|---|
 | Changes since last audit | **25** | An overview audit is due before the next feature starts |
 | Debt total | **20 points** | Feature freeze: no new features until the total is back under 10 |
 
-## Keeping the counter
+## Keeping the gauges
 
-Every PR that merges to `main` adds 1 to "changes since last audit" in its own
-branch (the `open-pr` skill's step 4). On a merge conflict over the number,
-take the higher side and add 1 — never resolve it downwards.
+**Run `scripts/tech-debt-status.sh` before starting a feature** — it prints
+both gauges live and says if a threshold is passed. The header is a snapshot:
+the change count is derived from git (merged PRs on `main` since the audit
+baseline), because a hand-bumped number undercounts silently when two open
+PRs both make the same edit.
+
+- Every PR to `main` runs `scripts/tech-debt-status.sh --write` before it
+  pushes (the `open-pr` skill's step 4), which refreshes the header and counts
+  itself. Orca workers' PRs into an integration branch skip it; the
+  integration PR into `main` counts once.
+- The debt total must equal the sum of the items and item numbers must be
+  unique — `scripts/check-invariants.sh` fails otherwise, so a silent merge
+  of two edits to the total is caught.
 
 An **overview audit** is a session that reads across the codebase rather than
 one change: it checks the design docs against the code, looks for duplicated
 or drifting logic between `sim_core` and Godot, re-scores every item below,
-deletes the ones that are paid off, adds what it finds, and resets the counter
-to 0 with today's date.
+deletes the ones that are paid off and adds what it finds. Its PR records the
+date on the "Last audit" line and sets the baseline to the `main` commit it
+branched from, so the audit itself is the first change counted after it.
 
 ## What belongs here — read before adding
 

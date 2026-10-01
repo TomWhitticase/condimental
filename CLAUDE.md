@@ -60,10 +60,9 @@ empty, and the player buys and places every tile.
   records; see WORKFLOW.md for the test to apply.
 - **Tech debt goes in [docs/TECH_DEBT.md](docs/TECH_DEBT.md), rarely.** Only
   a structural shortcut you cannot fix in the branch at hand, scored 1–3
-  points; do not hunt for debt to record. Every merged PR bumps its change
-  counter. Check its header before starting a feature: past the debt
-  threshold, features stop until it is paid down; past the change threshold,
-  an overview audit comes first.
+  points; do not hunt for debt to record. Run `scripts/tech-debt-status.sh`
+  before starting a feature: past the debt threshold, features stop until it
+  is paid down; past the change threshold, an overview audit comes first.
 
 ## Layout
 

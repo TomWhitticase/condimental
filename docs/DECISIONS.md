@@ -25,6 +25,35 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-02: **Tech debt is a scored register that can pause feature
+  work.** (Owner: "if this builds up and we have a large number of tech debt
+  points then we stop developing new features and clear the tech debt".) The
+  owner asked for a simple list of debt items with points, a counter of
+  changes since the last overview review, and a CLAUDE.md rule that agents
+  add to it only when genuinely necessary. What was decided:
+  1. **Scope.** An item is a structural shortcut that makes future change
+     slower or riskier and that the branch at hand cannot fix. Bugs stay
+     issues; fixable things are fixed (the "fix what you notice" rule).
+     Agents do not hunt for debt — an unread backlog of trivia would turn the
+     freeze into noise.
+  2. **Points.** 1 = friction in one area, 2 = causes bugs or taxes every
+     change in an area, 3 = cross-cutting, threatens determinism or saves, or
+     blocks a milestone.
+  3. **Thresholds.** Feature freeze at 20 points, lifted below 10 so a
+     freeze pays down real debt rather than one item; an overview audit at
+     25 merged PRs. Both numbers were picked by the agent and are the
+     owner's to tune — they live in the doc's table and the script reads
+     them from there.
+  4. **The count is derived, not kept.** The first version bumped a number in
+     every PR; review of PR #213 showed two open PRs both turn "1" into "2",
+     which git merges without a conflict, so the count undercounts silently.
+     `scripts/tech-debt-status.sh` counts first-parent commits on `main`
+     since an audit-baseline sha instead (squash merges are one per PR), and
+     `--write` refreshes the header snapshot. A stale header is at worst one
+     PR behind and heals on the next one; the live number is always one
+     command away. The debt total cannot be derived from git, so
+     `check-invariants.sh` fails when it disagrees with the sum of the items
+     or an item number repeats.
 - 2026-10-01: **A red check that passes when rerun locally meets the
   green-checks gate.** (Owner's rule: "If CI checks fail on a PR then run them
   locally, and if they pass, then thats good enough (This is because we are

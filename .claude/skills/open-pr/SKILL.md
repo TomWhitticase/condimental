@@ -70,10 +70,11 @@ shows and what to look at.
 
 ## 4. Push and open the PR
 
-First add 1 to "Changes since last overview audit" at the top of
-`docs/TECH_DEBT.md`, in this branch, and commit it with the work — every
-merged PR counts, docs-only ones too. If the header says a threshold is
-passed, say so in the PR body.
+First run `scripts/tech-debt-status.sh --write` and commit the refreshed
+`docs/TECH_DEBT.md` header with the work — it counts merged PRs from git and
+this branch as one more, so every PR to `main` counts, docs-only ones too
+(an Orca worker's PR into an integration branch skips it). If it prints
+AUDIT DUE or FEATURE FREEZE, say so in the PR body.
 
 ```
 git push -u origin HEAD
