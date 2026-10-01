@@ -64,8 +64,8 @@ func _initialize() -> void:
 	# --- Build one, through the same wire the scene uses. -------------------
 	Layouts.build_demo_line(sim)
 	var layout: Array = JSON.parse_string(sim.world_layout_json())
-	if layout.size() != 13:
-		_fail("expected the 13-piece demo line, got %d placements" % layout.size())
+	if layout.size() != 15:
+		_fail("expected the 15-piece demo line, got %d placements" % layout.size())
 		return
 	var directions_seen := {}
 	for placement in layout:
@@ -271,7 +271,7 @@ func _initialize() -> void:
 			_fail("contract '%s': mix and progress must zip positionally" % str(contract["id"]))
 			return
 
-	print("CORE_LOOP_OK: empty world -> 13 placements bought and placed over the wire, place/remove/rotate round-trip, the built line produced tomato_paste, auto-fill toggles and the item picker cross the wire, tile queries and economy shape correct")
+	print("CORE_LOOP_OK: empty world -> 15 placements bought and placed over the wire, place/remove/rotate round-trip, the built line produced tomato_paste, auto-fill toggles and the item picker cross the wire, tile queries and economy shape correct")
 	quit(0)
 
 

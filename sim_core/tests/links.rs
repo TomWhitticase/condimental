@@ -310,42 +310,32 @@ fn a_machine_takes_from_its_inlet_and_gives_to_its_outlet() {
     );
 }
 
-/// **The sim's inlet rule as it stands, pinned so the wire is read
-/// correctly: a belt is linked into a machine or dock when the tile it
-/// points at is on the inlet EDGE, from whichever side it approaches.**
-/// For a 1x1 machine every side is that edge, so a belt entering a crusher
-/// from its flank feeds it (`godot_project/test_layouts.gd`'s demo line
-/// builds exactly that: a north-going belt into a west-facing crusher),
-/// and a belt entering a dock's inlet-edge tile from the north feeds the
-/// dock. `world.rs`'s module doc says a flank accepts nothing; the code
-/// checks the tile, not the approach face. Reported for the overhaul's
-/// ticket 7 rather than changed here — this ticket adds a readout and
-/// must not move product. When that rule changes, these expectations
-/// change with it, which is the point of pinning them.
+/// **A belt feeds a machine or dock only through its inlet face** — it
+/// must point into an inlet-edge tile travelling the way the sink faces
+/// (GAMEPLAY §9, issue #1). A belt entering from the flank, or pointing
+/// back into the outlet face, hands to nothing; the outlet-face belt is
+/// still the one the machine discharges onto.
 #[test]
-fn a_belt_into_an_inlet_edge_tile_from_the_side_is_linked_as_the_sim_links_it() {
+fn a_belt_feeds_a_machine_or_dock_only_through_its_inlet_face() {
     let mut world = funded();
     build(&mut world, "crusher", (1, 0), East);
-    build(&mut world, "belt", (1, 1), South); // into the 1x1 crusher's north side
-    build(&mut world, "belt", (2, 0), West); // into its outlet face, even
-    assert_eq!(
-        conveyor(&world, (1, 1)),
-        conveyor_links(vec![], output(South, Machine))
-    );
-    // ...and that belt is also the one the crusher discharges onto, so the
-    // wire shows a belt that both feeds and is fed by the same machine.
+    build(&mut world, "belt", (1, 1), South); // into the 1x1 crusher's north flank
+    build(&mut world, "belt", (2, 0), West); // back into its outlet face
+    build(&mut world, "belt", (0, 0), East); // into its inlet face
+    assert_eq!(conveyor(&world, (1, 1)), conveyor_links(vec![], None));
     assert_eq!(
         conveyor(&world, (2, 0)),
-        conveyor_links(vec![input(West, Machine)], output(West, Machine))
+        conveyor_links(vec![input(West, Machine)], None)
+    );
+    assert_eq!(
+        conveyor(&world, (0, 0)),
+        conveyor_links(vec![], output(East, Machine))
     );
 
     let mut world = funded();
     build(&mut world, "dock", (1, 0), East); // inlet edge x = 1, y in 0..2
     build(&mut world, "belt", (1, 2), South); // into (1, 1) from the north
-    assert_eq!(
-        conveyor(&world, (1, 2)),
-        conveyor_links(vec![], output(South, Dock))
-    );
+    assert_eq!(conveyor(&world, (1, 2)), conveyor_links(vec![], None));
 }
 
 /// The 1x2 mixer accepts on both tiles of its inlet face and discharges
