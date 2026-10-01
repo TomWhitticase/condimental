@@ -22,7 +22,7 @@
 # nothing else — which is a real state worth reviewing, not a broken one.
 #
 # Pass --build (the same thing as --fixture demo) to lay down the demo line first: a hopper feeding belts that
-# run east, TURN NORTH into a crusher facing WEST which discharges back west,
+# run east, TURN NORTH and then WEST into a crusher facing WEST which discharges back west,
 # with a pipe run heading SOUTH beside it. Three of the four facings on belts
 # and the fourth on the pipes, which makes it the right subject for reviewing
 # per-tile rotation and the junction art's east-only fallback in one frame.

@@ -46,7 +46,7 @@
 # can build and run the real line again. See test_layouts.gd's header.
 #
 # `--build` puts down the demo line (test_layouts.gd's `build_demo_line`): a
-# hopper feeding belts that run east, TURN NORTH into a crusher facing WEST,
+# hopper feeding belts that run east, TURN NORTH and WEST into a crusher facing WEST,
 # which discharges back west, with a pipe run heading SOUTH beside it. Three
 # of the four facings on belts and the fourth on the pipes, which is what
 # makes it the right subject for reviewing per-tile rotation and the belt

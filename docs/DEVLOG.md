@@ -276,6 +276,20 @@ constant moved and the art did not. T4's docs land with it. Lesson: an epic
 on an integration branch is not done until that branch's PR into `main`
 has merged.
 
+### 2026-10-01 — A belt feeds a machine only through its inlet face (#1)
+
+The owner settled the question the pipes & conveyors close-out left open:
+`resolve_sink` now refuses a belt or splitter side that enters a machine or
+dock from its flank or back through its outlet face, so the code finally
+does what `world.rs`'s module doc and GAMEPLAY §9 always said. The demo line
+fed its crusher from the side, so it now runs one tile further east and
+turns west into the inlet (15 placements, 186 to build); the four demo saves
+need `scripts/make-demo-saves.sh` rerun. An existing save still loads, but a
+machine it fed from the side sits idle until the belt or machine is turned.
+`tests/links.rs` pins the new rule instead of the old one, and
+`tests/splitters.rs` covers the splitter half. Record in
+`docs/DECISIONS_LOG.md`.
+
 ### 2026-09-29 — The hover tooltip is its own size after a bigger one
 
 Hovering a short, narrow thing straight after a tall, wide machine left the

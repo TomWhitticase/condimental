@@ -347,7 +347,9 @@ implementation history (epics, tickets, balancing passes) behind each one.
   margin for mistakes and a second line.
 - **Placement direction decides flow.** A machine accepts input opposite
   its facing and discharges on the face it points at; a belt hands off to
-  whatever is downstream of its facing; a fluid connection is made by
+  whatever is downstream of its facing, and into a machine or dock only
+  when it points through the inlet face — a belt into a flank, or back into
+  the outlet face, feeds nothing (enforced 2026-10-01, issue #1); a fluid connection is made by
   touching, not facing, since a pressure network is not a conveyor. Flow is
   derived from adjacency, recomputed only on placement changes. The hopper,
   fluid tank and delivery dock are ordinary placeable kinds — a world may

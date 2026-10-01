@@ -29,6 +29,17 @@ See [WORKFLOW.md](WORKFLOW.md).
   the belt's items. The ghost obeys `preview_command_json`, which shares
   `plan_place` with the command. Saves as `SavedBody::Crossing`, still
   version 7. Full record in `docs/DECISIONS.md`.
+- 2026-10-01 **A belt feeds a machine or dock only through its inlet
+  face.** `World::recompute_topology`'s `resolve_sink` takes the direction
+  the item travels and links a machine or dock only when that equals the
+  sink's facing AND the target tile is on its inlet edge; a belt or
+  splitter side into a flank, or back into the outlet face, hands to
+  nothing. The code now matches `world.rs`'s module doc and GAMEPLAY §9;
+  the owner chose the rule over the old any-side behaviour (issue #1),
+  accepting that saves built on flank feeds stop feeding there.
+  `tests/links.rs` and `tests/splitters.rs` pin it; `build_demo_line` now
+  turns west into the crusher's inlet (15 placements, bill 186). Full
+  record in `docs/DECISIONS.md`.
 - 2026-09-29 **The contracts board lists every offer and padlocks the gated
   ones; its filters are presentation.** A contract a gate holds back is ON
   the board, flagged: `ContractOfferSnapshot` carries `locked`,

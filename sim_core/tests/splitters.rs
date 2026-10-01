@@ -313,10 +313,10 @@ fn a_splitter_feeds_a_machine_and_a_dock_the_way_a_belt_does() {
     build(&mut world, "crusher", (1, 0), Direction::East);
     // Branch (clockwise from east = south): a dock. It is 2x2 and its origin
     // is its min-X/min-Y corner, so it is anchored at (0, -2) and claims
-    // (0..1, -2..-1) — clear of the splitter and the crusher on row 0, with
-    // the tile the branch hands into, (0, -1), on its west edge, i.e. its
-    // inlet face.
-    build(&mut world, "dock", (0, -2), Direction::East);
+    // (0..1, -2..-1) — clear of the splitter and the crusher on row 0. It
+    // faces south, the way the branch hands, so the tile the branch hands
+    // into, (0, -1), is on its north edge, i.e. its inlet face.
+    build(&mut world, "dock", (0, -2), Direction::South);
     world.issue_command(PlayerCommand::BuyIngredient {
         item: "tomato".to_string(),
         quantity: 16,
@@ -353,6 +353,39 @@ fn a_splitter_feeds_a_machine_and_a_dock_the_way_a_belt_does() {
     assert!(
         paste > 0,
         "the straight output should have fed the crusher enough to craft, got {:?} in / {:?} out",
+        crusher.input,
+        crusher.output
+    );
+}
+
+/// ...and only through the inlet face, exactly as a belt: a splitter whose
+/// straight side points into a crusher's flank hands it nothing (issue #1).
+#[test]
+fn a_splitter_into_a_machines_flank_feeds_it_nothing() {
+    let mut world = funded();
+    build(&mut world, "hopper", (-1, 0), Direction::East);
+    build(&mut world, SPLITTER_KIND, (0, 0), Direction::East);
+    // Facing north, so the splitter's east-going hand-off enters its flank.
+    build(&mut world, "crusher", (1, 0), Direction::North);
+    common::buy(&mut world, "tomato", 16);
+    world.issue_command(PlayerCommand::FillHopper {
+        amount: 16,
+        tile: None,
+    });
+
+    for _ in 0..2000 {
+        world.tick();
+    }
+
+    let crusher = world
+        .chunk_snapshot((0, 0))
+        .machines
+        .into_iter()
+        .find(|m| m.tile == (1, 0))
+        .expect("the crusher is still standing at (1, 0)");
+    assert!(
+        crusher.input.iter().all(|(_, qty)| *qty == 0) && crusher.output.is_empty(),
+        "a splitter into a machine's flank must not feed it, got {:?} in / {:?} out",
         crusher.input,
         crusher.output
     );

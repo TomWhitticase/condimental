@@ -339,8 +339,10 @@ static func placement_count(sim) -> int:
 ## THE DEMO LINE — the fixture most tests build, and the one
 ## `scripts/screenshot-scene.sh --build` photographs.
 ##
-## A hopper feeding four belts that run east and then TURN NORTH into a
-## crusher facing WEST, which discharges back west along three more belts, with
+## A hopper feeding seven belts that run east, TURN NORTH, and then turn WEST
+## into the inlet face of a crusher facing WEST (a belt into a machine's flank
+## feeds nothing, GAMEPLAY §9), which discharges back west along three more
+## belts, with
 ## a short pipe run heading SOUTH beside it. That shape is chosen, not
 ## arbitrary: it uses three of the four directions on belts and the fourth on
 ## the pipes, so "does a rotated tile render correctly" and "does a belt pick
@@ -349,7 +351,7 @@ static func placement_count(sim) -> int:
 ## belt, the belts carry, the crusher crushes and discharges — so it is a
 ## working factory rather than a diorama.
 ##
-## Its bill is 176 of a 3000 starting balance. Its SIZE, though, is decided by
+## Its bill is 186 of a 3000 starting balance. Its SIZE, though, is decided by
 ## what it has to show rather than by what it costs (see this file's header):
 ## every additional tile is another node to build and another line of failure
 ## output, and none of them would add a facing this line does not already use.
@@ -358,8 +360,10 @@ static func build_demo_line(sim) -> void:
 	place(sim, "belt", Vector2i(0, 0), "east")
 	place(sim, "belt", Vector2i(1, 0), "east")
 	place(sim, "belt", Vector2i(2, 0), "east")
-	place(sim, "belt", Vector2i(3, 0), "north")
-	place(sim, "belt", Vector2i(3, 1), "north")
+	place(sim, "belt", Vector2i(3, 0), "east")
+	place(sim, "belt", Vector2i(4, 0), "north")
+	place(sim, "belt", Vector2i(4, 1), "north")
+	place(sim, "belt", Vector2i(4, 2), "west")
 	place(sim, "crusher", Vector2i(3, 2), "west")
 	place(sim, "belt", Vector2i(2, 2), "west")
 	place(sim, "belt", Vector2i(1, 2), "west")

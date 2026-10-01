@@ -209,6 +209,8 @@ a frame change costs two transform writes for the tile that changed.
 through any face of its inlet edge, including the outlet side; the demo
 layout in `test_layouts.gd` relies on it; one-condition fix
 `belt.direction == sink.direction`; `tests/links.rs` pins the current rule).
+*Since decided (2026-10-01, #1): that fix is taken, and the demo line now
+feeds the crusher through its inlet face.*
 Ticket 4's finding that ~8 ms of every tick step is chunk-snapshot JSON
 parsing on a 1500-belt line is milestone 8 scope, not this update's.
 
@@ -240,7 +242,8 @@ dispatched.
   exposed it). Ticket 4's perf rebuild went 38 → 64 ms with four frame sets;
   confirm `test_perf.gd`'s numbers with shapes + animation on.
 - A closed belt ring is legal and jams at its merge (used by the gallery).
-- The `resolve_sink` inlet-edge rule from ticket 1 is still untouched.
+- ~~The `resolve_sink` inlet-edge rule from ticket 1 is still untouched.~~
+  **Decided 2026-10-01 (#1):** a belt feeds only through the inlet face.
 - Every worktree grows an untracked `AGENTS.md` (a CLAUDE.md copy) from the
   environment; nobody has committed it. Decide whether to `.gitignore` it.
 - **Launching the real game after `cargo xtask` needs Godot's two `--import`
@@ -312,7 +315,10 @@ the state of the update from the ticket table above.
 Each of these is now a GitHub issue as well, so it is findable without
 reading this doc; the prose here stays as the evidence behind it.
 
-- **The `resolve_sink` inlet rule contradicts both design docs, and it moves
+- **Decided 2026-10-01 (#1): the owner chose the documented rule.** A belt
+  now feeds a machine or dock only when it points through the inlet face;
+  see `docs/DECISIONS_LOG.md`. The evidence that prompted it follows.
+  **The `resolve_sink` inlet rule contradicts both design docs, and it moves
   real product.** A belt feeds a machine or dock when the tile it points
   into is on the inlet EDGE, *from whichever side it approaches*. For a 1x1
   machine every side is that edge. Measured at close-out, not inferred: a
