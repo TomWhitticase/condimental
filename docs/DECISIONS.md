@@ -59,6 +59,79 @@ matches what code comments and data files cite.
   (tier 5) stay an open question in GAMEPLAY §11. The rest of mayo's design
   (recipe, gate, contracts, its role as a base sauce) is for its own plan.
 
+- 2026-10-02: **Tech debt is a scored register that can pause feature
+  work.** (Owner: "if this builds up and we have a large number of tech debt
+  points then we stop developing new features and clear the tech debt".) The
+  owner asked for a simple list of debt items with points, a counter of
+  changes since the last overview review, and a CLAUDE.md rule that agents
+  add to it only when genuinely necessary. What was decided:
+  1. **Scope.** An item is a structural shortcut that makes future change
+     slower or riskier and that the branch at hand cannot fix. Bugs stay
+     issues; fixable things are fixed (the "fix what you notice" rule).
+     Agents do not hunt for debt — an unread backlog of trivia would turn the
+     freeze into noise.
+  2. **Points.** 1 = friction in one area, 2 = causes bugs or taxes every
+     change in an area, 3 = cross-cutting, threatens determinism or saves, or
+     blocks a milestone.
+  3. **Thresholds.** Feature freeze at 20 points, lifted below 10 so a
+     freeze pays down real debt rather than one item; an overview audit at
+     25 merged PRs. Both numbers were picked by the agent and are the
+     owner's to tune — they live in the doc's table and the script reads
+     them from there.
+  4. **The count is derived, not kept.** The first version bumped a number in
+     every PR; review of PR #213 showed two open PRs both turn "1" into "2",
+     which git merges without a conflict, so the count undercounts silently.
+     `scripts/tech-debt-status.sh` counts first-parent commits on `main`
+     since an audit-baseline sha instead (squash merges are one per PR), and
+     `--write` refreshes the header snapshot. The snapshot can still lag —
+     by as many PRs as were open alongside the last one to merge, since
+     their identical `--write` edits merge cleanly too — but it never drifts
+     further: each `--write` recounts from git rather than adding to the old
+     number, and the live count is always one command away. That is why the
+     freeze and audit rules read the script, not the header. The debt total
+     cannot be derived from git, so `check-invariants.sh` fails when it
+     disagrees with the sum of the items, an item number repeats, or a `TD-`
+     heading is not in the exact form the sum reads.
+  5. **The freeze is recorded, not recomputed.** A pure function of the
+     total cannot tell 15 points on the way up (no freeze) from 15 on the way
+     down (still frozen), so the header carries `Feature freeze: on|off`.
+     `--write` sets it on at 20 and off below 10, and `--check` fails a state
+     that contradicts the total at either end.
+
+- 2026-10-02: **A plain `wrap-it-up` that ends green removes its own
+  worktree.** (Owner's rule: "by default if i use the wrap it up skill if the
+  banner is green it should go ahead and close, the only time it doesnt is if
+  i use wrap it up skill and pass in a custom ask".)
+
+  **What it replaces.** The skill's step 6 said removing the tree "cannot be
+  done from inside it" and handed the user a `git -C <main-checkout> worktree
+  remove` command to paste. That is true of a raw `git worktree remove`
+  started from the tree it deletes. It is not true of the Orca CLI, which
+  deregisters an Orca worktree and removes it from git in one call. The owner
+  had asked for the worktree closed (PR #212's wrap-up) and still had to run
+  it by hand.
+
+  **The rule.** The skill's step 8 runs a guard before the banner, then
+  `orca worktree rm --worktree path:<path>` as the session's final tool call,
+  never with `--force`. The removal is last because it deletes the shell's
+  working directory, and Orca may close the terminal with it. If it refuses,
+  the call returns and the session is still alive. The tree held something
+  step 6 missed, so the green banner was wrong, and the session follows it
+  with the red one.
+
+  **The guard, and why `orca worktree current` alone is not one.** Orca
+  registers the primary checkout as a worktree too (`isMainWorktree: true`),
+  so "it names a worktree" would let the step delete the main checkout; the
+  first review of #217 caught this. The guard prints `REMOVABLE <path>` only
+  when `isMainWorktree` is false and Orca's path equals
+  `git rev-parse --show-toplevel`, which holds from any subdirectory. A
+  non-Orca directory makes it error out, which keeps the tree.
+
+  **When it keeps the tree.** A red banner, because the tree may be the only
+  copy of the work. A custom ask passed with the skill, because anything
+  added is the user steering. The guard printing `KEEP`. In each case the
+  removal commands are printed instead.
+
 - 2026-10-01: **A red check that passes when rerun locally meets the
   green-checks gate.** (Owner's rule: "If CI checks fail on a PR then run them
   locally, and if they pass, then thats good enough (This is because we are

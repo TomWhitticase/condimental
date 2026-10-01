@@ -267,6 +267,14 @@ fluids (oil and vinegar) is a pipe run the resolver cannot name (#184), and
 a cream-coloured fluid would fail the fluid-tint saturation floor that issue
 #100 added (`test_fluid_gallery.gd`). Mayo's own plan is next.
 
+### 2026-10-02 — wrap-it-up removes its own worktree on a green banner
+
+A plain `wrap-it-up` that ends green now runs `orca worktree rm` on its own
+worktree as its final step, instead of handing the user a command to paste.
+A guard first checks that the tree is a linked Orca worktree, so the primary
+checkout is never removed. A red banner or a custom ask passed with the skill
+keeps the tree. The full record is in `docs/DECISIONS.md`.
+
 ### 2026-10-01 — A red check is rerun locally, and a local pass is enough
 
 The owner widened the merge rule. A PR check that is red on GitHub, for any

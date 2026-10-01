@@ -25,7 +25,27 @@ See [WORKFLOW.md](WORKFLOW.md).
   purchase. Corrosion (tier 5) is a separate question and stays open. The
   owner's call. Do not plan spoilage back in without the owner. Binds
   `docs/GAMEPLAY.md` §0/§2/§4/§8/§9/§10/§11, `docs/ARCHITECTURE.md` §11 and
-  `README.md`'s roadmap.
+  `README.md`'s roadmap. Full record in `docs/DECISIONS.md`.
+
+- 2026-10-02 **Tech debt is a scored register that can pause feature work.**
+  `docs/TECH_DEBT.md` lists structural debt only (not bugs, not what the
+  branch at hand can fix), each item 1–3 points. At 20 points, features stop
+  until the total is back under 10; at 25 merged PRs since the last overview
+  audit, an audit comes before the next feature. Both gauges come from
+  `scripts/tech-debt-status.sh`: the change count is derived from git, never
+  hand-bumped, and `check-invariants.sh` holds the header total to the sum of
+  the items. The header records whether a freeze is in force, since 10–19
+  points means frozen only on the way down. Full record in `docs/DECISIONS.md`.
+
+- 2026-10-02 **A plain `wrap-it-up` that ends green removes its own
+  worktree.** It runs `orca worktree rm --worktree path:<path>` as its final
+  tool call, after a check that the tree is a linked Orca worktree
+  (`isMainWorktree` false, path equal to git's top level), so the primary
+  checkout is never removed. It keeps the tree, and prints the removal
+  commands, when the banner is red or the user passed a custom ask with the
+  skill. A refused removal turns the banner red. The owner's reason: they
+  asked for the worktree closed and still had to paste the command. Binds
+  the `wrap-it-up` skill (step 8) and `docs/WORKFLOW.md`.
 
 - 2026-10-01 **A red check that passes when rerun locally meets the
   green-checks gate.** When a PR check is red on GitHub, for any reason,

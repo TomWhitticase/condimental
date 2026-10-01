@@ -205,6 +205,11 @@ sim_core`, `scripts/verify-core-loop.sh`, which `screenshot-scene.sh` flags
 and whether the PNG was read), the DEVLOG/decision-log calls that were made,
 and `Closes #N` for every issue the branch settles.
 
+Before pushing, run `scripts/tech-debt-status.sh --write` and commit the
+refreshed [TECH_DEBT.md](TECH_DEBT.md) header: it counts merged PRs since the
+last overview audit, plus this one. That file holds the debt register, the
+bar an item has to clear, and the two thresholds that pause feature work.
+
 ### Every pull request shows the change
 
 **A PR body embeds at least one screenshot — every PR, not only the visual
@@ -432,7 +437,10 @@ request — or is pushed, with its pull request open for one of the reasons
 below.
 
 The `wrap-it-up` skill is the procedure, including the sweep that proves it
-and the banner that reports it. Three rules it exists to enforce:
+and the banner that reports it. On a green banner it then removes its own
+worktree with `orca worktree rm`, unless the user passed a custom ask with the
+skill or the tree is the primary checkout (the owner's rule, 2026-10-02; the
+skill's step 8). Three rules it exists to enforce:
 
 - **Being near the end of a session is not a reason to file an issue.** The
   gate above is unchanged at the close: finish it, drop it deliberately, or —
@@ -443,9 +451,10 @@ and the banner that reports it. Three rules it exists to enforce:
 - **A PR of yours ends the session open only if it is approved and its merge
   is held (by checks neither green nor passed when rerun locally, by the task,
   or by the owner), or it is explicitly handed over with its latest verdict
-  named, or no reviewer could be launched at all.** You cannot review what you wrote, but you can launch a
-  context-free reviewer subagent for it (above) — and you must wait for its
-  verdict before you close, because the subagent does not outlive the session.
+  named, or no reviewer could be launched at all.** You cannot review what
+  you wrote, but you can launch a context-free reviewer subagent for it
+  (above) — and you must wait for its verdict before you close, because the
+  subagent does not outlive the session.
   A `CHANGES REQUESTED` verdict is work still in hand: fix it and get a fresh
   re-review, or hand the PR over saying so. Then name what the merge waits on;
   merging it unreviewed to tidy up is never finishing it.
