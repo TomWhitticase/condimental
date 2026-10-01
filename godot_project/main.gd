@@ -4513,17 +4513,19 @@ func _read_dock_states() -> void:
 ## But only when the warehouse has changed: `storage_revision` moves when the
 ## stock or the racks do, which is a hopper refill or a player action, not
 ## every tick. Read every polled frame, a 500-rack floor's snapshot cost 24 ms
-## to build and parse in a debug build.
+## to build and parse in a debug build even with the refusals shared (about
+## 40 ms before). The revision is only recorded once a read has parsed, so a
+## bad one is retried on the next poll rather than waiting for the stock.
 func _refresh_racks() -> void:
 	var revision: int = sim.storage_revision()
 	if revision == _storage_revision:
 		return
-	_storage_revision = revision
 	_rack_states.clear()
 	_storage_state = {}
 	var parsed = JSON.parse_string(sim.storage_snapshot_json())
 	if not (parsed is Dictionary):
 		return
+	_storage_revision = revision
 	_storage_state = parsed
 	for snapshot in parsed.get("racks", []):
 		if not (snapshot is Dictionary):
