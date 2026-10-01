@@ -209,6 +209,8 @@ a frame change costs two transform writes for the tile that changed.
 through any face of its inlet edge, including the outlet side; the demo
 layout in `test_layouts.gd` relies on it; one-condition fix
 `belt.direction == sink.direction`; `tests/links.rs` pins the current rule).
+*Since decided (2026-10-01, #1): that fix is taken, and the demo line now
+feeds the crusher through its inlet face.*
 Ticket 4's finding that ~8 ms of every tick step is chunk-snapshot JSON
 parsing on a 1500-belt line is milestone 8 scope, not this update's.
 

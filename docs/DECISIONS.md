@@ -27,7 +27,7 @@ matches what code comments and data files cite.
 
 - 2026-10-01: **A belt feeds a machine or dock only through its inlet
   face.** (Owner, on issue #1: "do #1. get it done".) The pipes & conveyors
-  close-out (2026-09-15, entry 5 below) found that `resolve_sink` linked a
+  close-out (the 2026-09-15 record below, its point 5) found that `resolve_sink` linked a
   belt into a machine or dock whenever the tile it pointed at was on the
   inlet *edge*, from whichever side it came. For a 1x1 machine every side
   is that edge, so a crusher fed from its flank crafted, and a belt on a
