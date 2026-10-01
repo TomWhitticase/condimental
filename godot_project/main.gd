@@ -1304,6 +1304,9 @@ var _delivery_full := false # is some dock at capacity — the clipboard reads F
 var _rack_states: Dictionary = {} # origin key -> rack snapshot (bays, contents, filter, refusals)
 var _rack_nodes: Dictionary = {} # origin key -> {"bays": Array of {"pallet", "load", "tint"}}
 var _storage_state: Dictionary = {} # base_cap / slot_stack / total_bays / used_bays / free_bays / racks
+## `sim.storage_revision()` as of the last `_refresh_racks` that read the
+## warehouse; -1 forces the next one to read it (a rebuild's fresh shelves).
+var _storage_revision := -1
 
 # --- Build mode: the ghost, and what the next click will do ----------------
 # `_build_kind` is "" when the player is not placing anything; `_remove_mode`
@@ -3508,6 +3511,7 @@ func _rebuild_world() -> void:
 	_fluid_tank_nodes.clear()
 	_dock_nodes.clear()
 	_rack_nodes.clear()
+	_storage_revision = -1
 	_pipe_fluid_nodes.clear()
 	_pipe_fault_nodes.clear()
 	_world_warnings.clear()
@@ -4399,7 +4403,16 @@ func _read_dock_states() -> void:
 ## re-applied from scratch here rather than diffed — every shelf is hidden and
 ## the occupied ones are put back, which is the only way a caching renderer
 ## stays honest about an assignment that can shuffle under it.
+##
+## But only when the warehouse has changed: `storage_revision` moves when the
+## stock or the racks do, which is a hopper refill or a player action, not
+## every tick. Read every polled frame, a 500-rack floor's snapshot cost 24 ms
+## to build and parse in a debug build.
 func _refresh_racks() -> void:
+	var revision: int = sim.storage_revision()
+	if revision == _storage_revision:
+		return
+	_storage_revision = revision
 	_rack_states.clear()
 	_storage_state = {}
 	var parsed = JSON.parse_string(sim.storage_snapshot_json())
