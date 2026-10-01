@@ -134,6 +134,11 @@ if ! grep -qE "_camera_input_sealed = true" godot_project/test_screenshot.gd; th
   fail "godot_project/test_screenshot.gd never seals the camera — a held key or a stray wheel notch can move the shot between the aim and the shutter (issue #82)"
 fi
 
+echo "==> the tech debt total is the sum of its items, item numbers unique"
+# A silent merge of two edits to docs/TECH_DEBT.md's total is otherwise
+# invisible, and that total is what the feature freeze reads.
+scripts/tech-debt-status.sh --check || status=1
+
 echo "==> every relative link between markdown files resolves"
 while read -r src link; do
   target="$(dirname "$src")/${link}"
@@ -148,7 +153,7 @@ done < <(
 
 echo
 if [ "$status" -eq 0 ]; then
-  echo "PASS: test scripts wired and marked, scenes text, res:// paths real, hover flags tabled, review clock pinned and camera sealed, doc links resolve"
+  echo "PASS: test scripts wired and marked, scenes text, res:// paths real, hover flags tabled, review clock pinned and camera sealed, debt total adds up, doc links resolve"
 else
   echo "FAILED — see above" >&2
 fi

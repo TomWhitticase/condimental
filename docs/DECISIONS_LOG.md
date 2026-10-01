@@ -18,6 +18,15 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-02 **Tech debt is a scored register that can pause feature work.**
+  `docs/TECH_DEBT.md` lists structural debt only (not bugs, not what the
+  branch at hand can fix), each item 1–3 points. At 20 points, features stop
+  until the total is back under 10; at 25 merged PRs since the last overview
+  audit, an audit comes before the next feature. Both gauges come from
+  `scripts/tech-debt-status.sh`: the change count is derived from git, never
+  hand-bumped, and `check-invariants.sh` holds the header total to the sum of
+  the items. The header records whether a freeze is in force, since 10–19
+  points means frozen only on the way down. Full record in `docs/DECISIONS.md`.
 - 2026-10-01 **A belt and a pipe cross as one `crossing` entity, never as two
   layers.** Place a pipe across a belt (or a belt across a pipe) and that
   tile becomes kind `crossing`, carrying a `BeltSegment` and a `PipeTile`;

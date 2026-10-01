@@ -25,6 +25,44 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-02: **Tech debt is a scored register that can pause feature
+  work.** (Owner: "if this builds up and we have a large number of tech debt
+  points then we stop developing new features and clear the tech debt".) The
+  owner asked for a simple list of debt items with points, a counter of
+  changes since the last overview review, and a CLAUDE.md rule that agents
+  add to it only when genuinely necessary. What was decided:
+  1. **Scope.** An item is a structural shortcut that makes future change
+     slower or riskier and that the branch at hand cannot fix. Bugs stay
+     issues; fixable things are fixed (the "fix what you notice" rule).
+     Agents do not hunt for debt — an unread backlog of trivia would turn the
+     freeze into noise.
+  2. **Points.** 1 = friction in one area, 2 = causes bugs or taxes every
+     change in an area, 3 = cross-cutting, threatens determinism or saves, or
+     blocks a milestone.
+  3. **Thresholds.** Feature freeze at 20 points, lifted below 10 so a
+     freeze pays down real debt rather than one item; an overview audit at
+     25 merged PRs. Both numbers were picked by the agent and are the
+     owner's to tune — they live in the doc's table and the script reads
+     them from there.
+  4. **The count is derived, not kept.** The first version bumped a number in
+     every PR; review of PR #213 showed two open PRs both turn "1" into "2",
+     which git merges without a conflict, so the count undercounts silently.
+     `scripts/tech-debt-status.sh` counts first-parent commits on `main`
+     since an audit-baseline sha instead (squash merges are one per PR), and
+     `--write` refreshes the header snapshot. The snapshot can still lag —
+     by as many PRs as were open alongside the last one to merge, since
+     their identical `--write` edits merge cleanly too — but it never drifts
+     further: each `--write` recounts from git rather than adding to the old
+     number, and the live count is always one command away. That is why the
+     freeze and audit rules read the script, not the header. The debt total
+     cannot be derived from git, so `check-invariants.sh` fails when it
+     disagrees with the sum of the items, an item number repeats, or a `TD-`
+     heading is not in the exact form the sum reads.
+  5. **The freeze is recorded, not recomputed.** A pure function of the
+     total cannot tell 15 points on the way up (no freeze) from 15 on the way
+     down (still frozen), so the header carries `Feature freeze: on|off`.
+     `--write` sets it on at 20 and off below 10, and `--check` fails a state
+     that contradicts the total at either end.
 - 2026-10-01: **A belt and a pipe cross as one entity of kind `crossing`,
   never as two layers on one tile.** (Design doc: "CONDIMENTAL — Design:
   letting belts and pipes cross (2026-09-25)", in Drive; build order in
