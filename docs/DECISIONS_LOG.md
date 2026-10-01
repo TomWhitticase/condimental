@@ -33,6 +33,39 @@ See [WORKFLOW.md](WORKFLOW.md).
   share one yield-aware `raw_content` in `sim_core/tests/common/mod.rs`.
   Full record in `docs/DECISIONS.md`.
 
+- 2026-10-02 **Tech debt is a scored register that can pause feature work.**
+  `docs/TECH_DEBT.md` lists structural debt only (not bugs, not what the
+  branch at hand can fix), each item 1–3 points. At 20 points, features stop
+  until the total is back under 10; at 25 merged PRs since the last overview
+  audit, an audit comes before the next feature. Both gauges come from
+  `scripts/tech-debt-status.sh`: the change count is derived from git, never
+  hand-bumped, and `check-invariants.sh` holds the header total to the sum of
+  the items. The header records whether a freeze is in force, since 10–19
+  points means frozen only on the way down. Full record in `docs/DECISIONS.md`.
+- 2026-10-01 **A red check that passes when rerun locally meets the
+  green-checks gate.** When a PR check is red on GitHub, for any reason,
+  merge `origin/main` into the branch, push, and run the same command
+  locally. If every red check passes, the agent merges with
+  `gh pr merge --admin` and does not need to ask first. The squash body names
+  each red check and the local command that passed in its place. A
+  `VERDICT: APPROVED` is still required. A check that fails locally too is
+  still the branch's to fix, and an unrerun check still blocks. `label` and
+  `review` have no local command and gate nothing, so they are exempt. The
+  owner's reason: Actions minutes run out, and every gating check can be run
+  locally. Widens the 2026-09-27 `--admin` entry below. Binds `CLAUDE.md`,
+  `CONTRIBUTING.md`, `docs/WORKFLOW.md` and the `open-pr` skill.
+
+- 2026-10-01 **A belt feeds a machine or dock only through its inlet
+  face.** `World::recompute_topology`'s `resolve_sink` takes the direction
+  the item travels and links a machine or dock only when that equals the
+  sink's facing AND the target tile is on its inlet edge; a belt or
+  splitter side into a flank, or back into the outlet face, hands to
+  nothing. The code now matches `world.rs`'s module doc and GAMEPLAY §9;
+  the owner chose the rule over the old any-side behaviour (issue #1),
+  accepting that saves built on flank feeds stop feeding there.
+  `tests/links.rs` and `tests/splitters.rs` pin it; `build_demo_line` now
+  turns west into the crusher's inlet (15 placements, bill 186). Full
+  record in `docs/DECISIONS.md`.
 - 2026-09-29 **The contracts board lists every offer and padlocks the gated
   ones; its filters are presentation.** A contract a gate holds back is ON
   the board, flagged: `ContractOfferSnapshot` carries `locked`,
@@ -96,7 +129,9 @@ See [WORKFLOW.md](WORKFLOW.md).
   every job in the repository on a billing error and eleven PRs — #192–#196
   and #198–#203 — landed this way. Binds `CLAUDE.md`, `docs/WORKFLOW.md` and
   the `open-pr` skill; recorded as an amendment inside the 2026-09-25 review
-  record in `docs/DECISIONS.md`.
+  record in `docs/DECISIONS.md`. *(Widened 2026-10-01, entry below: any red
+  check, not only one that could not run, is met by its command passing
+  locally, and the agent merges with `--admin` without asking.)*
 
 - 2026-09-26 **The review always runs; only the merge is ever held.** An
   amendment to the entry below, stated after PR #193 ended a session open
@@ -1209,7 +1244,9 @@ See [WORKFLOW.md](WORKFLOW.md).
   measured, and contrary to both `world.rs`'s module doc and GAMEPLAY §9,
   so the code is the outlier (`tests/links.rs` pins it on purpose). The
   fix is one condition (`belt.direction == sink.direction`) but it is a
-  gameplay change that breaks `build_demo_line` and existing saves. Also
+  gameplay change that breaks `build_demo_line` and existing saves.
+  **Superseded 2026-10-01 (#1):** the owner chose the documented rule, and
+  a belt now feeds a machine or dock only through its inlet face. Also
   reported not fixed: nobody has watched the belt animation live
   (`BELT_FRAMES`), `_read_world_layout` is ~40 of a rebuild's 80 ms
   (milestone 8), and every perf figure is off a debug build. Full record

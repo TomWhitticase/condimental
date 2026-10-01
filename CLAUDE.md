@@ -41,9 +41,11 @@ empty, and the player buys and places every tile.
   forbids you merging (an Orca worker's coordinator merges) or a change that
   also waits on the owner holds only the *merge*. On `CHANGES REQUESTED`, fix
   and send a fresh reviewer; if none can be launched, leave the PR open and
-  say it is waiting on review. Only the owner waives the green half, and only
-  when the checks could not run at all (`gh pr merge --admin`, WORKFLOW.md) —
-  never the verdict.
+  say it is waiting on review. A check that is red on GitHub is rerun
+  locally after merging `origin/main` into the branch; if the same command
+  passes here, that is good enough and the PR lands with
+  `gh pr merge --admin` (WORKFLOW.md) — never past the verdict, and never
+  past a check that fails locally too.
 - **Every PR body shows the change in a screenshot** — render with
   `scripts/screenshot-scene.sh`, read it, publish with
   `scripts/pr-screenshot.sh`, paste its markdown. A hook and CI both refuse a
@@ -56,6 +58,11 @@ empty, and the player buys and places every tile.
   large for the branch — roughly one per PR. The backlog is a queue a human
   has to prioritise, so an issue nobody would ever pick costs more than it
   records; see WORKFLOW.md for the test to apply.
+- **Tech debt goes in [docs/TECH_DEBT.md](docs/TECH_DEBT.md), rarely.** Only
+  a structural shortcut you cannot fix in the branch at hand, scored 1–3
+  points; do not hunt for debt to record. Run `scripts/tech-debt-status.sh`
+  before starting a feature: past the debt threshold, features stop until it
+  is paid down; past the change threshold, an overview audit comes first.
 
 ## Layout
 
@@ -88,6 +95,7 @@ change something that seems to conflict with it.
 | Whether a question is already settled | [docs/DECISIONS_LOG.md](docs/DECISIONS_LOG.md) |
 | Why a rule exists (full records) | [docs/DECISIONS.md](docs/DECISIONS.md) |
 | Status and dated history | [docs/DEVLOG.md](docs/DEVLOG.md) |
+| Known tech debt, audit counter | [docs/TECH_DEBT.md](docs/TECH_DEBT.md) |
 
 Skills cover the repeatable procedures: `voxel-asset`, `verify`,
 `screenshot-review`, `record-decision`, `open-pr`, `review`, `file-issue`,

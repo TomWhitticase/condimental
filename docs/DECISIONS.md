@@ -76,6 +76,105 @@ matches what code comments and data files cite.
   counts bottler *fills* (bottles over the recipe's own output count, read
   from the registry) rather than bottles.
 
+- 2026-10-02: **Tech debt is a scored register that can pause feature
+  work.** (Owner: "if this builds up and we have a large number of tech debt
+  points then we stop developing new features and clear the tech debt".) The
+  owner asked for a simple list of debt items with points, a counter of
+  changes since the last overview review, and a CLAUDE.md rule that agents
+  add to it only when genuinely necessary. What was decided:
+  1. **Scope.** An item is a structural shortcut that makes future change
+     slower or riskier and that the branch at hand cannot fix. Bugs stay
+     issues; fixable things are fixed (the "fix what you notice" rule).
+     Agents do not hunt for debt — an unread backlog of trivia would turn the
+     freeze into noise.
+  2. **Points.** 1 = friction in one area, 2 = causes bugs or taxes every
+     change in an area, 3 = cross-cutting, threatens determinism or saves, or
+     blocks a milestone.
+  3. **Thresholds.** Feature freeze at 20 points, lifted below 10 so a
+     freeze pays down real debt rather than one item; an overview audit at
+     25 merged PRs. Both numbers were picked by the agent and are the
+     owner's to tune — they live in the doc's table and the script reads
+     them from there.
+  4. **The count is derived, not kept.** The first version bumped a number in
+     every PR; review of PR #213 showed two open PRs both turn "1" into "2",
+     which git merges without a conflict, so the count undercounts silently.
+     `scripts/tech-debt-status.sh` counts first-parent commits on `main`
+     since an audit-baseline sha instead (squash merges are one per PR), and
+     `--write` refreshes the header snapshot. The snapshot can still lag —
+     by as many PRs as were open alongside the last one to merge, since
+     their identical `--write` edits merge cleanly too — but it never drifts
+     further: each `--write` recounts from git rather than adding to the old
+     number, and the live count is always one command away. That is why the
+     freeze and audit rules read the script, not the header. The debt total
+     cannot be derived from git, so `check-invariants.sh` fails when it
+     disagrees with the sum of the items, an item number repeats, or a `TD-`
+     heading is not in the exact form the sum reads.
+  5. **The freeze is recorded, not recomputed.** A pure function of the
+     total cannot tell 15 points on the way up (no freeze) from 15 on the way
+     down (still frozen), so the header carries `Feature freeze: on|off`.
+     `--write` sets it on at 20 and off below 10, and `--check` fails a state
+     that contradicts the total at either end.
+- 2026-10-01: **A red check that passes when rerun locally meets the
+  green-checks gate.** (Owner's rule: "If CI checks fail on a PR then run them
+  locally, and if they pass, then thats good enough (This is because we are
+  using too much gh actions and we run into the case where we cant run any
+  checks any more, and because all our checks can be run locally then in that
+  case we can just do that)".)
+
+  **What it replaces.** Since 2026-09-27, `gh pr merge --admin` was the
+  owner's override, for when GitHub refused to run the checks at all, and
+  each use waited on the owner saying to land the work. Yet every check that
+  gates a merge is a script or a cargo command that runs on this machine.
+
+  **The rule.** Whatever the cause of a red check, first merge `origin/main`
+  into the branch and push. CI tests the head merged into `main`, and
+  `--admin` skips the up-to-date rule, so the local run has to see the same
+  tree. The evidence that counts is then the same command passing locally. If
+  every red check does, the gate is met and the agent merges with `--admin`
+  without a fresh go-ahead. Branch protection still requires `lint`, which is
+  why `--admin` is needed at all. The squash body names each red check and
+  the local command that passed, because the body is what `main`'s history
+  keeps.
+
+  **What it does not cover.** The review verdict is a separate gate and is
+  never met locally. A check that fails locally too is the branch's to fix,
+  just as before. A check that was not rerun does not count as passed.
+  `label` (the labeler) and `review` (the dormant Claude review) have no local
+  command and gate nothing, so a red one of those is ignored.
+  `verify.yml` (the Godot gate) only runs on a `full-verify` PR, so running
+  `scripts/verify-core-loop.sh` locally is what passes it, as it always was.
+
+- 2026-10-01: **A belt feeds a machine or dock only through its inlet
+  face.** (Owner, on issue #1: "do #1. get it done".) The pipes & conveyors
+  close-out (the 2026-09-15 record below, its point 5) found that `resolve_sink` linked a
+  belt into a machine or dock whenever the tile it pointed at was on the
+  inlet *edge*, from whichever side it came. For a 1x1 machine every side
+  is that edge, so a crusher fed from its flank crafted, and a belt on a
+  machine's outlet face was linked as feeding it while also catching its
+  discharge. `world.rs`'s module doc and GAMEPLAY §9 both said the
+  opposite, so the code was the outlier; it was left alone then only
+  because tightening a placement rule is the owner's call.
+
+  The two options were to enforce the documented rule or to amend the docs
+  to the code. Enforcing it won: it is what makes a machine's facing a
+  decision with a visible consequence, and the outlet-face self-link was a
+  loop waiting for a recipe that consumes its own output. The fix is the
+  one condition the close-out named: `resolve_sink` now takes the
+  direction the item is travelling (the belt's facing, or a splitter
+  side's direction) and accepts a machine or dock only when it equals the
+  sink's facing and the target is an inlet-edge tile. Belts and splitters
+  as sinks are unchanged: they take from any side.
+
+  What it cost: `test_layouts.gd`'s `build_demo_line` fed its crusher from
+  the north flank, so it now runs one tile further east and turns west
+  into the inlet face (two more belts: 15 placements, bill 186);
+  `tests/splitters.rs`'s dock fixture was fed from the side and now faces
+  the branch. No save-format change: saves store placements and topology
+  is recomputed on load, so an old save loads and any flank-fed machine in
+  it simply stops receiving until the player turns the belt or the
+  machine. Every other `test_layouts.gd` builder was audited headless for
+  a belt pointing into a machine or dock with no link, and none does.
+
 - 2026-09-29: **The contracts board lists every offer and padlocks the gated
   ones; its filters are presentation.** (Owner's ask: "I want contracts that
   are for items that i cant make to be locked (e.g. at the start i can only
@@ -1016,6 +1115,11 @@ matches what code comments and data files cite.
   that is red because of the change is still the change's to fix, and the
   squash body carries the reason plus the local evidence, because that body is
   what `main` keeps. Eleven PRs landed under it: #192–#196 and #198–#203.)*
+
+  *(Amended 2026-10-01 by "A red check that passes when rerun locally meets
+  the green-checks gate" above: `--admin` is no longer only for checks that
+  could not run, nor only the owner's call. Any red check that passes when
+  rerun locally is met, and the agent merges without asking.)*
 
   **What was rejected.** Keeping the routine-change exemption was rejected.
   Whether a change counts as "routine" is judged by its author, which is
@@ -4287,7 +4391,10 @@ matches what code comments and data files cite.
      a **gameplay change, not a bug fix**: it breaks `test_layouts.gd`'s
      `build_demo_line`, the shipped demo saves, and any layout a player has
      built against the current rule. Tightening a connection rule after
-     players have built against it is the owner's call. Two more items are
+     players have built against it is the owner's call. *(Superseded on
+     2026-10-01 by "A belt feeds a machine or dock only through its inlet
+     face" at the top of Part A: the owner chose the documented rule.)*
+     Two more items are
      reported rather than fixed for the same class of reason: nobody has
      watched the belt animation run live at speed (`BELT_FRAMES` is a
      judgement no headless run can make), and `_read_world_layout` is ~40 ms
@@ -6920,7 +7027,9 @@ matches what code comments and data files cite.
   the decision is ticket 7's. Note the asymmetry: the *input* side is
   already face-correct (`source_to_belt` uses `outlet_neighbours`), so a
   belt that both points at and stands off a 1x1 machine reads as fed by
-  and feeding the same machine.
+  and feeding the same machine. *(Superseded on 2026-10-01 by "A belt
+  feeds a machine or dock only through its inlet face" at the top of
+  Part A: the fix was taken, issue #1.)*
 
   **Topology gaps that had to be filled**, all in the same pass: the
   machine *input* tap kept only `(network, segment)` and was found with a

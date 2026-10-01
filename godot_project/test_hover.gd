@@ -215,10 +215,10 @@ func _run_checks() -> void:
 			_fail("hover over %s should describe a %s, got: %s" % [str(tile), str(kinds[tile]), text])
 			return
 
-	# A ROTATED tile still identifies itself — the belt at (3, 1) faces north
-	# and hands into the crusher's flank, and hover must say its facing
+	# A ROTATED tile still identifies itself — the belt at (4, 1) faces north
+	# and turns west into the crusher's inlet, and hover must say its facing
 	# whatever shape `_belt_shape_for` gives it.
-	var north_belt: String = main._hover_text_at_tile(Vector2i(3, 1))
+	var north_belt: String = main._hover_text_at_tile(Vector2i(4, 1))
 	if not north_belt.contains("north"):
 		_fail("hover over the north-facing belt should say so, got: %s" % north_belt)
 		return

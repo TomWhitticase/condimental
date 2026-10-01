@@ -3498,35 +3498,42 @@ impl World {
         // because two relations now ask it — a belt's single downstream tile
         // and each of a splitter's — and they must never diverge on what
         // counts as a valid sink.
-        let resolve_sink = |grid: &BTreeMap<TileCoord, Entity>, target: TileCoord| {
-            let &occupant = grid.get(&target)?;
-            match body_of(occupant) {
-                // Belt-like: takes anything, whatever it is facing, exactly
-                // as a belt tile always has.
-                BodyKind::Belt | BodyKind::Splitter => Some(occupant),
-                // A machine or a dock only accepts on its inlet face.
-                BodyKind::Machine | BodyKind::Dock => {
-                    let sink = self.placement_of(occupant);
-                    let sink_origin = self.position_of(occupant);
-                    sink.footprint
-                        .inlet_tiles(sink_origin, sink.direction)
-                        .contains(&target)
+        // `heading` is the way the item travels into `target`.
+        let resolve_sink =
+            |grid: &BTreeMap<TileCoord, Entity>, target: TileCoord, heading: Direction| {
+                let &occupant = grid.get(&target)?;
+                match body_of(occupant) {
+                    // Belt-like: takes anything, whatever it is facing, exactly
+                    // as a belt tile always has.
+                    BodyKind::Belt | BodyKind::Splitter => Some(occupant),
+                    // A machine or a dock only accepts through its inlet face:
+                    // the item must enter an inlet-edge tile travelling the way
+                    // the sink faces, so a belt into its flank, or back into its
+                    // outlet face, feeds nothing (GAMEPLAY §9).
+                    BodyKind::Machine | BodyKind::Dock => {
+                        let sink = self.placement_of(occupant);
+                        let sink_origin = self.position_of(occupant);
+                        (heading == sink.direction
+                            && sink
+                                .footprint
+                                .inlet_tiles(sink_origin, sink.direction)
+                                .contains(&target))
                         .then_some(occupant)
+                    }
+                    // A rack is not a sink, deliberately (R6): an item on a
+                    // belt pointed at one simply stops, the way it does
+                    // against a tank.
+                    BodyKind::Pipe
+                    | BodyKind::Hopper
+                    | BodyKind::FluidTank
+                    | BodyKind::WarehouseRack => None,
                 }
-                // A rack is not a sink, deliberately (R6): an item on a
-                // belt pointed at one simply stops, the way it does
-                // against a tank.
-                BodyKind::Pipe
-                | BodyKind::Hopper
-                | BodyKind::FluidTank
-                | BodyKind::WarehouseRack => None,
-            }
-        };
+            };
         topology.belt_ahead = vec![None; topology.belts.len()];
         for (index, &belt) in topology.belts.iter().enumerate() {
             let placement = self.placement_of(belt);
             let target = placement.direction.step(self.position_of(belt));
-            let Some(occupant) = resolve_sink(&topology.grid, target) else {
+            let Some(occupant) = resolve_sink(&topology.grid, target, placement.direction) else {
                 continue;
             };
             let occupant_body = body_of(occupant);
@@ -3562,7 +3569,7 @@ impl World {
                     return None;
                 }
                 let direction = side.direction_from(placement.direction);
-                let sink = resolve_sink(&topology.grid, direction.step(origin));
+                let sink = resolve_sink(&topology.grid, direction.step(origin), direction);
                 if let Some(occupant) = sink {
                     let occupant_body = body_of(occupant);
                     // The wire's `output` is the straight side only; the
