@@ -75,6 +75,36 @@ matches what code comments and data files cite.
   other record changed shape, so a version 7 file still means one thing.
   Pinned by `tests/crossings.rs`' round trip.
 
+- 2026-10-01: **A red check that passes when rerun locally meets the
+  green-checks gate.** (Owner's rule: "If CI checks fail on a PR then run them
+  locally, and if they pass, then thats good enough (This is because we are
+  using too much gh actions and we run into the case where we cant run any
+  checks any more, and because all our checks can be run locally then in that
+  case we can just do that)".)
+
+  **What it replaces.** Since 2026-09-27, `gh pr merge --admin` was the
+  owner's override, for when GitHub refused to run the checks at all, and
+  each use waited on the owner saying to land the work. Yet every check that
+  gates a merge is a script or a cargo command that runs on this machine.
+
+  **The rule.** Whatever the cause of a red check, first merge `origin/main`
+  into the branch and push. CI tests the head merged into `main`, and
+  `--admin` skips the up-to-date rule, so the local run has to see the same
+  tree. The evidence that counts is then the same command passing locally. If
+  every red check does, the gate is met and the agent merges with `--admin`
+  without a fresh go-ahead. Branch protection still requires `lint`, which is
+  why `--admin` is needed at all. The squash body names each red check and
+  the local command that passed, because the body is what `main`'s history
+  keeps.
+
+  **What it does not cover.** The review verdict is a separate gate and is
+  never met locally. A check that fails locally too is the branch's to fix,
+  just as before. A check that was not rerun does not count as passed.
+  `label` (the labeler) and `review` (the dormant Claude review) have no local
+  command and gate nothing, so a red one of those is ignored.
+  `verify.yml` (the Godot gate) only runs on a `full-verify` PR, so running
+  `scripts/verify-core-loop.sh` locally is what passes it, as it always was.
+
 - 2026-10-01: **A belt feeds a machine or dock only through its inlet
   face.** (Owner, on issue #1: "do #1. get it done".) The pipes & conveyors
   close-out (the 2026-09-15 record below, its point 5) found that `resolve_sink` linked a
@@ -1046,6 +1076,11 @@ matches what code comments and data files cite.
   that is red because of the change is still the change's to fix, and the
   squash body carries the reason plus the local evidence, because that body is
   what `main` keeps. Eleven PRs landed under it: #192–#196 and #198–#203.)*
+
+  *(Amended 2026-10-01 by "A red check that passes when rerun locally meets
+  the green-checks gate" above: `--admin` is no longer only for checks that
+  could not run, nor only the owner's call. Any red check that passes when
+  rerun locally is met, and the agent merges without asking.)*
 
   **What was rejected.** Keeping the routine-change exemption was rejected.
   Whether a change counts as "routine" is judged by its author, which is
@@ -4317,7 +4352,10 @@ matches what code comments and data files cite.
      a **gameplay change, not a bug fix**: it breaks `test_layouts.gd`'s
      `build_demo_line`, the shipped demo saves, and any layout a player has
      built against the current rule. Tightening a connection rule after
-     players have built against it is the owner's call. Two more items are
+     players have built against it is the owner's call. *(Superseded on
+     2026-10-01 by "A belt feeds a machine or dock only through its inlet
+     face" at the top of Part A: the owner chose the documented rule.)*
+     Two more items are
      reported rather than fixed for the same class of reason: nobody has
      watched the belt animation run live at speed (`BELT_FRAMES` is a
      judgement no headless run can make), and `_read_world_layout` is ~40 ms
@@ -6952,7 +6990,9 @@ matches what code comments and data files cite.
   the decision is ticket 7's. Note the asymmetry: the *input* side is
   already face-correct (`source_to_belt` uses `outlet_neighbours`), so a
   belt that both points at and stands off a 1x1 machine reads as fed by
-  and feeding the same machine.
+  and feeding the same machine. *(Superseded on 2026-10-01 by "A belt
+  feeds a machine or dock only through its inlet face" at the top of
+  Part A: the fix was taken, issue #1.)*
 
   **Topology gaps that had to be filled**, all in the same pass: the
   machine *input* tap kept only `(network, segment)` and was found with a
