@@ -125,8 +125,8 @@ pub struct Recipe {
     pub display_name: Option<String>,
 
     /// One line saying what this product *is*, for the Cookbook's page
-    /// heading — "The cold-chain tier. Two new machines, and the first
-    /// ingredient in the game that can go off."
+    /// heading — "The second sauce, and the first thing you make out of
+    /// something you already make."
     ///
     /// **Optional, like every field below.** The Cookbook is built entirely
     /// out of this file and its siblings, so a sauce added to `recipes.ron`

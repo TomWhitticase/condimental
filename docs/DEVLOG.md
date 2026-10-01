@@ -253,6 +253,20 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-02 — Spoilage is out of the game
+
+The owner dropped spoilage. Nothing perishes, so the design no longer has a
+refrigeration tier, a cold chain or a spoilage component waiting to be built.
+It came up while planning mayonnaise as the next sauce, after burger sauce
+was set aside because real burger sauce is mostly mayo. Mayo stays tier 4 and
+an equipment gate, but the equipment is now its emulsifier, not a fridge.
+GAMEPLAY.md, ARCHITECTURE.md §11 and the README roadmap say so, and §11's
+"how is spoilage modelled" question is closed. Corrosion for hot sauce is
+still open. Two real obstacles to mayo remain: one recipe drinking two raw
+fluids (oil and vinegar) is a pipe run the resolver cannot name (#184), and
+a cream-coloured fluid would fail the fluid-tint saturation floor that issue
+#100 added (`test_fluid_gallery.gd`). Mayo's own plan is next.
+
 ### 2026-10-02 — A big warehouse no longer costs a frame
 
 A watched play session pointed at the warehouse poll, and measuring it on a
