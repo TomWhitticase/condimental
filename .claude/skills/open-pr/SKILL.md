@@ -70,6 +70,11 @@ shows and what to look at.
 
 ## 4. Push and open the PR
 
+First add 1 to "Changes since last overview audit" at the top of
+`docs/TECH_DEBT.md`, in this branch, and commit it with the work — every
+merged PR counts, docs-only ones too. If the header says a threshold is
+passed, say so in the PR body.
+
 ```
 git push -u origin HEAD
 gh pr create --title "…" --body "…"      # --fill holds no image, so it cannot pass

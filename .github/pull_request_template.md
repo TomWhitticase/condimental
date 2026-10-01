@@ -38,7 +38,9 @@ Name the PNG after its subject: the file name becomes the caption. -->
 <!-- Say which of these was done, or why it was not needed:
   - `docs/DEVLOG.md` — a status/history note, or "not DEVLOG-worthy"
   - `docs/DECISIONS_LOG.md` + `docs/DECISIONS.md` + the design doc — only if
-    a non-trivial decision was made (see the `record-decision` skill) -->
+    a non-trivial decision was made (see the `record-decision` skill)
+  - `docs/TECH_DEBT.md` — change counter bumped; a debt item added or paid
+    off only if one genuinely was (the bar is in that file) -->
 
 ## Issues
 

@@ -58,6 +58,12 @@ empty, and the player buys and places every tile.
   large for the branch — roughly one per PR. The backlog is a queue a human
   has to prioritise, so an issue nobody would ever pick costs more than it
   records; see WORKFLOW.md for the test to apply.
+- **Tech debt goes in [docs/TECH_DEBT.md](docs/TECH_DEBT.md), rarely.** Only
+  a structural shortcut you cannot fix in the branch at hand, scored 1–3
+  points; do not hunt for debt to record. Every merged PR bumps its change
+  counter. Check its header before starting a feature: past the debt
+  threshold, features stop until it is paid down; past the change threshold,
+  an overview audit comes first.
 
 ## Layout
 
@@ -90,6 +96,7 @@ change something that seems to conflict with it.
 | Whether a question is already settled | [docs/DECISIONS_LOG.md](docs/DECISIONS_LOG.md) |
 | Why a rule exists (full records) | [docs/DECISIONS.md](docs/DECISIONS.md) |
 | Status and dated history | [docs/DEVLOG.md](docs/DEVLOG.md) |
+| Known tech debt, audit counter | [docs/TECH_DEBT.md](docs/TECH_DEBT.md) |
 
 Skills cover the repeatable procedures: `voxel-asset`, `verify`,
 `screenshot-review`, `record-decision`, `open-pr`, `review`, `file-issue`,
