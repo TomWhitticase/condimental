@@ -25,6 +25,37 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-01: **A belt feeds a machine or dock only through its inlet
+  face.** (Owner, on issue #1: "do #1. get it done".) The pipes & conveyors
+  close-out (the 2026-09-15 record below, its point 5) found that `resolve_sink` linked a
+  belt into a machine or dock whenever the tile it pointed at was on the
+  inlet *edge*, from whichever side it came. For a 1x1 machine every side
+  is that edge, so a crusher fed from its flank crafted, and a belt on a
+  machine's outlet face was linked as feeding it while also catching its
+  discharge. `world.rs`'s module doc and GAMEPLAY §9 both said the
+  opposite, so the code was the outlier; it was left alone then only
+  because tightening a placement rule is the owner's call.
+
+  The two options were to enforce the documented rule or to amend the docs
+  to the code. Enforcing it won: it is what makes a machine's facing a
+  decision with a visible consequence, and the outlet-face self-link was a
+  loop waiting for a recipe that consumes its own output. The fix is the
+  one condition the close-out named: `resolve_sink` now takes the
+  direction the item is travelling (the belt's facing, or a splitter
+  side's direction) and accepts a machine or dock only when it equals the
+  sink's facing and the target is an inlet-edge tile. Belts and splitters
+  as sinks are unchanged: they take from any side.
+
+  What it cost: `test_layouts.gd`'s `build_demo_line` fed its crusher from
+  the north flank, so it now runs one tile further east and turns west
+  into the inlet face (two more belts: 15 placements, bill 186);
+  `tests/splitters.rs`'s dock fixture was fed from the side and now faces
+  the branch. No save-format change: saves store placements and topology
+  is recomputed on load, so an old save loads and any flank-fed machine in
+  it simply stops receiving until the player turns the belt or the
+  machine. Every other `test_layouts.gd` builder was audited headless for
+  a belt pointing into a machine or dock with no link, and none does.
+
 - 2026-09-29: **The contracts board lists every offer and padlocks the gated
   ones; its filters are presentation.** (Owner's ask: "I want contracts that
   are for items that i cant make to be locked (e.g. at the start i can only

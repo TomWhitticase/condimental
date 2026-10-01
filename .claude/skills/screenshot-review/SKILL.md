@@ -38,8 +38,8 @@ implied one (the run prints a `SCREENSHOT_NOTE` saying so, and the flag's
 panel/ticks still apply), and an unknown `--fixture` name is refused with a
 non-zero status rather than quietly building the demo line (issue #70).
 
-**What to build** — `--build` (demo line: belts turning north into a crusher,
-a pipe run south — three facings in one frame; the same as `--fixture demo`)
+**What to build** — `--build` (demo line: belts turning north, then west
+into a crusher's inlet face, a pipe run south — three facings in one frame; the same as `--fixture demo`)
 · `--fixture NAME` where NAME is `machines | fluids | vat | splitter | chain
 | stress | pipes | gallery | demo` · `--stress` (1500-tile serpentine, implies `--populate`, prints a
 `SCREENSHOT_RENDER` line with object/primitive/draw-call counts) ·
