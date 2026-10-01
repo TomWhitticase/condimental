@@ -212,10 +212,21 @@ fn the_two_sauces_split_one_vat_three_to_two() {
         }
     }
 
-    // One `bottled_ketchup` is one ketchup the bottler drew; one `bbq_mix` is
-    // one ketchup the branch drew. So these two counts *are* the split of the
-    // vat's output, and nothing else draws from that network.
-    let ketchup = made(&world, "bottled_ketchup") - start["bottled_ketchup"];
+    // One bottler fill is one ketchup the bottler drew, and it makes a case's
+    // worth of bottles; one `bbq_mix` is one ketchup the branch drew. So the
+    // bottles over the fill size and the mixes *are* the split of the vat's
+    // output, and nothing else draws from that network. The fill size is
+    // read from the recipe rather than written here, so a case resized in
+    // `data/recipes.ron` cannot quietly skew the ratio.
+    let per_fill = recipes()
+        .get("bottled_ketchup")
+        .expect("the ketchup bottler's recipe")
+        .outputs
+        .iter()
+        .find(|(item, _)| item == "bottled_ketchup")
+        .map(|(_, n)| u64::from(*n))
+        .expect("the bottler makes bottled ketchup");
+    let ketchup = (made(&world, "bottled_ketchup") - start["bottled_ketchup"]) / per_fill;
     let bbq = made(&world, "bbq_mix") - start["bbq_mix"];
     assert!(
         ketchup > 0 && bbq > 0,

@@ -694,27 +694,6 @@ fn the_new_commands_have_the_documented_wire_forms() {
 // 7. Conservation, with the ledger in the sum
 // ---------------------------------------------------------------------
 
-/// How many units of raw ingredient `raw` one unit of `id` embodies —
-/// `core_loop.rs`'s own walk, which this file needs for the same reason it
-/// does and which is only a handful of lines.
-fn raw_content(id: &str, raw: &str, recipes: &RecipeRegistry) -> u32 {
-    if id == raw {
-        return 1;
-    }
-    let Some(recipe) = recipes.ordered().iter().find(|r| {
-        r.outputs.iter().any(|(out, _)| out == id)
-            || r.fluid_outputs.iter().any(|(out, _)| out == id)
-    }) else {
-        return 0;
-    };
-    recipe
-        .inputs
-        .iter()
-        .chain(recipe.fluid_inputs.iter())
-        .map(|(input, qty)| qty * raw_content(input, raw, recipes))
-        .sum()
-}
-
 /// Every unit of `raw` the world can currently account for: **the larder**,
 /// plus everything the factory holds in any form, plus everything already
 /// shipped inside finished product. With auto-fill on, stock moves out of
@@ -722,7 +701,7 @@ fn raw_content(id: &str, raw: &str, recipes: &RecipeRegistry) -> u32 {
 /// together is exactly the check that the transfer is a transfer and not a
 /// duplication or a leak.
 fn accounted(world: &World, raw: &str, recipes: &RecipeRegistry, final_item: &str) -> Fx {
-    let value = |id: &str| Fx::from_num(raw_content(id, raw, recipes));
+    let value = |id: &str| common::raw_content(id, raw, recipes);
     let mut total = Fx::from_num(world.owned_ingredient(raw));
 
     for hopper in world.hopper_snapshots() {

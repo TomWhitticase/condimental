@@ -204,7 +204,9 @@ fn a_delivered_unit_is_worth_more_than_the_ingredients_that_made_it() {
 
     let ingredient_cost: Money = raw_ingredient_ids(&registry)
         .iter()
-        .map(|raw| Money::from_num(raw_content(&final_item, raw, &registry)) * price_of(raw))
+        .map(|raw| {
+            Money::from_num(common::raw_content(&final_item, raw, &registry)) * price_of(raw)
+        })
         .sum();
     assert!(
         ingredient_cost > Money::ZERO,
@@ -222,27 +224,6 @@ fn a_delivered_unit_is_worth_more_than_the_ingredients_that_made_it() {
             contract.id
         );
     }
-}
-
-/// How many units of `raw` one unit of `id` embodies — the same walk
-/// `core_loop.rs` uses for its conservation accounting, following fluid
-/// production as readily as solid.
-fn raw_content(id: &str, raw: &str, recipes: &RecipeRegistry) -> u32 {
-    if id == raw {
-        return 1;
-    }
-    let Some(recipe) = recipes.ordered().iter().find(|r| {
-        r.outputs.iter().any(|(out, _)| out == id)
-            || r.fluid_outputs.iter().any(|(out, _)| out == id)
-    }) else {
-        return 0;
-    };
-    recipe
-        .inputs
-        .iter()
-        .chain(recipe.fluid_inputs.iter())
-        .map(|(input, qty)| qty * raw_content(input, raw, recipes))
-        .sum()
 }
 
 /// ...and the other half of the same mechanic, observed on the real line:

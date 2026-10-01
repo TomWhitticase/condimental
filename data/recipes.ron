@@ -288,15 +288,34 @@
         // a belt — so this is the only recipe in the file with a fluid input
         // and a solid output, and it is where the piped middle of the chain
         // rejoins the conveyor.
+        //
+        // **ONE BATCH FILLS ONE CASE: 8 BOTTLES** (2026-10-02; it was one
+        // bottle, so a "case" held a single bottle). A unit of fluid
+        // everywhere upstream is a case-sized batch, and the multiplier
+        // lives HERE rather than at the vat on purpose. Measured: with the
+        // vat making 8 small units instead, this bottler sips them one at a
+        // time and the BBQ mixer, which needs 8 at once off the same run,
+        // never starts at all. Upstream of this line nothing moved, so the
+        // bill per case, every contract, both gates and the 3:2 splits are
+        // untouched.
+        //
+        // **200 TICKS IS THE BELT, NOT THE NOZZLES.** A fill deposits all 8
+        // into an output buffer that holds exactly 8 (`world.rs`'s
+        // `MACHINE_OUTPUT_CAPACITY`), and a belt lane takes one item per 25
+        // ticks, so the buffer needs ~175 ticks to empty. A shorter fill
+        // finishes into a buffer still holding bottles and the load lights
+        // read "backed up" on a machine that is not (`tests/machine_load.rs`
+        // caught that at 60). 200 clears it with margin and stays under the
+        // vat's 240, so the vat is still the line's bottleneck.
         Recipe(
             id: "bottled_ketchup",
-            blurb: "Where the product stops being a fluid. Ketchup is drawn out of the pipe run and leaves as a bottle on a belt — the one step in the game with a liquid input and a solid output, and where the piped middle of the chain rejoins the conveyor.",
+            blurb: "Where the product stops being a fluid. One batch of ketchup is drawn out of the pipe run and leaves as a whole case's worth of bottles on a belt — the one step in the game with a liquid input and a solid output, and where the piped middle of the chain rejoins the conveyor.",
             icon: "item_bottle",
             inputs: [],
             fluid_inputs: [("ketchup", 1)],
-            outputs: [("bottled_ketchup", 1)],
+            outputs: [("bottled_ketchup", 8)],
             machine: "bottler",
-            time_ticks: 60,
+            time_ticks: 200,
         ),
         // Added AFTER the 3-stage chain above was already working end to
         // end, purely by editing this file — no sim_core/src or
@@ -310,7 +329,7 @@
             blurb: "The packer is the end of the line; past it there is only belt and the dock. Nothing downstream cares which sauce is in the case — only the contract board does.",
             icon: "item_box",
             cookbook_icon: "item_bottle",
-            inputs: [("bottled_ketchup", 1)],
+            inputs: [("bottled_ketchup", 8)],
             outputs: [("boxed_ketchup", 1)],
             machine: "packer",
             time_ticks: 40,
@@ -394,8 +413,9 @@
             machine: "cooking_vat",
             time_ticks: 600,
         ),
-        // Bottling, the BBQ side: liquid in, solid bottle out on the belt,
-        // 60 ticks — the mirror of `bottled_ketchup` on a second bottler.
+        // Bottling, the BBQ side: liquid in, a case's worth of bottles out on
+        // the belt, 200 ticks — the mirror of `bottled_ketchup` on a second
+        // bottler, for the same reasons.
         Recipe(
             id: "bottled_bbq",
             display_name: "Bottled BBQ",
@@ -403,9 +423,9 @@
             icon: "item_bottle_bbq",
             inputs: [],
             fluid_inputs: [("bbq", 1)],
-            outputs: [("bottled_bbq", 1)],
+            outputs: [("bottled_bbq", 8)],
             machine: "bottler",
-            time_ticks: 60,
+            time_ticks: 200,
         ),
         // Packing, the BBQ side: 40 ticks, and `boxed_bbq` is the second
         // thing this factory can sell. A box rides ordinary belt into
@@ -417,7 +437,7 @@
             blurb: "The second thing this factory can sell. A case rides ordinary belt into whichever dock that belt feeds — a dock does not care which sauce a case holds, only the contract board does.",
             icon: "item_box_bbq",
             cookbook_icon: "item_bottle_bbq",
-            inputs: [("bottled_bbq", 1)],
+            inputs: [("bottled_bbq", 8)],
             outputs: [("boxed_bbq", 1)],
             machine: "packer",
             time_ticks: 40,
@@ -535,18 +555,18 @@
             machine: "cooking_vat",
             time_ticks: 360,
         ),
-        // Bottling, the mustard side: 60 ticks, the third bottler recipe and
-        // the same trade as the other two — the pipe run ends here and the
-        // product goes back on a belt as a solid.
+        // Bottling, the mustard side: 8 bottles in 200 ticks, the third
+        // bottler recipe and the same trade as the other two — the pipe run
+        // ends here and the product goes back on a belt as a solid.
         Recipe(
             id: "bottled_mustard",
             blurb: "The third bottler recipe and the same trade as the other two: the pipe run ends, and the product goes back on a belt as something you can pick up. A belt of mustard has to be tellable from a belt of ketchup at a glance, so it gets its own bottle rather than a tinted one.",
             icon: "item_bottle_mustard",
             inputs: [],
             fluid_inputs: [("mustard", 1)],
-            outputs: [("bottled_mustard", 1)],
+            outputs: [("bottled_mustard", 8)],
             machine: "bottler",
-            time_ticks: 60,
+            time_ticks: 200,
         ),
         // Packing, the mustard side: 40 ticks, and `boxed_mustard` is the
         // third thing this factory can sell. Every line's cases ride
@@ -557,7 +577,7 @@
             blurb: "The third thing this factory can sell, and the first that arrives at the dock without a single tomato behind it. Three lines, one delivery pool: only the contract board knows the difference.",
             icon: "item_box_mustard",
             cookbook_icon: "item_bottle_mustard",
-            inputs: [("bottled_mustard", 1)],
+            inputs: [("bottled_mustard", 8)],
             outputs: [("boxed_mustard", 1)],
             machine: "packer",
             time_ticks: 40,

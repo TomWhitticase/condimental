@@ -253,6 +253,17 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-02 — A case of sauce is eight bottles
+
+A case used to hold one bottle, which read wrong on the belt: a stream of
+single bottles each becoming a box. The bottler now fills 8 bottles from
+each batch of sauce, and the packer packs 8 into a case. Nothing before
+the bottler changed, so prices, contracts and costs per case are as they
+were. The bottler takes 200 ticks per fill, matched to how fast a belt can
+carry 8 bottles away. One measured side effect: once the BBQ branch is
+built it gets closer to its designed share of the ketchup, and the mustard
+unlock comes about 13 minutes sooner (tick 131 000, down from 155 000).
+
 ### 2026-09-29 — The hover tooltip is its own size after a bigger one
 
 Hovering a short, narrow thing straight after a tall, wide machine left the

@@ -25,6 +25,57 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-02: **A case is eight bottles; the multiplier lives on the
+  bottler.** (Owner's question, playing main: "a box of ketchup is only one
+  bottle — is that right?", then "8 bottles?" and "proceed".)
+
+  **What was true.** Every packer recipe took one bottle and made one case,
+  and no design doc set a case size. It was simply the number the chain
+  shipped with, and it read wrong on the belt.
+
+  **Where the 8 goes, tried both ways.** (1) *At the vat*: each cook makes 8
+  units of sauce, the bottler makes one bottle per unit, and the BBQ mixer
+  draws 8 ketchup. Measured, this breaks the BBQ branch outright. The ketchup
+  bottler draws one unit every craft off the run the BBQ mixer shares, so the
+  run never holds the 8 the mixer needs at once, and `bbq_branch.rs` saw zero
+  `bbq_mix` in 24 000 ticks. (2) *At the bottler* (chosen): one unit of sauce
+  is a case-sized batch, the bottler fills 8 bottles from it, and the packer
+  boxes 8. Every recipe before the bottler is byte-identical, so the bill per
+  case (17 for mustard, still), every payout, the unlock thresholds and the
+  3:2 splits are untouched. The cookbook's `unit_cost`/`expand` already
+  divided by a recipe's output count, so the Cookbook needed no code.
+
+  **Why 200 ticks.** At the old 60, `machine_load.rs` caught the bottler
+  reporting `StallKind::Output` for about 120 ticks in every 480. The fill
+  deposits all 8 into an output buffer of exactly 8 (`MACHINE_OUTPUT_CAPACITY`),
+  and a belt takes one item per 25 ticks (`ITEM_MIN_SPACING_TILES` over
+  `BELT_SPEED_TILES_PER_TICK`), so a fill shorter than about 175 ticks finishes
+  into a buffer still holding bottles. The load lights then call a machine
+  that is keeping up "backed up". A probe over 3 000 settled ticks showed no
+  output stalls at 180 or at 200. 200 was taken for margin, and it is under
+  the vat's 240, so the vat stays the line's bottleneck. Raising
+  `MACHINE_OUTPUT_CAPACITY` was the alternative. It was rejected because it
+  changes every machine's work-in-progress to fix one recipe, and it is a Rust
+  change for what is a content question.
+
+  **Measured side effect: mustard opens sooner.** `measure_gate_ticks.gd`, run
+  on main's data and then on this change: the BBQ gate is still tick 52 000,
+  and the mustard gate moves from **155 000 to 131 000** (~86 to ~73 minutes).
+  BBQ sells about 1.4 cases per 1 000 ticks after the hand-off, up from about
+  1.0. The likely reason is that the 60-tick ketchup bottler had been winning
+  the shared run's ketchup ahead of the BBQ mixer more often than the 3:2
+  design intends, and a bottler busy 200 ticks per fill no longer does. The
+  split test's ±0.1 band around 1.5 passes both before and after. The cause
+  is inferred, not instrumented. GAMEPLAY.md §2, `data/unlocks.ron`,
+  `measure_gate_ticks.gd` and `test_layouts.gd` carry the new figure.
+
+  **Tests.** Three test files each had their own `raw_content`, which assumed
+  one output per craft; with 8 bottles from one craft, the mass-conservation
+  checks counted a case's tomatoes eight times. It is now one `Fx`-valued,
+  yield-aware copy in `tests/common/mod.rs`. `the_two_sauces_split_one_vat_three_to_two`
+  counts bottler *fills* (bottles over the recipe's own output count, read
+  from the registry) rather than bottles.
+
 - 2026-09-29: **The contracts board lists every offer and padlocks the gated
   ones; its filters are presentation.** (Owner's ask: "I want contracts that
   are for items that i cant make to be locked (e.g. at the start i can only

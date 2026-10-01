@@ -20,9 +20,9 @@
 //!    1x2). [`supply`] tops up every hopper and the tank, which is all a
 //!    running line needs.
 
-use sim_core::sim::types::{Direction, Money};
+use sim_core::sim::types::{Direction, Fx, Money};
 use sim_core::sim::{
-    FLUID_TANK_CAPACITY, HOPPER_CAPACITY, PlayerCommand, WAREHOUSE_RACK_KIND, World,
+    FLUID_TANK_CAPACITY, HOPPER_CAPACITY, PlayerCommand, RecipeRegistry, WAREHOUSE_RACK_KIND, World,
 };
 
 /// A long run's worth of every raw ingredient the shipped chain needs.
@@ -259,4 +259,44 @@ pub fn restock(world: &mut World) {
             });
         }
     }
+}
+
+/// How many units of raw ingredient `raw` one unit of `id` embodies, by
+/// recursing back through whichever recipe produces it — following **fluid**
+/// production as readily as solid, since the middle of the chain is piped.
+///
+/// Answers `1` for `raw` itself and `0` for anything nothing produces and
+/// that is not `raw` (i.e. a *different* raw ingredient: sugar carries no
+/// tomatoes). A recipe's bill is divided by how many of `id` one craft
+/// makes, because not every stage makes one: a bottler fills a case's worth
+/// of bottles from one batch, so a bottle carries an eighth of that batch.
+/// That is why this is `Fx` rather than a whole count. One copy, shared by
+/// every conservation and costing test, so a yield can never be honoured in
+/// one file and forgotten in another.
+#[allow(dead_code)]
+pub fn raw_content(id: &str, raw: &str, recipes: &RecipeRegistry) -> Fx {
+    if id == raw {
+        return Fx::ONE;
+    }
+    let Some(recipe) = recipes.ordered().iter().find(|r| {
+        r.outputs.iter().any(|(out, _)| out == id)
+            || r.fluid_outputs.iter().any(|(out, _)| out == id)
+    }) else {
+        // Produced by nothing: another raw ingredient, which embodies none
+        // of the one being counted.
+        return Fx::ZERO;
+    };
+    let per_craft = recipe
+        .outputs
+        .iter()
+        .chain(recipe.fluid_outputs.iter())
+        .find(|(out, _)| out == id)
+        .map_or(1, |(_, n)| *n);
+    let bill: Fx = recipe
+        .inputs
+        .iter()
+        .chain(recipe.fluid_inputs.iter())
+        .map(|(input, qty)| Fx::from_num(*qty) * raw_content(input, raw, recipes))
+        .sum();
+    bill / Fx::from_num(per_craft)
 }

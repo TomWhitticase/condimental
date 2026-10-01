@@ -18,6 +18,21 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-02 **A case is eight bottles; the multiplier lives on the
+  bottler.** Each `bottled_*` recipe makes 8 bottles from ONE unit of its
+  sauce, and each `boxed_*` recipe packs 8 into one case. A unit of fluid
+  everywhere upstream stays a case-sized batch, so nothing before the bottler
+  changes: the ingredient bill per case, every contract, both gates and the
+  3:2 splits stand. Do not move the 8 to the vat: a vat making 8 small units
+  lets the bottler sip them one at a time, and the BBQ mixer, which needs 8
+  at once off the same run, never starts. The bottler fills in **200 ticks**
+  because its output buffer holds exactly 8 (`MACHINE_OUTPUT_CAPACITY`) and a
+  belt lane drains one per 25 ticks. A shorter fill reads as a false
+  "backed up" stall on the load lights, so keep any bottler time at or above
+  the drain time and under the vat's 240. Conservation and costing tests
+  share one yield-aware `raw_content` in `sim_core/tests/common/mod.rs`.
+  Full record in `docs/DECISIONS.md`.
+
 - 2026-09-29 **The contracts board lists every offer and padlocks the gated
   ones; its filters are presentation.** A contract a gate holds back is ON
   the board, flagged: `ContractOfferSnapshot` carries `locked`,
