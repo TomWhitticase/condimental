@@ -1515,6 +1515,23 @@ pub struct RackSnapshot {
     pub removal_refused: bool,
 }
 
+/// Everything [`World::storage_snapshot`] is a function of, and nothing it
+/// is not: two equal keys mean two identical snapshots ([`World::storage_key`]).
+/// Opaque — it is only ever compared.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageKey {
+    owned: super::ingredients::OwnedIngredients,
+    racks: Vec<(Entity, String, TileCoord, Direction, Option<ItemId>)>,
+}
+
+/// [`RackSnapshot::blocked_filters`] and [`RackSnapshot::removal_refused`],
+/// worked out once and shared by every rack with the same bays and filter
+/// ([`World::rack_verdicts`]).
+struct RackVerdicts {
+    blocked_filters: Vec<ItemId>,
+    removal_refused: bool,
+}
+
 /// The whole storage picture in one object — what a capacity readout needs
 /// without walking the racks itself (ARCHITECTURE.md §4/§5).
 ///
@@ -2620,9 +2637,8 @@ impl World {
 
     /// Whether the current stock would still fit on `pool` (this world's
     /// [`World::bay_pool`]) if the rack `entity` gave its bays to `filter`
-    /// instead of what it gives them to now. `pool` is passed in so a
-    /// snapshot asking this of every rack and every raw folds the floor
-    /// once, not once per question.
+    /// instead of what it gives them to now — the `SetRackFilter` refusal.
+    /// A snapshot asks the same question through [`World::rack_verdicts`].
     fn rack_could_hold(&self, pool: &BayPool, entity: Entity, filter: Option<&str>) -> bool {
         let bays = self.rack_bays(entity);
         let mut pool = pool.clone();
@@ -2657,14 +2673,48 @@ impl World {
         self.storage.rack_contents(&self.ingredients.owned, &racks)
     }
 
+    /// A rack's two floor-wide verdicts — which raws it may not be reserved
+    /// for, and whether picking it up is refused — on `pool`.
+    ///
+    /// Both depend on the rack only through its bay count and its filter
+    /// ([`World::rack_could_hold`], [`World::rack_holds_stock_up`]), so a
+    /// snapshot asks once per distinct `(bays, filter)` and shares the answer
+    /// ([`World::storage_snapshot`]). Asked once per rack instead, each
+    /// question cloning the pool and walking the ledger for every raw, the
+    /// warehouse snapshot cost 5.8 ms a frame at 500 racks in a release build.
+    fn rack_verdicts(&self, pool: &BayPool, bays: u32, filter: Option<&str>) -> RackVerdicts {
+        let without = {
+            let mut pool = pool.clone();
+            pool.remove_rack(bays, filter);
+            pool
+        };
+        let blocked_filters = self
+            .raw_items
+            .iter()
+            .chain(self.raw_fluids.iter())
+            .filter(|id| filter != Some(id.as_str()))
+            .filter(|id| {
+                let mut pool = without.clone();
+                pool.add_rack(bays, Some(id));
+                !self.storage.fits(&self.ingredients.owned, &pool)
+            })
+            .cloned()
+            .collect();
+        RackVerdicts {
+            blocked_filters,
+            removal_refused: !self.storage.fits(&self.ingredients.owned, &without),
+        }
+    }
+
     /// One rack's snapshot, given the bays [`World::rack_contents`] stood
     /// in it — passed in rather than recomputed because the assignment is a
-    /// property of the whole floor: a rack cannot know its own share.
+    /// property of the whole floor: a rack cannot know its own share — and
+    /// its [`World::rack_verdicts`], passed in for the same reason.
     fn rack_snapshot(
         &self,
-        pool: &BayPool,
         entity: Entity,
         stood: &[(ItemId, u32)],
+        verdicts: &RackVerdicts,
     ) -> RackSnapshot {
         let placement = self.placement_of(entity);
         let capacity = self.storage.slot_stack();
@@ -2678,15 +2728,6 @@ impl World {
                 capacity,
             })
             .collect();
-        let filter = self.rack_filter(entity);
-        let blocked_filters = self
-            .raw_items
-            .iter()
-            .chain(self.raw_fluids.iter())
-            .filter(|id| filter.as_ref() != Some(*id))
-            .filter(|id| !self.rack_could_hold(pool, entity, Some(id)))
-            .cloned()
-            .collect();
         RackSnapshot {
             tile: self.position_of(entity),
             kind: placement.kind.clone(),
@@ -2694,9 +2735,9 @@ impl World {
             footprint: placement.footprint,
             bays: self.rack_bays(entity),
             contents,
-            filter,
-            blocked_filters,
-            removal_refused: self.rack_holds_stock_up(pool, entity),
+            filter: self.rack_filter(entity),
+            blocked_filters: verdicts.blocked_filters.clone(),
+            removal_refused: verdicts.removal_refused,
         }
     }
 
@@ -2714,7 +2755,12 @@ impl World {
             .and_then(|index| contents.get(index))
             .map(Vec::as_slice)
             .unwrap_or(&[]);
-        self.rack_snapshot(&self.bay_pool(), entity, stood)
+        let verdicts = self.rack_verdicts(
+            &self.bay_pool(),
+            self.rack_bays(entity),
+            self.rack_filter(entity).as_deref(),
+        );
+        self.rack_snapshot(entity, stood, &verdicts)
     }
 
     /// Everything a capacity readout and a warehouse render need: the two
@@ -2727,8 +2773,28 @@ impl World {
     /// assignment is decided, so it is deterministic (§3.9) even though
     /// nothing stores it.
     pub fn storage_snapshot(&self) -> StorageSnapshot {
+        // Every input read below must be in `storage_key`, or a poll gated on
+        // the key draws a stale warehouse.
         let contents = self.rack_contents();
         let pool = self.bay_pool();
+        let mut verdicts: BTreeMap<(u32, Option<ItemId>), RackVerdicts> = BTreeMap::new();
+        let racks = self
+            .topology
+            .racks
+            .iter()
+            .zip(contents.iter())
+            .map(|(&entity, stood)| {
+                let bays = self.rack_bays(entity);
+                let filter = self.rack_filter(entity);
+                let verdict =
+                    verdicts
+                        .entry((bays, filter))
+                        .or_insert_with_key(|(bays, filter)| {
+                            self.rack_verdicts(&pool, *bays, filter.as_deref())
+                        });
+                self.rack_snapshot(entity, stood, verdict)
+            })
+            .collect();
         StorageSnapshot {
             base_cap: self.storage.base_cap(),
             slot_stack: self.storage.slot_stack(),
@@ -2737,12 +2803,37 @@ impl World {
             free_bays: pool
                 .shared()
                 .saturating_sub(self.storage.shared_used(&self.ingredients.owned, &pool)),
+            racks,
+        }
+    }
+
+    /// What [`World::storage_snapshot`] would be built from, as a value to
+    /// compare: equal keys, identical snapshots. The ledger and the racks in
+    /// topology order, each with what places it and its filter — the catalog
+    /// and the raw lists a snapshot also reads never change in a world.
+    ///
+    /// The warehouse is polled, not dirtied (see [`StorageSnapshot`]), and
+    /// at 500 racks a snapshot built and parsed every frame cost the
+    /// presentation layer 24 ms in a debug build. Stock and racks change on
+    /// a hopper refill or a player action, not every tick, so the poll asks
+    /// for this first and skips the read when it has not moved.
+    pub fn storage_key(&self) -> StorageKey {
+        StorageKey {
+            owned: self.ingredients.owned.clone(),
             racks: self
                 .topology
                 .racks
                 .iter()
-                .zip(contents.iter())
-                .map(|(&entity, stood)| self.rack_snapshot(&pool, entity, stood))
+                .map(|&entity| {
+                    let placement = self.placement_of(entity);
+                    (
+                        entity,
+                        placement.kind,
+                        self.position_of(entity),
+                        placement.direction,
+                        self.rack_filter(entity),
+                    )
+                })
                 .collect(),
         }
     }
