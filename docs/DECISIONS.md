@@ -50,8 +50,10 @@ matches what code comments and data files cite.
   and a choice over what a spoiled item becomes. Dropping it leaves mayo's
   real obstacles. One is the pipe resolver: one recipe drinking two raw
   fluids (oil and vinegar) is the case `World::resolve_network_fluids` cannot
-  name (issue #184). The other is fluid-tint headroom for a near-white
-  fluid (issue #131).
+  name (issue #184). The other is the fluid tint: a cream or near-white mayo
+  would fail `test_fluid_gallery.gd`'s `FLUID_TINT_MIN_SATURATION` floor
+  (0.35, from issue #100), which exists because a grey-ish fluid vanishes
+  against the steel pipe.
 
   **What it does not decide.** Corrosion and durability for hot sauce
   (tier 5) stay an open question in GAMEPLAY §11. The rest of mayo's design

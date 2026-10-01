@@ -264,7 +264,8 @@ GAMEPLAY.md, ARCHITECTURE.md §11 and the README roadmap say so, and §11's
 "how is spoilage modelled" question is closed. Corrosion for hot sauce is
 still open. Two real obstacles to mayo remain: one recipe drinking two raw
 fluids (oil and vinegar) is a pipe run the resolver cannot name (#184), and
-a near-white fluid has little tint headroom (#131). Mayo's own plan is next.
+a cream-coloured fluid would fail the fluid-tint saturation floor that issue
+#100 added (`test_fluid_gallery.gd`). Mayo's own plan is next.
 
 ### 2026-10-01 — A red check is rerun locally, and a local pass is enough
 

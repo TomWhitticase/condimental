@@ -47,9 +47,9 @@ once been exercised in play. **The job of the second sauce is to turn that
 pillar on**, not to add content for its own sake.
 
 BBQ is the right one because it needs no mechanic that GAMEPLAY.md §11
-still lists as undecided. Mayo (tier 4) needed spoilage when this was written — dropped from the game
-2026-10-02, see GAMEPLAY.md §11; hot sauce (tier 5)
-needs corrosion. Both would mean settling a large open question before we
+still lists as undecided. Mayo (tier 4) needed spoilage when this was
+written (dropped from the game 2026-10-02, see GAMEPLAY.md §11); hot sauce
+(tier 5) needs corrosion. Both would mean settling a large open question before we
 have shown that a second line is even fun. BBQ needs neither, and it is
 tier 3 in §2's existing table.
 
