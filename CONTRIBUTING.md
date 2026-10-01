@@ -63,9 +63,10 @@ gh pr checks --watch
 gh pr merge --squash --delete-branch   # only after a VERDICT: APPROVED review
 ```
 
-**No pull request merges before it is reviewed**: green checks — only the owner
-waives those, and only when they could not run at all (`gh pr merge --admin`;
-see `docs/WORKFLOW.md`) — *and* a comment review whose first line is
+**No pull request merges before it is reviewed**: green checks — a check that
+is red on GitHub may instead pass when its own command is rerun locally, after
+merging `origin/main` into the branch, and the PR then lands with `gh pr merge
+--admin` (see `docs/WORKFLOW.md`) — *and* a comment review whose first line is
 `VERDICT: APPROVED`, from a reviewer that does not share the author's context:
 a person or session that did not write the branch, or a fresh agent given only
 the PR number and the `review` skill in `.claude/skills/`, never the author's

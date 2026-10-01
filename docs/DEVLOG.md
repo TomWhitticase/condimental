@@ -253,6 +253,19 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-01 — A red check is rerun locally, and a local pass is enough
+
+The owner widened the merge rule. A PR check that is red on GitHub, for any
+reason, is rerun locally once `origin/main` has been merged into the branch.
+If it passes, the green-checks gate is met, and the agent merges with `gh pr
+merge --admin` without asking again. Before this, `--admin` was the owner's
+override for checks that could not run at all. GitHub Actions minutes keep
+running out, and every check that gates a merge (all but `label` and `review`)
+is a command that runs locally. The review verdict is still required, and a
+check that fails locally is still the branch's to fix. The rule is updated in
+`CLAUDE.md`, `CONTRIBUTING.md`, `docs/WORKFLOW.md`, the `open-pr` skill and
+both decision files.
+
 ### 2026-10-01 — A belt feeds a machine only through its inlet face (#1)
 
 The owner settled the question the pipes & conveyors close-out left open:
