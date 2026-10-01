@@ -114,6 +114,41 @@ matches what code comments and data files cite.
      down (still frozen), so the header carries `Feature freeze: on|off`.
      `--write` sets it on at 20 and off below 10, and `--check` fails a state
      that contradicts the total at either end.
+
+- 2026-10-02: **A plain `wrap-it-up` that ends green removes its own
+  worktree.** (Owner's rule: "by default if i use the wrap it up skill if the
+  banner is green it should go ahead and close, the only time it doesnt is if
+  i use wrap it up skill and pass in a custom ask".)
+
+  **What it replaces.** The skill's step 6 said removing the tree "cannot be
+  done from inside it" and handed the user a `git -C <main-checkout> worktree
+  remove` command to paste. That is true of a raw `git worktree remove`
+  started from the tree it deletes. It is not true of the Orca CLI, which
+  deregisters an Orca worktree and removes it from git in one call. The owner
+  had asked for the worktree closed (PR #212's wrap-up) and still had to run
+  it by hand.
+
+  **The rule.** The skill's step 8 runs a guard before the banner, then
+  `orca worktree rm --worktree path:<path>` as the session's final tool call,
+  never with `--force`. The removal is last because it deletes the shell's
+  working directory, and Orca may close the terminal with it. If it refuses,
+  the call returns and the session is still alive. The tree held something
+  step 6 missed, so the green banner was wrong, and the session follows it
+  with the red one.
+
+  **The guard, and why `orca worktree current` alone is not one.** Orca
+  registers the primary checkout as a worktree too (`isMainWorktree: true`),
+  so "it names a worktree" would let the step delete the main checkout; the
+  first review of #217 caught this. The guard prints `REMOVABLE <path>` only
+  when `isMainWorktree` is false and Orca's path equals
+  `git rev-parse --show-toplevel`, which holds from any subdirectory. A
+  non-Orca directory makes it error out, which keeps the tree.
+
+  **When it keeps the tree.** A red banner, because the tree may be the only
+  copy of the work. A custom ask passed with the skill, because anything
+  added is the user steering. The guard printing `KEEP`. In each case the
+  removal commands are printed instead.
+
 - 2026-10-01: **A red check that passes when rerun locally meets the
   green-checks gate.** (Owner's rule: "If CI checks fail on a PR then run them
   locally, and if they pass, then thats good enough (This is because we are

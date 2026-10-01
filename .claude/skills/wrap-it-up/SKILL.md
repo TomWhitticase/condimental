@@ -1,6 +1,6 @@
 ---
 name: wrap-it-up
-description: Close out a session so the worktree can be deleted without losing anything — finish the work in hand, land every branch through a merged pull request, sweep for uncommitted/unpushed/stashed work, and end with an unmissable all-caps SAFE or NOT SAFE banner. Use when the user says wrap it up, we're done, close this session, or before any worktree or session is torn down.
+description: Close out a session so the worktree can be deleted without losing anything — finish the work in hand, land every branch through a merged pull request, sweep for uncommitted/unpushed/stashed work, end with an unmissable all-caps SAFE or NOT SAFE banner, and on a green banner remove the worktree itself unless the user passed a custom ask. Use when the user says wrap it up, we're done, close this session, or before any worktree or session is torn down.
 ---
 
 # Wrapping up a session
@@ -146,14 +146,8 @@ Then:
 - **Never `pkill godot` by name.** Other worktrees run headless Godot; kill by
   a PID you captured yourself, or not at all.
 
-Removing the tree cannot be done from inside it, and `ExitWorktree` is a no-op
-for a worktree this session did not create (an Orca worktree, for instance).
-Hand the user the command rather than half-running it:
-
-```
-git -C <main-checkout> worktree remove <this-worktree>
-git -C <main-checkout> branch -D <branch>
-```
+Removing the tree is step 8, and only after the banner. `ExitWorktree` is a
+no-op for a worktree this session did not create, so do not reach for it.
 
 ## 7. Say it so it cannot be missed
 
@@ -188,8 +182,9 @@ the next session can pick it up without reading a transcript:
 ````
 
 Under either banner, list: the PR URLs and whether each merged, any issue
-numbers filed and why they were not fixed, and the exact worktree-removal
-command. Under the red one, add what is unfinished, where it is (branch,
+numbers filed and why they were not fixed, and either "removing this
+worktree now" (step 8) or the exact removal command and why you are not
+running it. Under the red one, add what is unfinished, where it is (branch,
 file, PR), the next concrete step, and — separately and in as many words —
 **whether the tree can still be deleted safely**. "PR #N is pushed and
 approved, its merge held for the owner; the worktree can go, the work cannot
@@ -201,6 +196,68 @@ the number learns to trust the rest of the banner less.
 **Never print the green banner with work outstanding.** The banner is a
 promise; a wrong one costs someone their work, or merges something nobody
 reviewed. When in doubt, print the red banner and say what you are unsure of.
+
+## 8. Close the worktree yourself
+
+The owner's rule (2026-10-02): **a plain `wrap-it-up` that ends on the green
+banner removes its own worktree.** The user should not have to paste a
+command to finish what they asked for. Remove it with the Orca CLI, which
+deregisters the worktree from Orca and removes it from git in one step:
+
+First, before the banner, prove the tree is a linked Orca worktree and not
+the primary checkout. Orca registers the primary checkout as a worktree too,
+so naming *a* worktree proves nothing. This prints `REMOVABLE <path>` only
+when `isMainWorktree` is false and Orca's path is git's top level, which holds
+from any subdirectory:
+
+```
+orca worktree current --json | python3 -c '
+import json, subprocess, sys
+w = json.load(sys.stdin)["result"]["worktree"]
+top = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
+print("REMOVABLE " + w["path"] if not w["isMainWorktree"] and w["path"] == top else "KEEP")'
+```
+
+Then, last of all (below), remove that exact path:
+
+```
+orca worktree rm --worktree path:<path>    # never --force
+```
+
+It deletes the checked-out branch only when Orca can prove it is merged. A
+squash-merged branch usually cannot be proved merged, so it often survives,
+which is expected and not a failure. It is merged, and
+`git branch -D <branch>` from any other checkout clears it. Leave `--force`
+off. If the command refuses, it returned and you are still running.
+Something is still in the tree that step 6 missed, so the green banner was
+wrong. Follow it straight away with the red banner, saying what Orca found
+and that the worktree was kept.
+
+**Do not remove it** when any of these is true. Print the removal commands
+under the banner instead:
+
+- **The banner is red.** Work is outstanding, and the tree may be the only
+  copy of it.
+- **The user passed a custom ask with the skill** (any argument after
+  `/wrap-it-up`, such as "wrap it up but keep the worktree", or "wrap up
+  #212 only"). A plain invocation means close. Anything added is the user
+  steering, so do what it says and leave the worktree in place unless it
+  says to remove it.
+- **The check above printed `KEEP`, or failed.** This is the primary checkout,
+  `orca worktree current` named no worktree, or its path is not this tree.
+
+In all three cases, print these under the banner for the user to run:
+
+```
+git -C <main-checkout> worktree remove <this-worktree>
+git -C <main-checkout> branch -D <branch>
+```
+
+**It is the very last thing you do.** The command deletes the directory the
+shell is running in, and Orca may close this session's terminal with it, so
+nothing after it can be relied on to run or be seen. Write the banner and
+everything under it first, ending with "removing this worktree now". Then
+make the removal the final tool call.
 
 Deeper: `docs/WORKFLOW.md` ("GitHub: branches, pull requests and issues",
 "Closing out a session", "Fix it, or file it — and prefer fixing it",
