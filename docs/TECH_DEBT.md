@@ -2,13 +2,15 @@
 
 **Changes since last overview audit: 3** · **Debt total: 0 points**
 
+Feature freeze: **off** — set by `scripts/tech-debt-status.sh --write`.
 Last audit: none yet (the counter started 2026-10-01).
 Audit baseline: `cb7d24e` — the `main` commit the change count runs from.
 
 | Gauge | Threshold | What happens |
 |---|---|---|
 | Changes since last audit | **25** | An overview audit is due before the next feature starts |
-| Debt total | **20 points** | Feature freeze: no new features until the total is back under 10 |
+| Debt total | **20 points** | Feature freeze starts: no new features |
+| Freeze lifts below | **10 points** | A freeze holds until the total drops below this, so it pays down real debt rather than one item |
 
 ## Keeping the gauges
 
@@ -26,7 +28,12 @@ hand-bumped number undercounts silently when two open PRs make the same edit.
 - The debt total must equal the sum of the items, item numbers must be
   unique, and every item heading must be in the exact format below —
   `scripts/check-invariants.sh` fails otherwise, so a silent merge of two
-  edits to the total is caught.
+  edits to the total is caught. The freeze line must agree with the totals
+  too: on at or above the freeze threshold, off below the lifting one.
+- Every PR edits the header line, so a PR open while others merge will
+  conflict there. Take either side, then run `--write` again — it recounts
+  from git, so the side you took does not matter. Never run `--write` after
+  the branch has merged; it would count the branch twice.
 
 An **overview audit** is a session that reads across the codebase rather than
 one change: it checks the design docs against the code, looks for duplicated

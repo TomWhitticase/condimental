@@ -25,7 +25,8 @@ See [WORKFLOW.md](WORKFLOW.md).
   audit, an audit comes before the next feature. Both gauges come from
   `scripts/tech-debt-status.sh`: the change count is derived from git, never
   hand-bumped, and `check-invariants.sh` holds the header total to the sum of
-  the items. Full record in `docs/DECISIONS.md`.
+  the items. The header records whether a freeze is in force, since 10–19
+  points means frozen only on the way down. Full record in `docs/DECISIONS.md`.
 - 2026-10-01 **A red check that passes when rerun locally meets the
   green-checks gate.** When a PR check is red on GitHub, for any reason,
   merge `origin/main` into the branch, push, and run the same command

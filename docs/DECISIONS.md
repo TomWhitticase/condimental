@@ -58,6 +58,11 @@ matches what code comments and data files cite.
      cannot be derived from git, so `check-invariants.sh` fails when it
      disagrees with the sum of the items, an item number repeats, or a `TD-`
      heading is not in the exact form the sum reads.
+  5. **The freeze is recorded, not recomputed.** A pure function of the
+     total cannot tell 15 points on the way up (no freeze) from 15 on the way
+     down (still frozen), so the header carries `Feature freeze: on|off`.
+     `--write` sets it on at 20 and off below 10, and `--check` fails a state
+     that contradicts the total at either end.
 - 2026-10-01: **A red check that passes when rerun locally meets the
   green-checks gate.** (Owner's rule: "If CI checks fail on a PR then run them
   locally, and if they pass, then thats good enough (This is because we are
