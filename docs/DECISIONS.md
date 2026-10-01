@@ -25,6 +25,38 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-02: **There is no spoilage.** (Owner: "spoilage is something i
+  actually dont really think we should implement in the game anymore, so lets
+  remove spoilage from any planning docs".)
+
+  **What it replaces.** GAMEPLAY §2 made tier 4 (mayonnaise) an
+  equipment-category gate built on perishability. Eggs and oil spoiled
+  without cold storage, refrigeration was the capital purchase, and §4/§8
+  described a cold chain of refrigerated storage and transport as a new
+  factory-layout concern. §9 and ARCHITECTURE §11 both listed a spoilage
+  component as owed before tier 4, and §11 held "full ECS component or
+  simpler flag?" open until then. None of it was ever built.
+
+  **The rule.** Nothing perishes. Tier 4 is still mayonnaise and still an
+  equipment-category gate. The equipment is the emulsifier, because an
+  emulsion is a process the mixer cannot do. That needs no new axis to
+  justify a purchase.
+
+  **Context.** This came up while planning mayo as the next sauce, after a
+  burger-sauce idea was set aside because real burger sauce is mostly mayo.
+  A spoilage design would have been the bulk of that plan. It meant a
+  per-item countdown on belts and in storage, a "what counts as cold" rule
+  (cold copies of every logistics kind, or a chiller with an area of effect),
+  and a choice over what a spoiled item becomes. Dropping it leaves mayo's
+  real obstacles. One is the pipe resolver: one recipe drinking two raw
+  fluids (oil and vinegar) is the case `World::resolve_network_fluids` cannot
+  name (issue #184). The other is fluid-tint headroom for a near-white
+  fluid (issue #131).
+
+  **What it does not decide.** Corrosion and durability for hot sauce
+  (tier 5) stay an open question in GAMEPLAY §11. The rest of mayo's design
+  (recipe, gate, contracts, its role as a base sauce) is for its own plan.
+
 - 2026-10-01: **A red check that passes when rerun locally meets the
   green-checks gate.** (Owner's rule: "If CI checks fail on a PR then run them
   locally, and if they pass, then thats good enough (This is because we are

@@ -18,6 +18,15 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-02 **There is no spoilage.** No item, ingredient, intermediate or
+  fluid perishes, so there is no freshness countdown, no spoilage component,
+  no refrigeration equipment tier and no cold chain. Mayonnaise (GAMEPLAY §2
+  tier 4) is gated by its new machine, the emulsifier, which is the capital
+  purchase. Corrosion (tier 5) is a separate question and stays open. The
+  owner's call. Do not plan spoilage back in without the owner. Binds
+  `docs/GAMEPLAY.md` §0/§2/§4/§8/§9/§10/§11, `docs/ARCHITECTURE.md` §11 and
+  `README.md`'s roadmap.
+
 - 2026-10-01 **A red check that passes when rerun locally meets the
   green-checks gate.** When a PR check is red on GitHub, for any reason,
   merge `origin/main` into the branch, push, and run the same command
