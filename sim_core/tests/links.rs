@@ -806,6 +806,10 @@ fn every_link_in_the_reference_chain_is_mirrored_by_its_neighbour() {
             TileSnapshot::WarehouseRack { .. } => {
                 unreachable!("the reference chain places no warehouse rack")
             }
+            // Likewise spelled out: `tests/crossings.rs` owns the crossing.
+            TileSnapshot::Crossing { .. } => {
+                unreachable!("the reference chain places no crossing")
+            }
         })
     };
 
@@ -885,6 +889,7 @@ fn every_link_in_the_reference_chain_is_mirrored_by_its_neighbour() {
                     }
                 }
             }
+            Some(Links::Crossing(_)) => unreachable!("the reference chain places no crossing"),
         }
     }
     assert!(

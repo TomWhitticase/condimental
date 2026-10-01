@@ -18,6 +18,17 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-01 **A belt and a pipe cross as one `crossing` entity, never as two
+  layers.** Place a pipe across a belt (or a belt across a pipe) and that
+  tile becomes kind `crossing`, carrying a `BeltSegment` and a `PipeTile`;
+  `topology.grid` keeps one occupant per tile, so `Remove`/`Rotate`/hover/
+  the ghost never ask "which layer?". Right angles only; the placement's
+  `Direction` is the belt's and the pipe runs `rotate_cw` of it. Remove
+  refunds both parts; rotate turns both; nothing is bought. The pipe is a
+  gantry lifted a tile (`CROSSING_LIFT`) because the flat pipe runs through
+  the belt's items. The ghost obeys `preview_command_json`, which shares
+  `plan_place` with the command. Saves as `SavedBody::Crossing`, still
+  version 7. Full record in `docs/DECISIONS.md`.
 - 2026-09-29 **The contracts board lists every offer and padlocks the gated
   ones; its filters are presentation.** A contract a gate holds back is ON
   the board, flagged: `ContractOfferSnapshot` carries `locked`,

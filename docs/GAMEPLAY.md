@@ -251,6 +251,15 @@ implementation history (epics, tickets, balancing passes) behind each one.
   `recipes.ron`/`machines.ron`. Derived sauces and variants (§3) need no new
   mechanism — a recipe listing another sauce item as an input is the
   standard Factorio-style intermediate-product pattern.
+- **A belt and a pipe may cross, at right angles, on one tile.** Place a pipe
+  onto a belt (or a belt onto a pipe) and the tile becomes a `crossing`: one
+  entity that is both a belt carrying items and a pipe carrying fluid, drawn
+  as the pipe lifted over the lane on a gantry. There is nothing to buy and
+  nothing on the hotbar — the ghost turns valid over a perpendicular belt and
+  says so. A parallel one is refused (that is a pipe laid along a belt, not
+  across it). Removing takes the whole tile and refunds both a belt and a
+  pipe; rotating turns both. No other pair stacks. (Full record:
+  `docs/DECISIONS.md`, 2026-10-01.)
 - **A machine kind may name several recipes, and what is plumbed into a
   placed machine decides which one it runs** — first fully-satisfied wins,
   `recipes.ron` file order is the tiebreak, and there is **no player-facing

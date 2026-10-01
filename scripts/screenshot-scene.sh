@@ -307,6 +307,12 @@
 # placed (the INVALID state), or --remove-mode to enter remove mode over a
 # placed building. These are the only way to review build mode without a live
 # interactive session — the same problem the hover flags solve for tooltips.
+# Add --ghost-at TX,TY[,FACING] to hold that ghost over one chosen tile at one
+# facing instead; the sim, not the flag, says whether it is valid there. The
+# crossing's two frames are a pipe across the line's belt and along it:
+#
+#   scripts/screenshot-scene.sh valid.png --fixture crossing --ghost pipe --ghost-at 6,0,north
+#   scripts/screenshot-scene.sh refused.png --fixture crossing --ghost pipe --ghost-at 6,0,east
 #
 # Pass one of --hover / --hover-pipe / --hover-vat / --hover-hopper /
 # --hover-tank / --hover-dock / --hover-splitter to aim the cursor over the

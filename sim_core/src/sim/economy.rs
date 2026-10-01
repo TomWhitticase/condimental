@@ -615,6 +615,12 @@ impl Economy {
             .map(|gate| gate.progress(&self.lifetime_boxes_sold))
     }
 
+    /// Whether [`Self::try_spend`] would take `amount` — its one rule, asked
+    /// without spending, so a preview and the spend check the same thing.
+    pub fn can_spend(&self, amount: Money) -> bool {
+        amount > Money::ZERO && self.money >= amount
+    }
+
     /// Spends `amount` if there is enough money, and reports whether it
     /// did. **All or nothing:** on `false` not a single unit has moved, so
     /// a caller can check-and-spend in one step without ever leaving a
@@ -627,7 +633,7 @@ impl Economy {
     /// debits the same field a contract delivery credits. A non-positive
     /// `amount` is refused rather than treated as a free purchase.
     pub fn try_spend(&mut self, amount: Money) -> bool {
-        if amount <= Money::ZERO || self.money < amount {
+        if !self.can_spend(amount) {
             return false;
         }
         self.money -= amount;
