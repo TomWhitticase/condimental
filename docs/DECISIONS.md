@@ -49,11 +49,15 @@ matches what code comments and data files cite.
      which git merges without a conflict, so the count undercounts silently.
      `scripts/tech-debt-status.sh` counts first-parent commits on `main`
      since an audit-baseline sha instead (squash merges are one per PR), and
-     `--write` refreshes the header snapshot. A stale header is at worst one
-     PR behind and heals on the next one; the live number is always one
-     command away. The debt total cannot be derived from git, so
-     `check-invariants.sh` fails when it disagrees with the sum of the items
-     or an item number repeats.
+     `--write` refreshes the header snapshot. The snapshot can still lag —
+     by as many PRs as were open alongside the last one to merge, since
+     their identical `--write` edits merge cleanly too — but it never drifts
+     further: each `--write` recounts from git rather than adding to the old
+     number, and the live count is always one command away. That is why the
+     freeze and audit rules read the script, not the header. The debt total
+     cannot be derived from git, so `check-invariants.sh` fails when it
+     disagrees with the sum of the items, an item number repeats, or a `TD-`
+     heading is not in the exact form the sum reads.
 - 2026-10-01: **A red check that passes when rerun locally meets the
   green-checks gate.** (Owner's rule: "If CI checks fail on a PR then run them
   locally, and if they pass, then thats good enough (This is because we are

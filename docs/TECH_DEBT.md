@@ -13,18 +13,20 @@ Audit baseline: `cb7d24e` — the `main` commit the change count runs from.
 ## Keeping the gauges
 
 **Run `scripts/tech-debt-status.sh` before starting a feature** — it prints
-both gauges live and says if a threshold is passed. The header is a snapshot:
-the change count is derived from git (merged PRs on `main` since the audit
-baseline), because a hand-bumped number undercounts silently when two open
-PRs both make the same edit.
+both gauges live and says if a threshold is passed; the rules above read its
+output, not the header. The header is a snapshot that can lag by a few PRs
+when several were open at once. The change count is derived from git (merged
+PRs on `main` since the audit baseline, one squash commit each), because a
+hand-bumped number undercounts silently when two open PRs make the same edit.
 
 - Every PR to `main` runs `scripts/tech-debt-status.sh --write` before it
   pushes (the `open-pr` skill's step 4), which refreshes the header and counts
   itself. Orca workers' PRs into an integration branch skip it; the
   integration PR into `main` counts once.
-- The debt total must equal the sum of the items and item numbers must be
-  unique — `scripts/check-invariants.sh` fails otherwise, so a silent merge
-  of two edits to the total is caught.
+- The debt total must equal the sum of the items, item numbers must be
+  unique, and every item heading must be in the exact format below —
+  `scripts/check-invariants.sh` fails otherwise, so a silent merge of two
+  edits to the total is caught.
 
 An **overview audit** is a session that reads across the codebase rather than
 one change: it checks the design docs against the code, looks for duplicated
@@ -61,7 +63,7 @@ total in the header equal to the sum of the list.
 
 ## Items
 
-Format: `### TD-N · <points> pt · <short title>`, then two to four sentences —
+Format, exactly: `### TD-N · <points> pt · <short title>`, then two to four sentences —
 where it is (file or system), what is wrong with it, and why it costs us.
 Number items in order added; never reuse a number.
 

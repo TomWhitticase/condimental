@@ -31,6 +31,15 @@ if [ "$mode" = "--check" ]; then
     echo "FAIL: docs/TECH_DEBT.md header says ${header_total:-nothing} debt points, its items sum to $sum" >&2
     status=1
   fi
+  # The sum above reads only the exact heading form, so a near-miss
+  # ("2 points", "####", a hyphen for the dot) would drop out of it silently.
+  malformed="$(grep -nE 'TD-[0-9]' "$doc" | grep -E '^[0-9]+:#' \
+    | grep -vE '^[0-9]+:### TD-[0-9]+ · [0-9]+ pt · .+$')"
+  if [ -n "$malformed" ]; then
+    echo "FAIL: docs/TECH_DEBT.md item headings not in the form '### TD-N · P pt · title':" >&2
+    echo "$malformed" >&2
+    status=1
+  fi
   dupes="$(sed -nE 's/^### (TD-[0-9]+) .*/\1/p' "$doc" | sort | uniq -d)"
   if [ -n "$dupes" ]; then
     echo "FAIL: docs/TECH_DEBT.md reuses item numbers: $dupes" >&2
@@ -50,10 +59,16 @@ merged="$(git -C "$repo_root" rev-list --first-parent --count "$baseline..origin
 
 change_limit="$(sed -nE 's/^\| Changes since last audit \| \*\*([0-9]+)\*\*.*/\1/p' "$doc")"
 debt_limit="$(sed -nE 's/^\| Debt total \| \*\*([0-9]+) points\*\*.*/\1/p' "$doc")"
+if [ -z "$change_limit" ] || [ -z "$debt_limit" ]; then
+  echo "docs/TECH_DEBT.md's threshold table no longer reads as '| Changes since last audit | **N** |' and '| Debt total | **N points** |'" >&2
+  exit 1
+fi
 
 changes="$merged"
 if [ "$mode" = "--write" ]; then
-  changes=$((merged + 1))
+  # This branch is one more change, unless it is main itself (nothing unmerged).
+  ahead="$(git -C "$repo_root" rev-list --count origin/main..HEAD)"
+  [ "$ahead" -gt 0 ] && changes=$((merged + 1))
   sed -i.bak -E \
     -e "s/\*\*Changes since last overview audit: [0-9]+\*\*/**Changes since last overview audit: $changes**/" \
     -e "s/\*\*Debt total: [0-9]+ points?\*\*/**Debt total: $sum points**/" "$doc"
