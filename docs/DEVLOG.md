@@ -253,6 +253,14 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-01 — wrap-it-up removes its own worktree on a green banner
+
+A plain `wrap-it-up` that ends green now runs `orca worktree rm` on its own
+worktree as its final step, instead of handing the user a command to paste.
+A guard first checks that the tree is a linked Orca worktree, so the primary
+checkout is never removed. A red banner or a custom ask passed with the skill
+keeps the tree. The full record is in `docs/DECISIONS.md`.
+
 ### 2026-10-01 — A red check is rerun locally, and a local pass is enough
 
 The owner widened the merge rule. A PR check that is red on GitHub, for any
