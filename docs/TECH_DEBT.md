@@ -1,6 +1,6 @@
 # CONDIMENTAL — Tech debt
 
-**Changes since last overview audit: 0** · last audit: none yet (counter
+**Changes since last overview audit: 1** · last audit: none yet (counter
 started 2026-10-01) · **Debt total: 0 points**
 
 | Gauge | Threshold | What happens |
