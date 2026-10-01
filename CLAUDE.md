@@ -42,9 +42,10 @@ empty, and the player buys and places every tile.
   also waits on the owner holds only the *merge*. On `CHANGES REQUESTED`, fix
   and send a fresh reviewer; if none can be launched, leave the PR open and
   say it is waiting on review. A check that is red on GitHub is rerun
-  locally; if the same command passes here, that is good enough and the PR
-  lands with `gh pr merge --admin` (WORKFLOW.md) — never past the verdict, and
-  never past a check that fails locally too.
+  locally after merging `origin/main` into the branch; if the same command
+  passes here, that is good enough and the PR lands with
+  `gh pr merge --admin` (WORKFLOW.md) — never past the verdict, and never
+  past a check that fails locally too.
 - **Every PR body shows the change in a screenshot** — render with
   `scripts/screenshot-scene.sh`, read it, publish with
   `scripts/pr-screenshot.sh`, paste its markdown. A hook and CI both refuse a

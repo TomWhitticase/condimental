@@ -43,8 +43,9 @@ matches what code comments and data files cite.
   tree. The evidence that counts is then the same command passing locally. If
   every red check does, the gate is met and the agent merges with `--admin`
   without a fresh go-ahead. Branch protection still requires `lint`, which is
-  why `--admin` is needed at all.
-  that passed, because the body is what `main`'s history keeps.
+  why `--admin` is needed at all. The squash body names each red check and
+  the local command that passed, because the body is what `main`'s history
+  keeps.
 
   **What it does not cover.** The review verdict is a separate gate and is
   never met locally. A check that fails locally too is the branch's to fix,

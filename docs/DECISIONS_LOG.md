@@ -28,7 +28,7 @@ See [WORKFLOW.md](WORKFLOW.md).
   still the branch's to fix, and an unrerun check still blocks. `label` and
   `review` have no local command and gate nothing, so they are exempt. The
   owner's reason: Actions minutes run out, and every gating check can be run
-  locally. Widens the 2026-09-27 `--admin` entry below.
+  locally. Widens the 2026-09-27 `--admin` entry below. Binds `CLAUDE.md`,
   `CONTRIBUTING.md`, `docs/WORKFLOW.md` and the `open-pr` skill.
 
 - 2026-09-29 **The contracts board lists every offer and padlocks the gated

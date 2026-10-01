@@ -137,25 +137,25 @@ a real merge commit only when each commit is a reviewed unit in its own right,
 as in a ticketed epic.
 
 **Do not merge** a PR with no `VERDICT: APPROVED`, one whose checks are still
-running or red *and* not yet passed locally (below), one the owner
-design doc, bumps `gdext`, or changes the save format. Leave **an approved
-one** open, give the URL, and say what it waits on. Neither of the other two
-verdict states is a "leave it open": no verdict means step 5 is not finished —
-launch the reviewer — and `CHANGES REQUESTED` means rework, per the paragraph
-above.
+running or red *and* not yet passed locally (below), one the owner asked to
+review, or one that deviates from a design doc, bumps `gdext`, or changes the
+save format. Leave **an approved one** open, give the URL, and say what it
+waits on. Neither of the other two verdict states is a "leave it open": no
+verdict means step 5 is not finished — launch the reviewer — and `CHANGES
+REQUESTED` means rework, per the paragraph above.
 
-**A red check is rerun locally; a local pass is good enough.** When a check
-is red on the PR, for any reason, first merge `origin/main` into the branch
-and push, so what you test is what would land. Then run each red check's own
-command locally (the "What CI runs" table in `docs/WORKFLOW.md` names each
-one). `label` and `review` have no local command and gate nothing, so a red
-one is ignored. If every other red check passes, merge with
-`gh pr merge --squash --delete-branch --admin`; there is no need to ask the
-owner first. Branch protection makes `--admin` necessary: a plain merge
-answers "the base branch policy prohibits the merge", which nothing on the
-branch fixes. Never use it for a check that fails locally too, for a check
-you did not rerun, or instead of the verdict. Put the red checks and the
-local commands that passed in the squash body.
+**A red check is rerun locally; a local pass is good enough.** When a check is
+red on the PR, for any reason, first merge `origin/main` into the branch,
+resolve any conflict and push, so what you test is what would land. Then run
+each red check's own command locally (the "What CI runs" table in
+`docs/WORKFLOW.md` names each one). `label` and `review` have no local command
+and gate nothing, so a red one is ignored. If every other red check passes,
+merge with `gh pr merge --squash --delete-branch --admin`; there is no need to
+ask the owner first. Branch protection makes `--admin` necessary: a plain
+merge answers "the base branch policy prohibits the merge", which nothing on
+the branch fixes. Never use it for a check that fails locally too, for a check
+you did not rerun, or instead of the verdict. Put the red checks and the local
+commands that passed in the squash body.
 
 ## Afterwards
 
