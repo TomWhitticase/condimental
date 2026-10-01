@@ -243,9 +243,9 @@ does not exist.
 
 Then **get it reviewed, and land it** — an open PR is unfinished work until it
 merges. It is left open only when it is approved and its merge is held (by
-checks not yet green, by the task, or by the owner, below), when it is handed
-over explicitly with its latest verdict named, or when no reviewer could be
-launched at all:
+checks neither green nor passed when rerun locally, by the task, or by the
+owner, below), when it is handed over explicitly with its latest verdict
+named, or when no reviewer could be launched at all:
 
 ```
 gh pr checks <N> --watch      # commitlint must pass; a red PR is not done
@@ -441,9 +441,9 @@ and the banner that reports it. Three rules it exists to enforce:
   If it genuinely cannot land, say so plainly and leave the worktree in place;
   do not report a clean close over the top of it.
 - **A PR of yours ends the session open only if it is approved and its merge
-  is held (by checks not yet green, by the task, or by the owner), or it is
-  explicitly handed over with its latest verdict named, or no reviewer could
-  be launched at all.** You cannot review what you wrote, but you can launch a
+  is held (by checks neither green nor passed when rerun locally, by the task,
+  or by the owner), or it is explicitly handed over with its latest verdict
+  named, or no reviewer could be launched at all.** You cannot review what you wrote, but you can launch a
   context-free reviewer subagent for it (above) — and you must wait for its
   verdict before you close, because the subagent does not outlive the session.
   A `CHANGES REQUESTED` verdict is work still in hand: fix it and get a fresh
