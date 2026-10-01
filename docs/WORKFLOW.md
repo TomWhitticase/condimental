@@ -433,9 +433,9 @@ below.
 
 The `wrap-it-up` skill is the procedure, including the sweep that proves it
 and the banner that reports it. On a green banner it then removes its own
-worktree with `orca worktree rm --worktree current`, unless the user passed a
-custom ask with the skill (the owner's rule, 2026-10-01). Three rules it
-exists to enforce:
+worktree with `orca worktree rm`, unless the user passed a custom ask with the
+skill or the tree is the primary checkout (the owner's rule, 2026-10-01; the
+skill's step 8). Three rules it exists to enforce:
 
 - **Being near the end of a session is not a reason to file an issue.** The
   gate above is unchanged at the close: finish it, drop it deliberately, or —

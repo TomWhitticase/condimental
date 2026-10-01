@@ -18,6 +18,16 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-01 **A plain `wrap-it-up` that ends green removes its own
+  worktree.** It runs `orca worktree rm --worktree path:<path>` as its final
+  tool call, after a check that the tree is a linked Orca worktree
+  (`isMainWorktree` false, path equal to git's top level), so the primary
+  checkout is never removed. It keeps the tree, and prints the removal
+  commands, when the banner is red or the user passed a custom ask with the
+  skill. A refused removal turns the banner red. The owner's reason: they
+  asked for the worktree closed and still had to paste the command. Binds
+  the `wrap-it-up` skill (step 8) and `docs/WORKFLOW.md`.
+
 - 2026-10-01 **A red check that passes when rerun locally meets the
   green-checks gate.** When a PR check is red on GitHub, for any reason,
   merge `origin/main` into the branch, push, and run the same command

@@ -204,15 +204,34 @@ banner removes its own worktree.** The user should not have to paste a
 command to finish what they asked for. Remove it with the Orca CLI, which
 deregisters the worktree from Orca and removes it from git in one step:
 
+First, before the banner, prove the tree is a linked Orca worktree and not
+the primary checkout. Orca registers the primary checkout as a worktree too,
+so naming *a* worktree proves nothing. This prints `REMOVABLE <path>` only
+when `isMainWorktree` is false and Orca's path is git's top level, which holds
+from any subdirectory:
+
 ```
-orca worktree current                    # confirm it names THIS worktree
-orca worktree rm --worktree current      # never --force
+orca worktree current --json | python3 -c '
+import json, subprocess, sys
+w = json.load(sys.stdin)["result"]["worktree"]
+top = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
+print("REMOVABLE " + w["path"] if not w["isMainWorktree"] and w["path"] == top else "KEEP")'
 ```
 
-It also deletes the checked-out branch when Orca can prove the branch is
-merged, and keeps it otherwise. Leave `--force` off: if the command refuses
-because something is still in the tree, step 6 missed it. Report what it
-found, and do not remove the worktree.
+Then, last of all (below), remove that exact path:
+
+```
+orca worktree rm --worktree path:<path>    # never --force
+```
+
+It deletes the checked-out branch only when Orca can prove it is merged. A
+squash-merged branch usually cannot be proved merged, so it often survives,
+which is expected and not a failure. It is merged, and
+`git branch -D <branch>` from any other checkout clears it. Leave `--force`
+off. If the command refuses, it returned and you are still running.
+Something is still in the tree that step 6 missed, so the green banner was
+wrong. Follow it straight away with the red banner, saying what Orca found
+and that the worktree was kept.
 
 **Do not remove it** when any of these is true. Print the removal commands
 under the banner instead:
@@ -224,9 +243,9 @@ under the banner instead:
   #212 only"). A plain invocation means close. Anything added is the user
   steering, so do what it says and leave the worktree in place unless it
   says to remove it.
-- **This is the primary checkout**, not a worktree
-  (`git rev-parse --git-common-dir` is `.git`), or `orca worktree current`
-  names no worktree or a different one. Then hand over:
+- **The check above printed `KEEP`, or failed.** This is the primary checkout,
+  `orca worktree current` named no worktree, or its path is not this tree.
+  Then hand over:
 
   ```
   git -C <main-checkout> worktree remove <this-worktree>
