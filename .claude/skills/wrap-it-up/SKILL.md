@@ -74,7 +74,8 @@ it. The wrap-up-specific parts:
   with your reasoning. **Wait for that verdict before you close**: the subagent
   dies with the session. So **a PR of yours ends the session open only if it is
   approved and its merge is held (by checks neither green nor passed when
-  rerun locally, by the task, or by the owner), or it is explicitly handed over with its latest verdict named, or
+  rerun locally, by the task, or by the owner), or it is explicitly handed
+  over with its latest verdict named, or
   no reviewer could be launched at all.** A `CHANGES REQUESTED` verdict is work
   still in hand: fix it and get a fresh re-review, or hand the PR over saying
   so. For an approved PR left open, say which hold applies. Do not merge it to
@@ -96,7 +97,8 @@ it. The wrap-up-specific parts:
   asked to review, or one that deviates from a design doc, bumps `gdext` or
   changes the save format. A missing verdict is not an ending at all — launch
   the reviewer, above — and `CHANGES REQUESTED` is rework, also above. A
-  check that fails locally too, and the four sign-off cases leave an *approved* PR open on a
+  check that fails locally too, or any of the four sign-off cases, leaves an
+  *approved* PR open on a
   named hold, which is a red banner (step 7) rather than a judgement call to
   make on the way out.
 - The lint ratchet counts **files**, not lines: new Rust almost always needs

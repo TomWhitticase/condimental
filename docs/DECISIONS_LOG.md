@@ -19,14 +19,16 @@ See [WORKFLOW.md](WORKFLOW.md).
 ---
 
 - 2026-10-01 **A red check that passes when rerun locally meets the
-  green-checks gate.** When a PR check is red on GitHub, for any reason, run
-  the same command locally from the PR's head. If every red check passes, the
-  agent merges with `gh pr merge --admin` and does not need to ask first. The
-  squash body names each red check and the local command that passed in its
-  place. A `VERDICT: APPROVED` is still required. A check that fails locally
-  too is still the branch's to fix, and an unrerun check still blocks. The
-  owner's reason: Actions minutes run out, and every check can be run locally.
-  Widens the 2026-09-27 `--admin` entry below. Binds `CLAUDE.md`,
+  green-checks gate.** When a PR check is red on GitHub, for any reason,
+  merge `origin/main` into the branch, push, and run the same command
+  locally. If every red check passes, the agent merges with
+  `gh pr merge --admin` and does not need to ask first. The squash body names
+  each red check and the local command that passed in its place. A
+  `VERDICT: APPROVED` is still required. A check that fails locally too is
+  still the branch's to fix, and an unrerun check still blocks. `label` and
+  `review` have no local command and gate nothing, so they are exempt. The
+  owner's reason: Actions minutes run out, and every gating check can be run
+  locally. Widens the 2026-09-27 `--admin` entry below.
   `CONTRIBUTING.md`, `docs/WORKFLOW.md` and the `open-pr` skill.
 
 - 2026-09-29 **The contracts board lists every offer and padlocks the gated

@@ -32,24 +32,25 @@ matches what code comments and data files cite.
   checks any more, and because all our checks can be run locally then in that
   case we can just do that)".)
 
-  **What it replaces.** Since 2026-09-27, `gh pr merge --admin` was the owner's
-  override for when GitHub refused to run the checks at all. On 2026-09-29 it
-  became a standing waiver, but only for a billing block. Every use still
-  turned on whether a red check was "really" a billing stop. Between
-  2026-09-26 and 2026-09-29 each merge waited for the owner to say "land it",
-  although every check in `.github/workflows/` is a script or a cargo command
-  that runs on this machine.
+  **What it replaces.** Since 2026-09-27, `gh pr merge --admin` was the
+  owner's override, for when GitHub refused to run the checks at all, and
+  each use waited on the owner saying to land the work. Yet every check that
+  gates a merge is a script or a cargo command that runs on this machine.
 
-  **The rule.** Whatever the cause of a red check, the evidence that counts is
-  the same command passing locally from the PR's head. If every red check
-  does, the gate is met and the agent merges with `--admin` without a fresh
-  go-ahead. Branch protection still requires `lint`, which is why `--admin` is
-  needed at all. The squash body names each red check and the local command
+  **The rule.** Whatever the cause of a red check, first merge `origin/main`
+  into the branch and push. CI tests the head merged into `main`, and
+  `--admin` skips the up-to-date rule, so the local run has to see the same
+  tree. The evidence that counts is then the same command passing locally. If
+  every red check does, the gate is met and the agent merges with `--admin`
+  without a fresh go-ahead. Branch protection still requires `lint`, which is
+  why `--admin` is needed at all.
   that passed, because the body is what `main`'s history keeps.
 
   **What it does not cover.** The review verdict is a separate gate and is
   never met locally. A check that fails locally too is the branch's to fix,
   just as before. A check that was not rerun does not count as passed.
+  `label` (the labeler) and `review` (the dormant Claude review) have no local
+  command and gate nothing, so a red one of those is ignored.
   `verify.yml` (the Godot gate) only runs on a `full-verify` PR, so running
   `scripts/verify-core-loop.sh` locally is what passes it, as it always was.
 

@@ -94,12 +94,13 @@ session is still caught before the change reaches `main`. Workflows live in
 
 | Workflow | Runs | On |
 |---|---|---|
-| `rust.yml` | `cargo test -p sim_core`, `cargo test -p voxgen`, `cargo xtask`, the fmt/clippy ratchet, and a regenerate-and-diff of `assets/voxels/models` | every PR and push to `main` |
-| `invariants.yml` | `scripts/check-invariants.sh`, `shellcheck`, `actionlint` | every PR and push to `main` |
+| `rust.yml` | `cargo test -p sim_core`, `cargo test -p voxgen`, `cargo xtask`, the fmt/clippy ratchet, and a regenerate-and-diff of `assets/voxels/models` (`cargo run -p voxgen --bin voxgen`, then `git status --porcelain assets/voxels/models` prints nothing) | every PR and push to `main` |
+| `invariants.yml` | `scripts/check-invariants.sh`, `shellcheck -S error scripts/*.sh .githooks/*`, `python3 .claude/hooks/test_require_pr_screenshot.py`, `actionlint` | every PR and push to `main` |
 | `commitlint.yml` | `scripts/lint-commit-msg.sh` over the whole range | every PR and push to `main` |
 | `pr-screenshot.yml` | `scripts/check-pr-screenshot.sh` — the body embeds an image | every PR |
 | `verify.yml` | `scripts/verify-core-loop.sh` in full, Godot and all | nightly, on demand, or on a PR labelled `full-verify` |
 | `audit.yml` | `cargo audit` against Cargo.lock | lockfile changes, and weekly |
+| `labeler.yml` | `label`: tags the PR by the paths it touches — no local command, gates nothing | every PR |
 | `claude.yml`, `claude-review.yml` | `@claude` on an issue or PR, and a first-pass review of every PR | on mention / on PR open |
 
 Two of these are worth knowing the shape of before they surprise you.
@@ -284,25 +285,27 @@ its verdict, naming what the merge is still waiting on — so no PR sits
 waiting on a review nobody was asked for, as #193 did until the owner said so
 (2026-09-26).
 
-**A red check is rerun locally, and a local pass is good enough.** Every
-check in the table above is a command you can run here, and GitHub Actions
-minutes run out — on 2026-09-27 GitHub refused every job in the repository on
-a billing error, and eleven PRs (#192–#196, #198–#203) waited on the owner to
-land them. So the owner's rule since 2026-10-01: when a check is red on a PR,
-for whatever reason, run that check's own command locally from the PR's head
-(the "Runs" column above; `scripts/check-pr-screenshot.sh` needs `PR_BODY`
-set to the body). If every red check passes locally, the checks gate is met
-and you merge with `gh pr merge --admin` without asking again. `main` is
-protected, so a plain `gh pr merge` refuses a PR whose required checks are not
-green — first with "the head branch is not up to date with the base branch",
-which a real `git merge origin/main` and a push do fix, then with "the base
-branch policy prohibits the merge", which nothing on the branch can fix;
-`--admin` merges past that. Three things it never covers: a missing
-`VERDICT: APPROVED` (the review gate is not the one being met locally), a
-check that fails locally too (that failure is the branch's to fix), and a
-check you did not rerun. Say in the squash body which checks were red and the
-local command that passed in their place, because the body is what `main`'s
-history keeps.
+**A red check is rerun locally, and a local pass is good enough.** GitHub
+Actions minutes run out: on 2026-09-27 GitHub refused every job in the
+repository on a billing error, and eleven PRs (#192–#196, #198–#203) waited
+on the owner to land them. Every check that gates a merge is a command you
+can run here. So the owner's rule since 2026-10-01: when a check is red on a
+PR, for whatever reason, first merge `origin/main` into the branch and push.
+CI tests the head merged into `main`, and `--admin` skips the up-to-date
+rule, so a stale head is not what would land. Then run each red check's own
+command locally (the "Runs" column above;
+`scripts/check-pr-screenshot.sh` needs `PR_BODY` set to the body). `labeler.yml`'s `label` and
+`claude-review.yml`'s `review` have no local command and gate nothing, so a
+red one is ignored. If every other red check passes locally, the checks gate
+is met and you merge with `gh pr merge --admin` without asking again. `main`
+is protected, so a plain `gh pr merge` refuses a PR whose required checks are
+not green with "the base branch policy prohibits the merge", which nothing on
+the branch can fix; `--admin` merges past that. Three things it never covers:
+a missing `VERDICT: APPROVED` (the review gate is not the one being met
+locally), a check that fails locally too (that failure is the branch's to
+fix), and a check you did not rerun. Say in the squash body which checks were
+red and the local command that passed in their place, because the body is
+what `main`'s history keeps.
 
 **A PR is reviewed adversarially, by a reviewer that does not share the
 author's context.** What makes a review independent is not which session runs
