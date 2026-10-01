@@ -13,6 +13,7 @@ useful even if the others change:
 | [DECISIONS_LOG.md](DECISIONS_LOG.md) | Every decision as one condensed rule, newest first | Checking whether a question is already settled before re-opening it |
 | [DECISIONS.md](DECISIONS.md) | Full-text decision records (the long form of DECISIONS_LOG.md, UI_UX.md §2b and ARCHITECTURE.md §9a) | The *why* behind a rule, or the history of a change |
 | [WORKFLOW.md](WORKFLOW.md) | Building, verifying, the one non-headless check, commits, branches/PRs/issues on GitHub, the DEVLOG decision, Orca orchestration | How work actually gets done, proven and shipped in this repo |
+| [TECH_DEBT.md](TECH_DEBT.md) | Known tech debt scored in points, and the change counter since the last overview audit | Whether features must pause for a debt paydown or an audit |
 | [PIPES_AND_CONVEYORS_PLAN.md](PIPES_AND_CONVEYORS_PLAN.md) | The pipes & conveyors overhaul: goals, ticket DAG, and the wire/asset contracts every ticket shares | What that update is and how its tickets fit together |
 | [STAFF_POOLS_PLAN.md](STAFF_POOLS_PLAN.md) | The staff pools MVP: goals, ticket DAG, the data shapes and the wire contract every ticket shares | What that epic is and how its tickets fit together |
 

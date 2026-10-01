@@ -205,6 +205,11 @@ sim_core`, `scripts/verify-core-loop.sh`, which `screenshot-scene.sh` flags
 and whether the PNG was read), the DEVLOG/decision-log calls that were made,
 and `Closes #N` for every issue the branch settles.
 
+Before pushing, run `scripts/tech-debt-status.sh --write` and commit the
+refreshed [TECH_DEBT.md](TECH_DEBT.md) header: it counts merged PRs since the
+last overview audit, plus this one. That file holds the debt register, the
+bar an item has to clear, and the two thresholds that pause feature work.
+
 ### Every pull request shows the change
 
 **A PR body embeds at least one screenshot — every PR, not only the visual
