@@ -4709,6 +4709,8 @@ func _dock_lamp_lit(stocked: bool, full: bool, current_tick: int) -> bool:
 	return phase % 2 == 0
 
 
+var _fluid_materials: Dictionary = {} # fluid id -> its one shared StandardMaterial3D
+
 ## A network's or tank's fluid id, or "" — `fluid` is NULLABLE on the wire
 ## (a run no machine taps has not been told what it carries), and `String(null)`
 ## is a hard error in GDScript rather than an empty string.
@@ -4721,10 +4723,20 @@ func _fluid_id_of(snapshot: Dictionary) -> String:
 ## dielectric — UI_UX.md §4's "visible liquid surfaces ... with subtle
 ## shading/reflection"), tinted per fluid id. Only the tint is decided here;
 ## the shading numbers stay in palette.ron like every other material.
+##
+## One material per fluid, made the first time it is asked for and shared by
+## every pipe body and tank fill holding that fluid. Nothing mutates it once
+## assigned, and the fluid poll asks for every network's on every polled
+## frame: duplicating a fresh one each time cost a material per network per
+## frame, the largest script cost on a big pipe floor.
 func _fluid_material_for(fluid_id: String) -> StandardMaterial3D:
+	var cached: StandardMaterial3D = _fluid_materials.get(fluid_id, null)
+	if cached != null:
+		return cached
 	var base: StandardMaterial3D = _class_materials.get("liquid", null)
 	var mat: StandardMaterial3D = base.duplicate() if base != null else _make_material(0.0, 0.14)
 	mat.albedo_color = FLUID_TINTS.get(fluid_id, FLUID_TINT_FALLBACK)
+	_fluid_materials[fluid_id] = mat
 	return mat
 
 

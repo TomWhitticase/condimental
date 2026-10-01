@@ -259,6 +259,18 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-02 — The fluid poll stops making a material per network per frame
+
+A scale sweep (the owner's 178-placement factory tiled 1×/5×/20×, frames
+timed headless against a release `sim_core`) found `_update_fluid_network`
+the largest script cost on a big floor: 0.9 ms a frame at 1×, 20 ms at 20×.
+`_fluid_material_for` duplicated a fresh `StandardMaterial3D` for every
+network on every polled frame, only for it to be thrown away unless a body
+was being created. It now caches one material per fluid id, shared by every
+body and tank fill of that fluid; nothing mutates it once assigned. At 20× a
+frame's script time fell from 31 ms to 12 ms, and the fluid poll to its JSON
+parse. `test_fluids.gd` checks a second poll reuses the material.
+
 ### 2026-10-02 — Spoilage is out of the game
 
 The owner dropped spoilage. Nothing perishes, so the design no longer has a
