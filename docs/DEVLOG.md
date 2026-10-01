@@ -259,6 +259,14 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-02 — wrap-it-up removes its own worktree on a green banner
+
+A plain `wrap-it-up` that ends green now runs `orca worktree rm` on its own
+worktree as its final step, instead of handing the user a command to paste.
+A guard first checks that the tree is a linked Orca worktree, so the primary
+checkout is never removed. A red banner or a custom ask passed with the skill
+keeps the tree. The full record is in `docs/DECISIONS.md`.
+
 ### 2026-10-01 — Belts and pipes cross on `main`, five days late
 
 The owner played `main` and could not lay a pipe across a belt. The feature

@@ -27,6 +27,17 @@ See [WORKFLOW.md](WORKFLOW.md).
   hand-bumped, and `check-invariants.sh` holds the header total to the sum of
   the items. The header records whether a freeze is in force, since 10–19
   points means frozen only on the way down. Full record in `docs/DECISIONS.md`.
+
+- 2026-10-02 **A plain `wrap-it-up` that ends green removes its own
+  worktree.** It runs `orca worktree rm --worktree path:<path>` as its final
+  tool call, after a check that the tree is a linked Orca worktree
+  (`isMainWorktree` false, path equal to git's top level), so the primary
+  checkout is never removed. It keeps the tree, and prints the removal
+  commands, when the banner is red or the user passed a custom ask with the
+  skill. A refused removal turns the banner red. The owner's reason: they
+  asked for the worktree closed and still had to paste the command. Binds
+  the `wrap-it-up` skill (step 8) and `docs/WORKFLOW.md`.
+
 - 2026-10-01 **A belt and a pipe cross as one `crossing` entity, never as two
   layers.** Place a pipe across a belt (or a belt across a pipe) and that
   tile becomes kind `crossing`, carrying a `BeltSegment` and a `PipeTile`;
