@@ -1,6 +1,6 @@
 # CONDIMENTAL — Tech debt
 
-**Changes since last overview audit: 1** · **Debt total: 0 points**
+**Changes since last overview audit: 2** · **Debt total: 0 points**
 
 Last audit: none yet (the counter started 2026-10-01).
 Audit baseline: `cb7d24e` — the `main` commit the change count runs from.
