@@ -253,7 +253,7 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
-### 2026-10-01 — wrap-it-up removes its own worktree on a green banner
+### 2026-10-02 — wrap-it-up removes its own worktree on a green banner
 
 A plain `wrap-it-up` that ends green now runs `orca worktree rm` on its own
 worktree as its final step, instead of handing the user a command to paste.

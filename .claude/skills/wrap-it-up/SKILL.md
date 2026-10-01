@@ -199,7 +199,7 @@ reviewed. When in doubt, print the red banner and say what you are unsure of.
 
 ## 8. Close the worktree yourself
 
-The owner's rule (2026-10-01): **a plain `wrap-it-up` that ends on the green
+The owner's rule (2026-10-02): **a plain `wrap-it-up` that ends on the green
 banner removes its own worktree.** The user should not have to paste a
 command to finish what they asked for. Remove it with the Orca CLI, which
 deregisters the worktree from Orca and removes it from git in one step:
@@ -245,12 +245,13 @@ under the banner instead:
   says to remove it.
 - **The check above printed `KEEP`, or failed.** This is the primary checkout,
   `orca worktree current` named no worktree, or its path is not this tree.
-  Then hand over:
 
-  ```
-  git -C <main-checkout> worktree remove <this-worktree>
-  git -C <main-checkout> branch -D <branch>
-  ```
+In all three cases, print these under the banner for the user to run:
+
+```
+git -C <main-checkout> worktree remove <this-worktree>
+git -C <main-checkout> branch -D <branch>
+```
 
 **It is the very last thing you do.** The command deletes the directory the
 shell is running in, and Orca may close this session's terminal with it, so
