@@ -25,6 +25,34 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-01: **A red check that passes when rerun locally meets the
+  green-checks gate.** (Owner's rule: "If CI checks fail on a PR then run them
+  locally, and if they pass, then thats good enough (This is because we are
+  using too much gh actions and we run into the case where we cant run any
+  checks any more, and because all our checks can be run locally then in that
+  case we can just do that)".)
+
+  **What it replaces.** Since 2026-09-27, `gh pr merge --admin` was the owner's
+  override for when GitHub refused to run the checks at all. On 2026-09-29 it
+  became a standing waiver, but only for a billing block. Every use still
+  turned on whether a red check was "really" a billing stop. Between
+  2026-09-26 and 2026-09-29 each merge waited for the owner to say "land it",
+  although every check in `.github/workflows/` is a script or a cargo command
+  that runs on this machine.
+
+  **The rule.** Whatever the cause of a red check, the evidence that counts is
+  the same command passing locally from the PR's head. If every red check
+  does, the gate is met and the agent merges with `--admin` without a fresh
+  go-ahead. Branch protection still requires `lint`, which is why `--admin` is
+  needed at all. The squash body names each red check and the local command
+  that passed, because the body is what `main`'s history keeps.
+
+  **What it does not cover.** The review verdict is a separate gate and is
+  never met locally. A check that fails locally too is the branch's to fix,
+  just as before. A check that was not rerun does not count as passed.
+  `verify.yml` (the Godot gate) only runs on a `full-verify` PR, so running
+  `scripts/verify-core-loop.sh` locally is what passes it, as it always was.
+
 - 2026-09-29: **The contracts board lists every offer and padlocks the gated
   ones; its filters are presentation.** (Owner's ask: "I want contracts that
   are for items that i cant make to be locked (e.g. at the start i can only
@@ -965,6 +993,11 @@ matches what code comments and data files cite.
   that is red because of the change is still the change's to fix, and the
   squash body carries the reason plus the local evidence, because that body is
   what `main` keeps. Eleven PRs landed under it: #192–#196 and #198–#203.)*
+
+  *(Amended 2026-10-01 by "A red check that passes when rerun locally meets
+  the green-checks gate" above: `--admin` is no longer only for checks that
+  could not run, nor only the owner's call. Any red check that passes when
+  rerun locally is met, and the agent merges without asking.)*
 
   **What was rejected.** Keeping the routine-change exemption was rejected.
   Whether a change counts as "routine" is judged by its author, which is

@@ -266,9 +266,9 @@ commit is a reviewed unit.
 **Every PR is reviewed before it merges. No exceptions for routine changes,
 and no reviewing after the merge** (the owner's rule, 2026-09-25). A PR
 merges only once it has a `VERDICT: APPROVED` comment from a reviewer that
-does not share the author's context (below), and its checks are green (only
-the owner waives that half, and only when they could not run at all —
-`--admin`, below). An instruction to "open a PR and merge it" means that: get
+does not share the author's context (below), and its checks are green — or,
+for any that are red, the same command passes when rerun locally (`--admin`,
+below). An instruction to "open a PR and merge it" means that: get
 the review, then
 merge on its verdict. PR #163 is why this is spelled out. It merged on green
 CI under the old wording ("merging your own work unreviewed is fine for
@@ -284,19 +284,25 @@ its verdict, naming what the merge is still waiting on — so no PR sits
 waiting on a review nobody was asked for, as #193 did until the owner said so
 (2026-09-26).
 
-**`--admin` is the owner's override, never yours.** `main` is protected, so
-when the required checks have not run `gh pr merge` refuses outright — first
-with "the head branch is not up to date with the base branch", which a real
-`git merge origin/main` and a push do fix, and then with "the base branch
-policy prohibits the merge", which nothing on the branch can fix. Adding
-`--admin` merges past it. Use it **only** when the owner has said to land the
-work anyway, and only with a `VERDICT: APPROVED` in hand: the review gate is
-not what is being waived. Say in the squash body that the checks could not run
-and what was verified locally in their place, because the body is what `main`'s
-history keeps. This came up on 2026-09-27, when GitHub refused every job in
-the repository on a billing error and eleven PRs — #192–#196 and #198–#203 —
-landed this way; a red check that belongs to the branch is still the branch's
-to fix.
+**A red check is rerun locally, and a local pass is good enough.** Every
+check in the table above is a command you can run here, and GitHub Actions
+minutes run out — on 2026-09-27 GitHub refused every job in the repository on
+a billing error, and eleven PRs (#192–#196, #198–#203) waited on the owner to
+land them. So the owner's rule since 2026-10-01: when a check is red on a PR,
+for whatever reason, run that check's own command locally from the PR's head
+(the "Runs" column above; `scripts/check-pr-screenshot.sh` needs `PR_BODY`
+set to the body). If every red check passes locally, the checks gate is met
+and you merge with `gh pr merge --admin` without asking again. `main` is
+protected, so a plain `gh pr merge` refuses a PR whose required checks are not
+green — first with "the head branch is not up to date with the base branch",
+which a real `git merge origin/main` and a push do fix, then with "the base
+branch policy prohibits the merge", which nothing on the branch can fix;
+`--admin` merges past that. Three things it never covers: a missing
+`VERDICT: APPROVED` (the review gate is not the one being met locally), a
+check that fails locally too (that failure is the branch's to fix), and a
+check you did not rerun. Say in the squash body which checks were red and the
+local command that passed in their place, because the body is what `main`'s
+history keeps.
 
 **A PR is reviewed adversarially, by a reviewer that does not share the
 author's context.** What makes a review independent is not which session runs

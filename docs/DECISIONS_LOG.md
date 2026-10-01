@@ -18,6 +18,17 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-01 **A red check that passes when rerun locally meets the
+  green-checks gate.** When a PR check is red on GitHub, for any reason, run
+  the same command locally from the PR's head. If every red check passes, the
+  agent merges with `gh pr merge --admin` and does not need to ask first. The
+  squash body names each red check and the local command that passed in its
+  place. A `VERDICT: APPROVED` is still required. A check that fails locally
+  too is still the branch's to fix, and an unrerun check still blocks. The
+  owner's reason: Actions minutes run out, and every check can be run locally.
+  Widens the 2026-09-27 `--admin` entry below. Binds `CLAUDE.md`,
+  `CONTRIBUTING.md`, `docs/WORKFLOW.md` and the `open-pr` skill.
+
 - 2026-09-29 **The contracts board lists every offer and padlocks the gated
   ones; its filters are presentation.** A contract a gate holds back is ON
   the board, flagged: `ContractOfferSnapshot` carries `locked`,
@@ -81,7 +92,9 @@ See [WORKFLOW.md](WORKFLOW.md).
   every job in the repository on a billing error and eleven PRs — #192–#196
   and #198–#203 — landed this way. Binds `CLAUDE.md`, `docs/WORKFLOW.md` and
   the `open-pr` skill; recorded as an amendment inside the 2026-09-25 review
-  record in `docs/DECISIONS.md`.
+  record in `docs/DECISIONS.md`. *(Widened 2026-10-01, entry below: any red
+  check, not only one that could not run, is met by its command passing
+  locally, and the agent merges with `--admin` without asking.)*
 
 - 2026-09-26 **The review always runs; only the merge is ever held.** An
   amendment to the entry below, stated after PR #193 ended a session open
