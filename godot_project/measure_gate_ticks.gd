@@ -17,15 +17,16 @@
 # broke — restocked and refunded every poll — so both numbers are a FLOOR, not
 # a typical playthrough.
 #
-# WHAT IT PRINTED on 2026-10-02 (a case of eight bottles; the 2026-09-29 run,
-# at one bottle a case, printed 155000 / 86.1 min / 88 000 / 103 000), at `data/unlocks.ron`'s shipped 100/100:
+# WHAT IT PRINTED on 2026-10-02, at `data/unlocks.ron`'s shipped 100/100,
+# with a case of eight bottles (the 2026-09-29 run, at one bottle a case,
+# printed 155000 / 86.1 min / 88 000 / 103 000):
 #
-#   BBQ gate crossed at tick 67000, 142 boxes sold — that is the tick
+#   BBQ fixture handed back at tick 67000, 142 boxes of ketchup sold — the tick
 #     `build_bbq_running_line` RETURNS at, not the tick the gate opened: it
 #     spots the open gate on a 250-tick poll at about tick 52 000, then builds
 #     the BBQ branch and runs `BBQ_SETTLE_TICKS` (15 000) more before handing
 #     back, and the ketchup line keeps selling throughout
-#   active contracts after signing 11 of 13 offers: 13
+#   active contracts after signing 15 of 17 offers: 13
 #   MUSTARD gate crossed at tick 131000 — 72.8 minutes at 30 ticks/s,
 #     64 000 ticks after the line above; the BBQ gate itself opened at tick
 #     52 000, so 79 000 ticks (~44 min) of the run follow it
