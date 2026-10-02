@@ -54,6 +54,72 @@ func _find_all(node: Node, type_name: String, out: Array) -> Array:
 	return out
 
 
+## `node`'s transform in `ancestor`'s frame.
+func _transform_under(node: Node3D, ancestor: Node3D) -> Transform3D:
+	var out := Transform3D.IDENTITY
+	var at: Node = node
+	while at != ancestor and at is Node3D:
+		out = (at as Node3D).transform * out
+		at = at.get_parent()
+	return out
+
+
+## Whether `node` and every parent up to `ancestor` is visible.
+func _shown_under(node: Node, ancestor: Node) -> bool:
+	var at: Node = node
+	while at != null and at != ancestor:
+		if at is Node3D and not (at as Node3D).visible:
+			return false
+		at = at.get_parent()
+	return true
+
+
+## "" when, for every window size and slot position tried, the topmost rod
+## mesh the sign shows projects above the frame's top edge and the rod
+## meshes stack without a gap from the board up; otherwise what went wrong.
+func _sign_rods_reach_top(backdrop: Node3D, camera: Camera3D, rig: Node3D) -> String:
+	backdrop.finish_intro()
+	var slot := Vector2(840, 150) # the menu's sign slot at UI_SCALE 1.5
+	for size in [Vector2(1280, 720), Vector2(1920, 1080), Vector2(3024, 1964),
+			Vector2(2560, 1080), Vector2(3440, 1440), Vector2(1080, 1920)]:
+		for top_fraction in [0.05, 0.3, 0.55]:
+			var rect := Rect2(Vector2((size.x - slot.x) * 0.5, size.y * top_fraction), slot)
+			backdrop.frame_sign(rect, size)
+			# Every visible mesh above the board, as [bottom, top] in the
+			# rig's frame, and the highest point of any of them.
+			var spans: Array = []
+			# Transforms are chained by hand: this script-mode tree never
+			# enters the backdrop, so `global_transform` is not available.
+			var eye := Vector3.ZERO
+			var top_y := -INF
+			for mesh in _find_all(rig, "MeshInstance3D", []):
+				if not _shown_under(mesh, rig) or mesh.mesh == null:
+					continue
+				var in_rig: Transform3D = _transform_under(mesh, rig)
+				var local: AABB = in_rig * mesh.get_aabb()
+				spans.append([local.position.y, local.end.y])
+				var box: AABB = (rig.transform * in_rig) * mesh.get_aabb()
+				if box.end.y > top_y:
+					top_y = box.end.y
+					eye = Vector3(box.get_center().x, box.end.y, box.get_center().z)
+			# Project the top point through the camera (the rig is its child,
+			# so `eye` is already in camera space): its screen y, with 0 at
+			# the top edge, from the vertical fov alone.
+			var half_tan := tan(deg_to_rad(camera.fov) * 0.5)
+			var screen_y: float = size.y * 0.5 * (1.0 - (eye.y / -eye.z) / half_tan)
+			if screen_y > 0.0:
+				return "at %dx%d with the sign slot %d%% down, the sign's rods stop %.0f px below the top of the frame — it floats instead of hanging" % [size.x, size.y, int(top_fraction * 100.0), screen_y]
+			# Unbroken: sorted by their foot, each mesh starts no higher
+			# than the run below it has reached.
+			spans.sort_custom(func(a, b): return a[0] < b[0])
+			var reached: float = spans[0][1]
+			for span in spans:
+				if span[0] > reached + 0.01:
+					return "at %dx%d the sign's rods have a gap at %.2f" % [size.x, size.y, reached]
+				reached = maxf(reached, span[1])
+	return ""
+
+
 func _fail(msg: String) -> void:
 	_cleanup()
 	printerr("MAIN_MENU_FAIL: %s" % msg)
@@ -244,6 +310,17 @@ func _initialize() -> void:
 	backdrop.frame_sign(Rect2(300, 300, 400, 75), Vector2(1280, 720))
 	if framed_at.is_equal_approx(sign_rig.position) or sign_rig.scale.x >= 1.0e3:
 		_fail("frame_sign must follow the rect it is handed")
+		return
+	# ...and wherever that slot lands, the sign HANGS: its rods leave the top
+	# of the frame, unbroken. In a fullscreen window the column is centred
+	# lower than at 1280x720 and the body's own rods used to stop in mid-air
+	# (the owner's report, 2026-10-02). Checked by projecting the real rod
+	# meshes through the title camera's own fov — not frame_sign's arithmetic
+	# — across 16:9, the owner's 16:10 MacBook, ultrawide and portrait, with
+	# the slot high, centred and low.
+	var rod_failure := _sign_rods_reach_top(backdrop, title_camera, sign_rig)
+	if rod_failure != "":
+		_fail(rod_failure)
 		return
 
 	# The poster RUNS: belts march, product slides, and the intro can be

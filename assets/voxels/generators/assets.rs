@@ -517,6 +517,13 @@ pub const ASSETS: &[Asset] = &[
         name: "title_sign_bulbs_f2",
         build: title_sign_bulbs_f2,
     },
+    // A length of the sign's two rods, stacked above the body's own rods by
+    // `title_scene.gd` until they run out of the top of the frame — however
+    // tall the window is (`TITLE_SIGN_ROD_SEGMENT`).
+    Asset {
+        name: "title_sign_rods",
+        build: title_sign_rods,
+    },
     // A puff of steam off the cooking vat on the title screen. Like the
     // crush bit it exists only to be thrown — `title_scene.gd` lifts, swells
     // and shrinks a handful of them over the vat.
@@ -6328,10 +6335,18 @@ const TITLE_SIGN_LETTER_DEPTH: i32 = 4;
 /// right — the drop shadow that makes the word read as solid rather than as
 /// a decal, the way an old enamel sign's lettering does.
 const TITLE_SIGN_SHADOW: i32 = 2;
-/// The two hanging rods' length above the board. The sign is framed so they
-/// run out of the top of the screen: it hangs from the roof, it does not
-/// float.
+/// The two hanging rods' length above the board, on the body itself. They
+/// must run out of the top of the screen — the sign hangs from the roof, it
+/// does not float — and how far that is depends on the window, so
+/// `title_scene.gd` carries them on with [`title_sign_rods`] lengths.
 const TITLE_SIGN_ROD: i32 = 60;
+/// The rods' length in one `title_sign_rods` piece. The body's own
+/// [`TITLE_SIGN_ROD`] only reaches the top of the frame when the sign's slot
+/// sits near it, as it does in a 1280x720 window; in a taller one (a
+/// fullscreen MacBook, 16:10) the menu column is centred lower and the rods
+/// stopped in mid-air. `title_scene.gd` stacks as many of these above them
+/// as the window needs, so the sign hangs from the roof at every size.
+const TITLE_SIGN_ROD_SEGMENT: i32 = 32;
 
 fn title_sign_word_width() -> i32 {
     let pixels: i32 = TITLE_SIGN_WORD.iter().map(|g| g[0].len() as i32).sum();
@@ -6424,13 +6439,8 @@ pub fn title_sign(p: &Palette) -> VoxModel {
     );
 
     // The rods, with a bracket where each meets the rim.
-    for x in [w / 5, w - 1 - w / 5] {
-        m.cuboid(
-            (x - 1, x),
-            (2, 3),
-            (h, h + TITLE_SIGN_ROD - 1),
-            p.idx("steel_light"),
-        );
+    for x in title_sign_rod_xs() {
+        title_sign_rod(&mut m, p, x, (h, h + TITLE_SIGN_ROD - 1));
         m.cuboid((x - 3, x + 2), (1, 4), (h - 1, h + 2), p.idx("steel"));
     }
 
@@ -6475,6 +6485,35 @@ pub fn title_sign(p: &Palette) -> VoxModel {
             }
         }
         gx += (glyph[0].len() as i32 + TITLE_SIGN_GAP) * TITLE_SIGN_PX;
+    }
+    title_sign_face_front(&m)
+}
+
+/// The X of each hanging rod, shared by the body and [`title_sign_rods`] so
+/// a stacked length lands exactly on the rod below it.
+fn title_sign_rod_xs() -> [i32; 2] {
+    let (w, _) = title_sign_board();
+    [w / 5, w - 1 - w / 5]
+}
+
+/// One rod at `x`, over the vox-Z range `z` (before the face is turned
+/// front — [`title_sign_face_front`]).
+fn title_sign_rod(m: &mut VoxModel, p: &Palette, x: i32, z: (i32, i32)) {
+    m.cuboid((x - 1, x), (2, 3), z, p.idx("steel_light"));
+}
+
+/// A [`TITLE_SIGN_ROD_SEGMENT`]-voxel length of both rods. The same X/depth
+/// footprint as the body, so the importer centres it on the same origin and
+/// it stacks straight up off the body's rod tops with no offset to compute.
+pub fn title_sign_rods(p: &Palette) -> VoxModel {
+    let (w, _) = title_sign_board();
+    let mut m = VoxModel::new([
+        w as u32,
+        (TITLE_SIGN_BOARD_DEPTH + TITLE_SIGN_LETTER_DEPTH) as u32,
+        TITLE_SIGN_ROD_SEGMENT as u32,
+    ]);
+    for x in title_sign_rod_xs() {
+        title_sign_rod(&mut m, p, x, (0, TITLE_SIGN_ROD_SEGMENT - 1));
     }
     title_sign_face_front(&m)
 }
@@ -9583,9 +9622,44 @@ mod tests {
         );
     }
 
-    /// `title_scene.gd` frames the sign from two of this family's numbers —
-    /// how many bulb frames to load, and how far above the board the rods
-    /// reach (it hangs the sign from their top). GDScript cannot import a
+    /// A stacked rod length continues the body's rods exactly: the same
+    /// columns and depth, the body's top rod layer and the piece's bottom
+    /// layer holding the same (x, y) cells, and nothing else in the piece.
+    #[test]
+    fn the_title_sign_rod_lengths_continue_the_body_rods() {
+        let p = palette();
+        let body = title_sign(&p);
+        let rods = title_sign_rods(&p);
+        assert_eq!(rods.size[0], body.size[0], "same width as the body");
+        assert_eq!(rods.size[1], body.size[1], "same depth as the body");
+        assert_eq!(rods.size[2], TITLE_SIGN_ROD_SEGMENT as u32);
+        let top = body.size[2] - 1;
+        let mut body_top: Vec<_> = body
+            .voxels
+            .keys()
+            .filter(|&&(_, _, z)| z == top)
+            .map(|&(x, y, _)| (x, y))
+            .collect();
+        body_top.sort();
+        for layer in 0..rods.size[2] {
+            let mut cells: Vec<_> = rods
+                .voxels
+                .keys()
+                .filter(|&&(_, _, z)| z == layer)
+                .map(|&(x, y, _)| (x, y))
+                .collect();
+            cells.sort();
+            assert_eq!(
+                cells, body_top,
+                "rod layer {layer} must match the body's rod tops"
+            );
+        }
+    }
+
+    /// `title_scene.gd` frames the sign from three of this family's numbers —
+    /// how many bulb frames to load, how far above the board the rods
+    /// reach (it hangs the sign from their top), and how long a stacked rod
+    /// length is (it stacks them on up to the top of the frame). GDScript cannot import a
     /// Rust constant, so its copies are checked against these instead: a
     /// change here that left them behind would frame the sign wrongly with
     /// every Godot test still green (PR #226's review).
@@ -9597,6 +9671,7 @@ mod tests {
         for (name, value) in [
             ("SIGN_BULB_FRAMES", TITLE_SIGN_BULB_FRAMES as i32),
             ("SIGN_ROD_VOXELS", TITLE_SIGN_ROD),
+            ("SIGN_ROD_SEGMENT_VOXELS", TITLE_SIGN_ROD_SEGMENT),
         ] {
             let line = format!("const {name} := {value}");
             assert!(
