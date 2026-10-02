@@ -1052,9 +1052,10 @@ impl SaveData {
             .expect("SaveData is plain data and must always serialize")
     }
 
-    /// Parses RON text, checking `schema_version` **first** so a file from a
-    /// different build reports that rather than whatever the shape change
-    /// happens to break.
+    /// Parses RON text. A file from a different build reports its
+    /// `schema_version` rather than whatever the shape change happens to
+    /// break: the version is compared once the parse succeeds, and read on
+    /// its own only when the parse has failed.
     pub fn from_ron(text: &str) -> Result<SaveData, SaveError> {
         #[derive(Deserialize)]
         struct Header {
@@ -1068,7 +1069,7 @@ impl SaveData {
         // other field through `deserialize_any`, and ron 0.12.2 scans the
         // whole rest of the text for `..` on each number it skips that way
         // (`Parser::next_bytes_is_float`), so on a good file it made every
-        // load quadratic: 3 560 placements took 3.8 s with it, 23 ms without.
+        // load quadratic in the file's length (DEVLOG, 2026-10-02).
         let data: SaveData = match ron::from_str(text) {
             Ok(data) => data,
             Err(error) => {

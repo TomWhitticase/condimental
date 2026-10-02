@@ -45,7 +45,9 @@
 //! (ARCHITECTURE.md §3.8's union-find rule, made real for the first time —
 //! see [`World::recompute_topology`]). `Place`, `Remove` and `Rotate` are
 //! the only three things that can change what is adjacent to what, so they
-//! are the only three that pay for the recompute. Item movement inside a
+//! pay for the recompute; a splitter's mode and a tank's fluid change what a
+//! link carries, and pay for it too. A load's bulk placement
+//! ([`World::begin_bulk_place`]) runs it once at the end, not per `Place`. Item movement inside a
 //! tick still uses the exact same [`BeltSegment`]/[`Machine`]/
 //! [`FluidNetwork`] mechanics it always did; only how a pair of them is
 //! *linked* changed. The recompute is a single-threaded pass — `rayon`
@@ -3651,8 +3653,8 @@ impl World {
     /// [`World::end_bulk_place`], each `Place` claims its tiles in the grid —
     /// which is all a later `Place` checks against — and counts itself in
     /// [`World::placement_count`], and skips the full topology pass.
-    /// Replaying a save's placements one full pass each was quadratic: 7.2 s
-    /// of a 3 560-placement load in a release build.
+    /// Replaying a save's placements one full pass each was quadratic in the
+    /// placement count (DEVLOG, 2026-10-02).
     pub(super) fn begin_bulk_place(&mut self) {
         self.bulk_placing = true;
     }
@@ -3671,10 +3673,11 @@ impl World {
     /// figure is useless without: what the MOTHBALLED machinery would need,
     /// and which kinds are asking.
     ///
-    /// Called from [`Self::recompute_topology`], which is reached only from
-    /// `Place`, `Remove` and `Rotate` — and, in a load, once from
-    /// [`Self::end_bulk_place`] in their place — so the staffing requirement
-    /// moves when the FACTORY changes and at no other time. **Also called by
+    /// Called from [`Self::recompute_topology`], which runs when the factory
+    /// changes — `Place`, `Remove`, `Rotate`, a splitter's mode, a tank's
+    /// fluid, and in a load once from [`Self::end_bulk_place`] and again
+    /// after the restore — so the staffing requirement moves when the
+    /// FACTORY changes and at no other time. **Also called by
     /// the save loader after it restores the pools**: `StaffPools::restore`
     /// builds fresh pools, which would otherwise drop the establishment
     /// `end_bulk_place`'s pass had just computed and load every world
