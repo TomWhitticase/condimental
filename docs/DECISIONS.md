@@ -25,6 +25,41 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-02: **The configuration panel is six slots wide and sheds lines to
+  fit a short window** (issue #206). **The defect.** At 1280x720 the band
+  between the window's top margin and the hotbar is 510px. A hopper's panel
+  with two gates still shut measured 821px and a rack's 837px, so the gate
+  lines and the footer were drawn under the hotbar and off the window. The
+  positioning already clamped; the panel was simply taller than the window.
+  **Options weighed.** The issue named three: fold the gate lines into one,
+  widen the panel so more slots fit a row, or shrink the slots on short
+  windows. A scroll bar was ruled out by #99's precedent. Shrinking the slots
+  as a short-window mode was rejected: the 78px height is what two-line names
+  need (§5g, issue #106). **What was done.** Both of the other two, because
+  neither was enough alone. Six slots a row took the hopper from 821px to
+  about 664px and also stopped a rack's title making the panel wider than
+  its constant. A first try at 380 x UI_SCALE (606px) failed
+  `test_hud_plates.gd`: with contracts signed, the clipboard's left edge is
+  580px in, so 572px is the ceiling. The slots narrowed from 58 to 54 wide
+  and the gap from 6 to 4 instead, giving a 554px panel. 54 is the narrowest
+  width that keeps "Molasses" whole at the name's floor size; at 52 it broke
+  as `Molasse` / `s`. The
+  remaining height is shed by a yield ladder modelled on the hover's
+  (`_hover_yield_rungs`): close hint, level bar, auto-fill note, picker
+  heading, then the gate lines folded to "🔒 N locked — hover a padlock for
+  its gate". The order puts what is repeated elsewhere on the frame first and
+  the gate words last. Each rung's words are kept under the pointer: the ✕ and
+  AUTO-FILL buttons carry the footer's and the note's text as tooltips, and
+  each padlocked slot always carries its own gate's sentence (`_gate_line_for`),
+  so §5g's "never a glyph alone" holds at every rung. The ladder re-measures
+  the live panel after each rung rather than summing typed heights, because
+  the gate lines wrap. The rack's note was shortened to one line ("a pick has
+  these shelves to itself — Any shares them") so a rack fits as well. At
+  1600x900 a hopper's panel shows whole. **Measured.** Real render at
+  1280x720: both the hopper and the rack panel end inside the 510px band. Headless
+  at 1280x720 with the ladder disabled: 8..746, past the hotbar at 518, which
+  is the failure `test_config_panel.gd`'s new check reports.
+
 - 2026-10-02: **There is no spoilage.** (Owner: "spoilage is something i
   actually dont really think we should implement in the game anymore, so lets
   remove spoilage from any planning docs".)

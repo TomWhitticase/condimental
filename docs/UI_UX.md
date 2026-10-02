@@ -1199,7 +1199,7 @@ yielded, so the panel cannot drift off the corner, find it free and hand it
 back once a frame.
 
 **Inside the panel, the type yields before a word does.** A CONTENTS slot is
-58×78 and deliberately tall enough for two lines, which is the right answer
+54×78 and deliberately tall enough for two lines, which is the right answer
 for "Spice Mix": a name with a space wraps at a join it already has. A name
 with no join and no room had nowhere legal to break, and "Molasses" was
 drawn as `Molasse` / `s` with the tail outside the slot's frame (issue
@@ -1241,6 +1241,26 @@ positioning arithmetic above is written against `CONFIG_PANEL_WIDTH`; a
 single unpinned footer Label made the real panel 99px wider than that, which
 is 99px of legend it could then not get off. Every label on this panel pins
 its width and wraps — §5c's rule, and the reason that rule exists.
+
+**It is six slots wide, and on a short window it sheds lines rather than
+running off the bottom** (2026-10-02, issue #206). At 1280x720 the band above
+the hotbar is 510px, and a hopper with two gates still shut was 821px: its
+gate lines and footer were drawn off-screen. Width is the cheap axis, so
+`CONFIG_PANEL_WIDTH` takes six slots a row — a hopper's raws are one row, a
+rack's ten are two. The slots narrowed from 58 to 54 to do it, which is the
+narrowest that still keeps "Molasses" whole by the rule above, so the panel
+stays inside the 572px left clear of a signed clipboard at 1280x720. What height is left over is §5c's #99 rule applied to
+this panel: a yield ladder (`_fit_config_panel`), climbed only as far as the
+band needs and judged from the full panel every frame, so a bigger window
+gives every line back. The rungs, in order, are the close hint (it is the ✕
+button's tooltip), the level bar (its number is printed in the line above),
+the auto-fill note (the AUTO-FILL button's tooltip), the picker's heading,
+and last the gate lines, which fold to one ("🔒 4 locked — hover a padlock
+for its gate"). The padlock rule above still holds: every padlocked slot
+carries its own gate's sentence as a tooltip on every rung, so the words are
+always one hover away and never only a glyph. A scroll bar was not used,
+for #99's reason: a panel that commands should show its controls whole.
+Record in `docs/DECISIONS.md`, 2026-10-02.
 
 ### 5h. THE COOKBOOK: the game explaining itself (built 2026-09-25, BASICS 2026-09-26)
 
