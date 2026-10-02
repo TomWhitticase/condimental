@@ -360,6 +360,44 @@ func _run_checks() -> void:
 				return
 		seen[fluid] = tint
 
+	# --- the DRAWN liquid is each run's own tint -------------------------
+	# The checks above read `FLUID_TINTS`, not what the pipes are drawn with.
+	# Pipe bodies share one cached material per fluid (`_fluid_material_for`),
+	# so a wrong cache key would draw every run one colour with all of the
+	# above still green. Poll twice, as the frame loop does, then read every
+	# body's material back.
+	main._update_fluid_network()
+	main._update_fluid_network()
+	var materials := {} # fluid id -> the one material its bodies draw with
+	for n in range(main._last_fluid.size()):
+		var network: Dictionary = main._last_fluid[n]
+		var fluid: String = main._fluid_id_of(network)
+		var tint: Color = main.FLUID_TINTS.get(fluid, main.FLUID_TINT_FALLBACK)
+		for s in range(network.get("segments", []).size()):
+			var body: Node = main._pipe_fluid_nodes.get("%d:%d" % [n, s], null)
+			if body == null:
+				continue
+			for child in body.get_children():
+				if not (child is MeshInstance3D):
+					continue
+				var drawn: StandardMaterial3D = child.get_surface_override_material(0)
+				if drawn == null or not drawn.albedo_color.is_equal_approx(tint):
+					_fail(
+						"a '%s' pipe body is drawn %s, not its own tint %s"
+						% [fluid, str(drawn.albedo_color if drawn != null else null), str(tint)]
+					)
+					return
+				if materials.has(fluid) and materials[fluid] != drawn:
+					_fail("two '%s' pipe bodies draw with different materials" % fluid)
+					return
+				materials[fluid] = drawn
+	if materials.size() != expected.size():
+		_fail(
+			"liquid is drawn for %s, but the gallery's runs carry %s"
+			% [str(materials.keys()), str(expected.keys())]
+		)
+		return
+
 	print(
 		"FLUID_GALLERY_OK: %d placements stand %d runs, each named by topology alone, each above "
 		% [placed, snapshots.size()]

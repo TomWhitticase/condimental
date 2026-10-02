@@ -186,6 +186,23 @@ func _run_checks() -> void:
 		_fail("the tank was filled and the run ticked, but no liquid is drawn")
 		return
 
+	# --- one material per fluid, not one per network per frame ------------
+	# The poll asks for every network's material on every polled frame;
+	# duplicating a fresh one each time was the largest script cost on a big
+	# pipe floor. Every body of one fluid shares the one cached material, and
+	# polling again makes no new one.
+	var fluid_id: String = main._fluid_id_of(main._last_fluid[0])
+	var shared: StandardMaterial3D = main._fluid_material_for(fluid_id)
+	main._update_fluid_network()
+	if main._fluid_material_for(fluid_id) != shared:
+		_fail("polling the fluid network made a new material for '%s'" % fluid_id)
+		return
+	for body in main._pipe_fluid_nodes.values():
+		for mesh in _meshes(body, []):
+			if mesh.get_surface_override_material(0) != shared:
+				_fail("a liquid body of '%s' does not draw with its fluid's one material" % fluid_id)
+				return
+
 	# --- hover: a pipe answers through the one mechanism -----------------
 	var probe_pair: Array = segments[0]["tile"]
 	var probe := Vector2i(int(probe_pair[0]), int(probe_pair[1]))

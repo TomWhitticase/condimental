@@ -270,6 +270,21 @@ sheds is still a hover away as a tooltip, including each padlock's own gate. A
 big window shows the panel whole. UI_UX §5g has the rule;
 `test_config_panel.gd` now checks the fit at three window sizes.
 
+### 2026-10-02 — The fluid poll stops making a material per network per frame
+
+A scale sweep (the owner's 178-placement factory tiled 1×/5×/20×, frames
+timed headless against a release `sim_core`) found `_update_fluid_network`
+the largest script cost on a big floor: 0.9 ms a frame at 1×, 20 ms at 20×.
+`_fluid_material_for` duplicated a fresh `StandardMaterial3D` for every
+network on every polled frame, only for it to be thrown away unless a body
+was being created. It now caches one material per fluid id, shared by every
+body and tank fill of that fluid; nothing mutates it once assigned. Five polls
+at 20× made 700 materials before and 4 after; a frame's script time fell from
+31 ms to 12 ms on a heavily loaded machine, leaving the fluid poll to its JSON
+parse. `test_fluids.gd` checks a second poll reuses the material, and
+`test_fluid_gallery.gd` that every drawn run still carries its own fluid's
+tint — a wrong cache key would draw them all one colour.
+
 ### 2026-10-02 — Spoilage is out of the game
 
 The owner dropped spoilage. Nothing perishes, so the design no longer has a
