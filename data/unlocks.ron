@@ -232,7 +232,11 @@
             // `roadhouse_group`, which ask for ketchup as well. A mixed
             // order is still a BBQ order — signing one before the branch
             // exists would be signing up to strike out.
-            contracts: ["smokehouse_trial", "grill_pub", "roadhouse_group", "bbq_festival"],
+            contracts: [
+                "rib_shack", "smokehouse_trial", "picnic_caterer", "grill_pub",
+                "steakhouse_group", "roadhouse_group", "smokehouse_wholesale",
+                "bbq_festival", "county_fair",
+            ],
         ),
 
         // THE SECOND GATE (the mustard epic, 2026-09-26; re-triggered on
@@ -256,31 +260,40 @@
         //
         // WHAT IT COSTS IN TIME, measured from a NEW GAME on 2026-09-29 by
         // `godot_project/measure_gate_ticks.gd`, re-measured 2026-10-02 when a
-        // case became eight bottles (fully staffed, raws topped
-        // up and money no object — a floor, not a typical run):
+        // case became eight bottles, and again the same day when the contract
+        // board doubled (fully staffed, raws topped up and money no object —
+        // a floor, not a typical run):
         //
         //   100th box of boxed_ketchup at tick 52 000, and the 100th box of
-        //   boxed_bbq at tick 131 000 — 73 minutes at 30 ticks/sec, of which
-        //   79 000 ticks (~44 min) are after the first gate opened, with
-        //   every one of the four BBQ orders signed
+        //   boxed_bbq at tick 125 000 — 69 minutes at 30 ticks/sec, of which
+        //   73 000 ticks (~41 min) are after the first gate opened, with
+        //   every one of the nine BBQ-tier orders signed
         //
-        //   (the tool prints "64 000 ticks" for that gap because it starts
+        //   (the tool prints "58 000 ticks" for that gap because it starts
         //   its clock at the fixture's hand-off at tick 67 000, 15 000 ticks
         //   of branch-building and settling after the gate itself opened)
         //
-        // THAT IS A FLAG, not a measurement in support: it puts mustard about
-        // an hour and a quarter into a session, where the old trigger put it
-        // at eleven minutes. The cause is not the factory — with all four BBQ
-        // orders signed the board asks for about 4.5 boxes per 1 000 ticks
-        // (smokehouse_trial 2 boxes / 2 500 ticks = 0.80, grill_pub 2/3 000 =
-        // 0.67, roadhouse_group 4/4 000 = 1.00, bbq_festival 10/5 000 = 2.00)
-        // and the branch put about 1.4 of them into paid windows (92 boxes in
-        // the 64 000 ticks measured; it was 1.0 and 88 000 ticks while a case
-        // was one bottle, and the whole of that change follows the BBQ
-        // bottler's 8-bottle, 200-tick shape, measured in PR #225's review —
-        // see the note on `bottled_ketchup` in `data/recipes.ron`), so it is
-        // the branch's throughput against the cadences the orders keep, not
-        // a shortage of demand. Whoever wants
+        // The bottle change took it from 155 000 to 131 000; the doubled
+        // board (more BBQ demand, the second lever below) from 131 000 to
+        // 125 000, about three minutes. The BBQ gate did not move.
+        //
+        // THAT IS A FLAG, not a measurement in support: it puts mustard over
+        // an hour into a session, where the old trigger put it at eleven
+        // minutes. The cause is not the factory — with all nine BBQ-tier
+        // orders signed the board asks for about 9.0 boxes of BBQ per 1 000
+        // ticks (rib_shack 1 box / 2 000 ticks = 0.50, smokehouse_trial
+        // 2/2 500 = 0.80, picnic_caterer 1/2 000 = 0.50, grill_pub 2/3 000 =
+        // 0.67, steakhouse_group 4/4 000 = 1.00, roadhouse_group 4/4 000 =
+        // 1.00, smokehouse_wholesale 6/5 000 = 1.20, bbq_festival 10/5 000 =
+        // 2.00, county_fair 8/6 000 = 1.33) and the branch put about 1.6 of
+        // them into paid windows (92 boxes in the 58 000 ticks measured; it
+        // was 1.4 against the four-order board's ~4.5, and 1.0 and 88 000
+        // ticks while a case was one bottle, and the whole of that change
+        // follows the BBQ bottler's 8-bottle, 200-tick shape, measured in PR
+        // #225's review — see the note on `bottled_ketchup` in
+        // `data/recipes.ron`), so it is the branch's throughput against the
+        // cadences the orders keep, not a shortage of demand — which is why
+        // doubling the demand bought only three minutes. Whoever wants
         // mustard sooner has three content-side levers and no Rust to write:
         // a smaller `boxes` here, more BBQ demand in `data/contracts.ron`, or
         // a faster BBQ recipe.
@@ -394,7 +407,11 @@
             // which asks for ketchup as well — a mixed order is still a
             // mustard order, and signing one without a mustard line is
             // signing up to strike out.
-            contracts: ["deli_counter", "hot_dog_stand", "deli_chain", "sandwich_franchise"],
+            contracts: [
+                "pretzel_cart", "deli_counter", "hot_dog_stand", "food_court",
+                "ballpark_vendor", "burger_bar", "deli_chain", "sandwich_franchise",
+                "charcuterie_supplier", "festival_caterers", "national_condiments",
+            ],
         ),
     ],
 )
