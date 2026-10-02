@@ -1052,26 +1052,38 @@ impl SaveData {
             .expect("SaveData is plain data and must always serialize")
     }
 
-    /// Parses RON text, checking `schema_version` **first** so a file from a
-    /// different build reports that rather than whatever the shape change
-    /// happens to break.
+    /// Parses RON text. A file from a different build reports its
+    /// `schema_version` rather than whatever the shape change happens to
+    /// break: the version is compared once the parse succeeds, and read on
+    /// its own only when the parse has failed.
     pub fn from_ron(text: &str) -> Result<SaveData, SaveError> {
         #[derive(Deserialize)]
         struct Header {
             schema_version: u32,
         }
         // A version mismatch is far more likely than a corrupt file, and its
-        // message is far more useful, so it is checked against a shape that
-        // only has the one field in it.
-        if let Ok(header) = ron::from_str::<Header>(text)
-            && header.schema_version != SAVE_SCHEMA_VERSION
-        {
-            return Err(SaveError::UnsupportedSchemaVersion {
-                found: header.schema_version,
-                supported: SAVE_SCHEMA_VERSION,
-            });
-        }
-        let data: SaveData = ron::from_str(text).map_err(SaveError::Parse)?;
+        // message is far more useful, so a file that does not parse is asked
+        // again against a shape that only has the one field in it.
+        //
+        // Only once the real parse has failed: reading that shape skips every
+        // other field through `deserialize_any`, and ron 0.12.2 scans the
+        // whole rest of the text for `..` on each number it skips that way
+        // (`Parser::next_bytes_is_float`), so on a good file it made every
+        // load quadratic in the file's length (DEVLOG, 2026-10-02).
+        let data: SaveData = match ron::from_str(text) {
+            Ok(data) => data,
+            Err(error) => {
+                if let Ok(header) = ron::from_str::<Header>(text)
+                    && header.schema_version != SAVE_SCHEMA_VERSION
+                {
+                    return Err(SaveError::UnsupportedSchemaVersion {
+                        found: header.schema_version,
+                        supported: SAVE_SCHEMA_VERSION,
+                    });
+                }
+                return Err(SaveError::Parse(error));
+            }
+        };
         if data.schema_version != SAVE_SCHEMA_VERSION {
             return Err(SaveError::UnsupportedSchemaVersion {
                 found: data.schema_version,
@@ -1326,8 +1338,8 @@ impl World {
         restore_ledgers(&mut world, &data);
         world.restore_production(restore_production(&data.production)?);
         restore_staff(&mut world, &data)?;
-        // `restore_staff` builds fresh pools, so the establishment the
-        // replayed `Place` commands computed in `rebuild_structure` is gone
+        // `restore_staff` builds fresh pools, so the establishment the one
+        // topology pass at the end of `rebuild_structure` computed is gone
         // by here. Sum it again, or every loaded world reads as needing
         // nobody and the hiring advice is silently wrong after a load.
         world.recompute_establishment();
@@ -1641,6 +1653,16 @@ fn check_item(
 /// commands (module doc). Funded one item at a time, so an arbitrarily large
 /// factory loads whatever its total bill (which once had to fit in `Fx`).
 fn rebuild_structure(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
+    world.begin_bulk_place();
+    let rebuilt = replay_placements(world, data);
+    world.end_bulk_place();
+    rebuilt
+}
+
+/// One `Purchase` + `Place` per saved placement, in save order — inside
+/// [`World::begin_bulk_place`], so each costs its own tiles rather than a
+/// pass over the whole floor.
+fn replay_placements(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
     for (index, placement) in data.placements.iter().enumerate() {
         if placement.kind == CROSSING_KIND {
             rebuild_crossing(world, placement)?;

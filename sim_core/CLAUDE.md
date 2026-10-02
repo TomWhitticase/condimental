@@ -29,10 +29,13 @@ the plan is `docs/ARCHITECTURE.md` §3/§4/§6/§10.
 
 - **`World::new` builds nothing** — empty grid and graph, `STARTING_MONEY`.
   Everything arrives via real `Purchase` + `Place` commands.
-- **`recompute_topology` runs only on `Place`/`Remove`/`Rotate`, never per
-  tick**: a full single-threaded rebuild of occupancy, hand-off links and fluid
-  networks (volumes carried across by tile). `rayon`/partitioning is milestone
-  8, deliberately unbuilt.
+- **`recompute_topology` runs only when the factory changes, never per tick**:
+  on `Place`/`Remove`/`Rotate`, a splitter's mode and a tank's fluid (which
+  change what a link carries), and twice in a load — once after the bulk
+  placement (`World::begin_bulk_place`, which skips it per `Place`) and once
+  after the restore. A full single-threaded rebuild of occupancy, hand-off
+  links and fluid networks (volumes carried across by tile).
+  `rayon`/partitioning is milestone 8, deliberately unbuilt.
 - **Declaring a *different* fluid empties the tank *and* the run it feeds**,
   before the recompute (`try_set_tank_fluid` → `purge_runs_fed_by`). Carrying
   volumes across by tile would otherwise relabel the fluid already in the

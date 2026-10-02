@@ -233,7 +233,9 @@ calls "Stock Shelving" — see DECISIONS.md, 2026-09-21.
 **Status (2026-09-08):** the "compute connected components once per topology
 change, not every tick" half is real for fluid networks and belt/machine
 links. `World::recompute_topology` rebuilds the occupancy grid, every
-hand-off link and every pipe network on `Place`/`Remove`/`Rotate`, never
+hand-off link and every pipe network when the factory changes —
+`Place`/`Remove`/`Rotate`, a splitter's mode, a tank's fluid, and once at the
+end of a load's bulk placement rather than per replayed `Place` — never
 from `tick`. It is a full single-threaded rebuild, not an incremental
 union-find: at this scale that is cheaper and cannot drift out of sync. It
 flips around milestone 8, in that one function. `rayon`, per-network threads

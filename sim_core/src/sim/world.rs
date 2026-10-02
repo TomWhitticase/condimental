@@ -45,12 +45,15 @@
 //! (ARCHITECTURE.md §3.8's union-find rule, made real for the first time —
 //! see [`World::recompute_topology`]). `Place`, `Remove` and `Rotate` are
 //! the only three things that can change what is adjacent to what, so they
-//! are the only three that pay for the recompute. Item movement inside a
-//! tick still uses the exact same [`BeltSegment`]/[`Machine`]/
-//! [`FluidNetwork`] mechanics it always did; only how a pair of them is
-//! *linked* changed. The recompute is a single-threaded pass — `rayon`
-//! parallelism and multi-network partitioning stay ARCHITECTURE.md §9
-//! milestone 8's scope, deliberately not half-built here.
+//! pay for the recompute; a splitter's mode and a tank's fluid change what a
+//! link carries, and pay for it too. A load's bulk placement
+//! ([`World::begin_bulk_place`]) runs it once at the end, not per `Place`.
+//! Item movement inside a tick still uses the exact same
+//! [`BeltSegment`]/[`Machine`]/[`FluidNetwork`] mechanics it always did;
+//! only how a pair of them is *linked* changed. The recompute is a
+//! single-threaded pass — `rayon` parallelism and multi-network partitioning
+//! stay ARCHITECTURE.md §9 milestone 8's scope, deliberately not half-built
+//! here.
 //!
 //! **3. The hopper, the fluid tank and the dock are ordinary placeable
 //! kinds.** All three used to be `Option`-less fields constructed once at a
@@ -2481,6 +2484,11 @@ pub struct World {
     /// where the registries live.
     guide: GuideRegistry,
     topology: Topology,
+    /// True only inside the save loader's structure rebuild
+    /// ([`World::begin_bulk_place`]): `Place` records its tiles in the grid
+    /// and leaves the full topology pass to the one the loader runs at the
+    /// end. Never true on a live world, so never saved.
+    bulk_placing: bool,
     /// What the factory made and used, per item, over several rolling
     /// windows and for all time (the production-stats epic, `stats.rs`).
     /// Written by `Machine::tick` and by a contract payout in step 7 of
@@ -2656,6 +2664,7 @@ impl World {
             staff: StaffPools::bundled(),
             guide: GuideRegistry::bundled(),
             topology: Topology::default(),
+            bulk_placing: false,
             production: ProductionLedger::new(),
         }
     }
@@ -2795,7 +2804,10 @@ impl World {
     ///
     /// Folded off `topology.racks` rather than kept, so it cannot drift from
     /// the floor: `recompute_topology` runs on every `Place`, `Remove` and
-    /// `Rotate`, and a filter is read straight off the rack.
+    /// `Rotate`, and a filter is read straight off the rack. The one window
+    /// where it lags is inside a load's bulk placement
+    /// ([`World::begin_bulk_place`]), where `topology.racks` stays empty until
+    /// [`World::end_bulk_place`]; nothing asks for the pool in between.
     pub fn bay_pool(&self) -> BayPool {
         let mut pool = BayPool::default();
         for &entity in &self.topology.racks {
@@ -3320,7 +3332,11 @@ impl World {
                 self.assemble_crossing(occupant, kind, direction);
                 let taken = self.shop.owned.take_one(kind);
                 debug_assert!(taken, "plan_place checked the owned count");
-                self.recompute_topology();
+                // The occupant already holds its tile and its count, so a
+                // load has nothing to keep exact here and defers the pass.
+                if !self.bulk_placing {
+                    self.recompute_topology();
+                }
                 self.mark_tiles_dirty(&tiles);
                 return occupant;
             }
@@ -3433,7 +3449,19 @@ impl World {
 
         let taken = self.shop.owned.take_one(kind);
         debug_assert!(taken, "plan_place checked the owned count");
-        self.recompute_topology();
+        if self.bulk_placing {
+            // The grid is all the check above reads (the loader's validation
+            // has already refused overlapping footprints, but the check keeps
+            // its meaning), and `all` is what the loader's refusal check
+            // counts (`placement_count`): a load keeps those two exact as it
+            // goes and defers everything else.
+            for &claimed in &tiles {
+                self.topology.grid.insert(claimed, entity);
+            }
+            self.topology.all.push(entity);
+        } else {
+            self.recompute_topology();
+        }
         self.mark_tiles_dirty(&tiles);
         entity
     }
@@ -3603,8 +3631,9 @@ impl World {
     /// live state — the load-time counterpart of the `Place` commands that
     /// drive it during play.
     ///
-    /// Loading rebuilds structure through real `Purchase`/`Place`, and each
-    /// of those recomputes the topology on its own. A tank's **declared**
+    /// Loading rebuilds structure through real `Purchase`/`Place`, inside a
+    /// bulk placement ([`World::begin_bulk_place`]) whose end runs the
+    /// topology pass once over all of them. A tank's **declared**
     /// fluid, though, is restored afterwards with the bodies, and a
     /// declaration is an *input* to pipe naming
     /// ([`resolve_network_fluids`]) rather than a record of its output. So
@@ -3622,18 +3651,38 @@ impl World {
         self.recompute_topology();
     }
 
+    /// Starts the save loader's structure rebuild: until
+    /// [`World::end_bulk_place`], each `Place` claims its tiles in the grid —
+    /// which is all a later `Place` checks against — and counts itself in
+    /// [`World::placement_count`], and skips the full topology pass.
+    /// Replaying a save's placements one full pass each was quadratic in the
+    /// placement count (DEVLOG, 2026-10-02).
+    pub(super) fn begin_bulk_place(&mut self) {
+        self.bulk_placing = true;
+    }
+
+    /// Ends [`World::begin_bulk_place`] with the one topology pass the
+    /// replayed placements skipped — the same pass a last ordinary `Place`
+    /// would have run, over the same entities.
+    pub(super) fn end_bulk_place(&mut self) {
+        self.bulk_placing = false;
+        self.recompute_topology();
+    }
+
     /// Sums the ESTABLISHMENT — every head the placed machinery needs to be
     /// fully crewed, whether or not any of it is running — and hands it to
     /// [`StaffPools::set_required`], together with the two things that
     /// figure is useless without: what the MOTHBALLED machinery would need,
     /// and which kinds are asking.
     ///
-    /// Called from [`Self::recompute_topology`], which is reached only from
-    /// `Place`, `Remove` and `Rotate`, so the staffing requirement moves
-    /// when the FACTORY changes and at no other time. **Also called by the
-    /// save loader after it restores the pools**: `StaffPools::restore`
-    /// builds fresh pools, which would otherwise drop the establishment the
-    /// replayed `Place` commands had just computed and load every world
+    /// Called from [`Self::recompute_topology`], which runs when the factory
+    /// changes — `Place`, `Remove`, `Rotate`, a splitter's mode, a tank's
+    /// fluid, and in a load once from [`Self::end_bulk_place`] and again
+    /// after the restore — so the staffing requirement moves when the
+    /// FACTORY changes and at no other time. **Also called by
+    /// the save loader after it restores the pools**: `StaffPools::restore`
+    /// builds fresh pools, which would otherwise drop the establishment
+    /// `end_bulk_place`'s pass had just computed and load every world
     /// needing nobody. And by `try_set_mothballed`, which is a change to
     /// the factory that moves no tile.
     ///
@@ -5633,12 +5682,11 @@ impl World {
     /// against a tank, with two extra steps at the end.
     ///
     /// The last is the topology recompute. `sim_core/CLAUDE.md` says the
-    /// pass runs on `Place`/`Remove`/`Rotate` and never per tick, and this
-    /// does not weaken that rule: it is the same rule, applied to the same
-    /// kind of thing. A declared fluid is a *seed* of
-    /// [`resolve_network_fluids`], so changing it changes what the runs in
-    /// this world carry exactly as moving a machine does, and a discrete
-    /// player action is precisely what the pass is allowed to cost.
+    /// pass runs when the factory changes and never per tick, and this is
+    /// that rule, applied to the same kind of thing. A declared fluid is a
+    /// *seed* of [`resolve_network_fluids`], so changing it changes what the
+    /// runs in this world carry exactly as moving a machine does, and a
+    /// discrete player action is precisely what the pass is allowed to cost.
     ///
     /// **The one before it is what makes the emptying honest.**
     /// [`FluidTank::declare`] zeroes the tank so that the old fluid is not
@@ -5820,8 +5868,8 @@ impl World {
     /// the occupancy grid, the hand-off links and the fluid networks are
     /// all still what they were, and a mothballed machine keeps its taps so
     /// that returning it to service needs no rebuild either. Calling the
-    /// narrow one keeps the rule that a full rebuild happens on
-    /// `Place`/`Remove`/`Rotate` and nowhere else.
+    /// narrow one keeps the rule that a full rebuild happens only when
+    /// something it rebuilds has changed.
     fn try_set_mothballed(&mut self, tile: TileCoord, enabled: bool) -> bool {
         let Some(&entity) = self.topology.grid.get(&tile) else {
             return false;
