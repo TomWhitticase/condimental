@@ -395,7 +395,8 @@ pub struct EstablishmentEntry {
 /// `left_last_payday` persist (and ride the save); `available`, `demand`
 /// and `assigned` are this tick's tally, reset at the top of every tick;
 /// `required` is the ESTABLISHMENT, derived from what is placed and
-/// changed only by a topology change (see [`StaffPools::set_required`]).
+/// changed only when the player changes the factory (see
+/// [`StaffPools::set_required`]).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CategoryPool {
     pub headcount: u32,
