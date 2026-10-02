@@ -580,6 +580,7 @@ fn the_splitter_wire_form_has_the_documented_shape() {
         fields,
         vec![
             "direction",
+            "exits",
             "footprint",
             "items",
             "kind",
@@ -894,4 +895,257 @@ fn a_splitters_mode_survives_a_save() {
     );
     assert_eq!(after_load, cross.counts());
     assert_eq!(after_load, (4, 4, 4));
+}
+
+/// The splitter's entry in its chunk snapshot: `(items, exits)`, front item
+/// first — what the renderer draws each item's path across the tile from.
+fn splitter_plan(world: &World) -> (Vec<f64>, Vec<String>) {
+    let value =
+        serde_json::to_value(world.chunk_snapshot((0, 0))).expect("a chunk snapshot serializes");
+    let entry = &value["splitters"][0];
+    let items = entry["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .map(|pair| pair[1].as_f64().expect("a distance"))
+        .collect();
+    let exits = entry["exits"]
+        .as_array()
+        .expect("every splitter snapshot carries exits")
+        .iter()
+        .map(|d| d.as_str().expect("a direction name").to_string())
+        .collect();
+    (items, exits)
+}
+
+/// The owner's report (2026-10-02): an item routed out of a splitter's side
+/// carried straight on across the tile and only turned once it had left it.
+/// The renderer turns it toward `exits[i]` instead, so that has to be where
+/// it really goes. For every mode, every hand-off off the splitter lands on
+/// the run its front item was planned for the tick before; and while nothing
+/// is backed up, an item's plan never changes between entering the tile and
+/// leaving it — so a drawn item never jumps from one path to another.
+#[test]
+fn every_item_leaves_a_splitter_by_the_exit_it_was_drawn_heading_for() {
+    for (mode, expected) in [
+        ("left", (6, 6, 0)),
+        ("right", (6, 0, 6)),
+        ("t_junction", (0, 6, 6)),
+        ("three_way", (4, 4, 4)),
+    ] {
+        let mut cross = Cross::build(mode, 12);
+        let mut handoffs = 0;
+        let mut seen_turn = false;
+        for tick in 0..3000 {
+            let before = cross.counts();
+            let (items, exits) = splitter_plan(&cross.world);
+            assert_eq!(items.len(), exits.len(), "{mode}: one exit per item");
+            for (distance, exit) in items.iter().zip(&exits) {
+                if *distance > 0.5 && exit != "east" {
+                    seen_turn = true;
+                }
+            }
+            cross.world.tick();
+            let after = cross.counts();
+            let (_, exits_after) = splitter_plan(&cross.world);
+            let landed = match (after.0 - before.0, after.1 - before.1, after.2 - before.2) {
+                (0, 0, 0) => None,
+                (1, 0, 0) => Some("east"),
+                (0, 1, 0) => Some("south"),
+                (0, 0, 1) => Some("north"),
+                other => panic!("{mode} tick {tick}: at most one hand-off per tick, got {other:?}"),
+            };
+            // The items still on the tile kept their plans: shifted by one if
+            // the front one left, untouched if nothing did. (An item that
+            // arrived this tick is at the back and has no earlier plan.)
+            let kept = if landed.is_some() {
+                &exits[1..]
+            } else {
+                &exits[..]
+            };
+            let common = kept.len().min(exits_after.len());
+            assert_eq!(
+                &exits_after[..common],
+                &kept[..common],
+                "{mode} tick {tick}: an item on the tile changed its planned exit"
+            );
+            if let Some(direction) = landed {
+                handoffs += 1;
+                assert_eq!(
+                    exits[0], direction,
+                    "{mode} tick {tick}: the front item was drawn heading {} but left {direction}",
+                    exits[0]
+                );
+            }
+        }
+        assert_eq!(handoffs, 12, "{mode}: every unit crossed the splitter");
+        assert_eq!(cross.counts(), expected, "{mode}: dealing is unchanged");
+        assert!(
+            seen_turn,
+            "{mode}: a side exit is planned while the item is still on the tile"
+        );
+    }
+}
+
+/// A side that is full is planned past, exactly as the hand-off's fallback
+/// passes it: with the straight run backed up solid, every item crossing a
+/// `left` splitter is drawn turning left — not drawn carrying straight on and
+/// then popping sideways onto the branch.
+#[test]
+fn a_backed_up_side_is_planned_past_like_the_fallback_passes_it() {
+    // One straight tile with nothing beyond it fills and then refuses; the
+    // branch is long enough for everything else.
+    let mut j = Junction::build(1, 3, 12);
+    let mut misplanned = 0;
+    let mut south_with_straight_at = Vec::new();
+    for _ in 0..3000 {
+        let before = (
+            items_on(&j.world, &j.straight),
+            items_on(&j.world, &j.branch),
+        );
+        let (_, exits) = splitter_plan(&j.world);
+        j.world.tick();
+        let after = (
+            items_on(&j.world, &j.straight),
+            items_on(&j.world, &j.branch),
+        );
+        let landed = if after.0 > before.0 {
+            Some("east")
+        } else if after.1 > before.1 {
+            south_with_straight_at.push(before.0);
+            Some("south")
+        } else {
+            None
+        };
+        if landed.is_some_and(|direction| exits[0] != direction) {
+            misplanned += 1;
+        }
+    }
+    let full = items_on(&j.world, &j.straight);
+    assert_eq!(j.total(), 12, "mass is conserved");
+    let fallbacks = south_with_straight_at
+        .iter()
+        .filter(|&&n| n == full)
+        .count();
+    assert!(
+        fallbacks >= 2,
+        "the fixture must send more than one unit past the full straight tile \
+         ({fallbacks}; straight holds {full})"
+    );
+    assert_eq!(
+        misplanned, 0,
+        "every hand-off went where it was drawn heading"
+    );
+}
+
+/// Raw tomatoes waiting in the input buffer of the machine at `tile`.
+fn machine_input_at(world: &World, tile: TileCoord) -> u32 {
+    world
+        .chunk_snapshot((0, 0))
+        .machines
+        .into_iter()
+        .find(|m| m.tile == tile)
+        .expect("the machine is standing")
+        .input
+        .iter()
+        .map(|(_, qty)| qty)
+        .sum()
+}
+
+/// A MACHINE whose input buffer is full is planned past, by the same test
+/// the belt-to-machine hand-off refuses on (`Machine::input`'s room), not
+/// only a backed-up belt: a `left` splitter whose straight side is a
+/// switched-off crusher draws every item turning left once that crusher has
+/// filled up.
+#[test]
+fn a_full_machine_is_planned_past_like_the_fallback_passes_it() {
+    let mut world = funded();
+    build(&mut world, "hopper", (-1, 0), Direction::East);
+    build(&mut world, SPLITTER_KIND, (0, 0), Direction::East);
+    // Straight (east): a crusher with its inlet face on the splitter,
+    // switched off so it never crafts and its input buffer only fills.
+    build(&mut world, "crusher", (1, 0), Direction::East);
+    world.issue_command(PlayerCommand::SetMothballed {
+        tile: (1, 0),
+        enabled: true,
+    });
+    let branch = build_belt_run(&mut world, (0, -1), Direction::South, 12);
+    common::buy(&mut world, "tomato", HOPPER_CAPACITY);
+    world.issue_command(PlayerCommand::FillHopper {
+        amount: HOPPER_CAPACITY,
+        tile: None,
+    });
+    let (mut to_machine, mut to_branch, mut misplanned) = (0, 0, 0);
+    for _ in 0..6000 {
+        let before = (machine_input_at(&world, (1, 0)), items_on(&world, &branch));
+        let (_, exits) = splitter_plan(&world);
+        world.tick();
+        let after = (machine_input_at(&world, (1, 0)), items_on(&world, &branch));
+        let landed = if after.0 > before.0 {
+            to_machine += 1;
+            Some("east")
+        } else if after.1 > before.1 {
+            to_branch += 1;
+            Some("south")
+        } else {
+            None
+        };
+        if landed.is_some_and(|direction| exits[0] != direction) {
+            misplanned += 1;
+        }
+    }
+    assert!(to_machine > 0, "the crusher took some before it filled");
+    assert!(
+        to_branch > to_machine,
+        "the fixture must send most units past the full crusher \
+         ({to_machine} to it, {to_branch} past it)"
+    );
+    assert_eq!(
+        misplanned, 0,
+        "every hand-off went where it was drawn heading"
+    );
+}
+
+/// A MOTHBALLED dock is planned past too — the dock hand-off's refusal
+/// (`Dock::mothballed`, then `Dock::has_room_for`) is what the plan asks: a
+/// `left` splitter whose left side is a switched-off dock draws every item
+/// going straight on, not alternately turning toward a dock that will never
+/// take it.
+#[test]
+fn a_mothballed_dock_is_planned_past_like_the_fallback_passes_it() {
+    let mut world = funded();
+    build(&mut world, "hopper", (-1, 0), Direction::East);
+    build(&mut world, SPLITTER_KIND, (0, 0), Direction::East);
+    let straight = build_belt_run(&mut world, (1, 0), Direction::East, 6);
+    // Left (south): a dock whose inlet face is (0, -1), as in
+    // `a_splitter_feeds_a_machine_and_a_dock_the_way_a_belt_does`.
+    build(&mut world, "dock", (0, -2), Direction::South);
+    world.issue_command(PlayerCommand::SetMothballed {
+        tile: (0, -2),
+        enabled: true,
+    });
+    common::buy(&mut world, "tomato", HOPPER_CAPACITY);
+    world.issue_command(PlayerCommand::FillHopper {
+        amount: 12,
+        tile: None,
+    });
+    let (mut handoffs, mut misplanned) = (0, 0);
+    for _ in 0..3000 {
+        let before = items_on(&world, &straight);
+        let (_, exits) = splitter_plan(&world);
+        world.tick();
+        if items_on(&world, &straight) > before {
+            handoffs += 1;
+            if exits[0] != "east" {
+                misplanned += 1;
+            }
+        }
+    }
+    let shipped: u32 = world.dock_snapshots().iter().map(|d| d.shipped_total).sum();
+    assert_eq!(shipped, 0, "a mothballed dock takes nothing");
+    assert_eq!(handoffs, 12, "every unit went straight on");
+    assert_eq!(
+        misplanned, 0,
+        "every hand-off went where it was drawn heading"
+    );
 }

@@ -48,7 +48,7 @@ outpace the ingredients and the wage bill.
 - **Progression is a gate on the content, not a tech tree.** BBQ's three ingredients
   and its four contracts are held back until your tenth lifetime delivery, so a new
   game's market and board show only what a one-sauce factory can use.
-- **Staff as a capacity constraint.** Four categories (manufacturing, maintenance,
+- **Staff as a capacity constraint.** Four categories (manufacturing, engineering,
   packaging, logistics). Machines need a crew to run at all, wages come out of the
   same money counter every payday, and an unpaid head idles before it walks. Anything
   that asks for a crew can be **mothballed** — switched off, off the payroll, holding

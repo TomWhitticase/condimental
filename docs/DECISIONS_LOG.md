@@ -32,6 +32,37 @@ See [WORKFLOW.md](WORKFLOW.md).
   add detail to the board. The list never shows less than its first whole
   row (`_contract_list_hard`), and every plate line is one line no wider than
   the column — no autowrap. Full record in `docs/DECISIONS.md`.
+
+- 2026-10-02 **The maintenance crew is called engineering; a renamed staff
+  category keeps its old id in `renamed_from`.** The category is
+  `StaffCategory(id: "engineering", name: "Engineering", ...,
+  renamed_from: ["maintenance"])` in `data/staff.ron`; its meaning is
+  unchanged (repairs and keeps equipment running, GAMEPLAY.md §7). A save's
+  staff maps and `SavedMachine::refused_by` are read through
+  `StaffCatalog::resolve`, which maps a former id to its category, so every
+  save written before the rename loads with its counts on `engineering` and
+  the next save writes only the new id — no save-schema bump. Commands and
+  `machines.ron` use `StaffCatalog::get`, which knows live ids only. The
+  loader refuses a former id that is a live id or another former id
+  (`StaffLoadError::AmbiguousFormerId`), and a save naming one category
+  under both ids is `SaveError::BadStaff`. Never drop a `renamed_from`
+  entry: an old save would stop loading. Full record in
+  `docs/DECISIONS.md`.
+
+- 2026-10-02 **An item on a splitter is drawn turning toward the exit it
+  will take.** `SplitterSnapshot::exits` gives each item on the tile a world
+  direction, front first. It is `Splitter::planned_exits`, the dealing rule
+  run forward on a copy, over the sides that would take an item right now
+  (`World::would_take`, the hand-offs' own refusal tests; a running belt is
+  never "full"). If no side would take one, it uses every connected side.
+  Godot draws a side exit as the corner belt's quarter arc from the back face
+  (`_quarter_arc_point`). The hand-off at the tile's end still decides, and
+  throughput and timing are unchanged. A side that fills or clears mid-tile
+  can still snap an item onto another path. The owner reported items
+  "continue forward until actually leave splitter". `tests/splitters.rs`
+  pins plan == destination for every mode. Full record in
+  `docs/DECISIONS.md`.
+
 - 2026-10-02 **Mustard is yellow and white, not yellow and black.** The
   owner's ruling. The mustard bottle (`item_bottle_mustard`) is a
   `mustard_gold` body with a WHITE label band and cap — both
@@ -45,6 +76,7 @@ See [WORKFLOW.md](WORKFLOW.md).
   legibility; brighten the white or move the neck instead.
   `mustard_gold` itself is unchanged, and so is the mustard case (gold
   print on cardboard). Full record in `docs/DECISIONS.md`.
+
 - 2026-10-02 **The game's typeface is Chakra Petch SemiBold.** It is set
   once, as `project.godot`'s `gui/theme/custom_font`, so every Label,
   Button and LabelSettings uses it and no GDScript names a font. The owner

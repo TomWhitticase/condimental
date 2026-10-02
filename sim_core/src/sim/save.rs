@@ -409,7 +409,11 @@ pub struct SavedItemStats {
 pub struct SavedStaff {
     /// Every category's headcount, keyed by id. A category the map does not
     /// name keeps its starting headcount (`StaffPools::restore`); an id the
-    /// catalog does not know is [`SaveError::UnknownStaffCategory`].
+    /// catalog does not know is [`SaveError::UnknownStaffCategory`]. A
+    /// category's former id (`StaffCategory::renamed_from`, e.g. a save's
+    /// `maintenance` since that crew became `engineering`) loads as that
+    /// category, in every map here and in `SavedMachine::refused_by`; the
+    /// save written after it names the current id.
     pub headcount: BTreeMap<String, u32>,
     pub next_payday_tick: u64,
     pub last_bill: u32,
@@ -1538,22 +1542,35 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
     }
     let staff_catalog = world.staff().catalog();
     if let Some(staff) = &data.staff {
-        for id in staff
-            .headcount
-            .keys()
-            .chain(staff.unpaid.keys())
-            .chain(staff.owed.keys())
-            .chain(staff.left_last_payday.keys())
-        {
-            if staff_catalog.get(id).is_none() {
-                return Err(SaveError::UnknownStaffCategory { id: id.clone() });
+        for map in [
+            &staff.headcount,
+            &staff.unpaid,
+            &staff.owed,
+            &staff.left_last_payday,
+        ] {
+            // `resolve`, not `get`: a former id (`renamed_from`) is a
+            // category a save written before its rename still names.
+            let mut seen: Vec<&str> = Vec::new();
+            for id in map.keys() {
+                let Some(category) = staff_catalog.resolve(id) else {
+                    return Err(SaveError::UnknownStaffCategory { id: id.clone() });
+                };
+                // A map naming a category under both its ids could only
+                // keep one of the two counts, silently.
+                if seen.contains(&category.id.as_str()) {
+                    return Err(SaveError::BadStaff {
+                        category: category.id.clone(),
+                        reason: format!("named twice in one map, once as its former id '{id}'"),
+                    });
+                }
+                seen.push(&category.id);
             }
         }
     }
     for placement in &data.placements {
         if let SavedBody::Machine(machine) = &placement.body
             && let Some(id) = &machine.refused_by
-            && staff_catalog.get(id).is_none()
+            && staff_catalog.resolve(id).is_none()
         {
             return Err(SaveError::UnknownStaffCategory { id: id.clone() });
         }
@@ -1794,6 +1811,15 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                     placement.tile,
                 )?;
                 let load = restore_load(&saved.load, placement.tile)?;
+                // Validated above, so `resolve` finds it; a former id
+                // (`renamed_from`) is stored as the category's current id.
+                let refused_by = saved.refused_by.as_ref().map(|id| {
+                    world
+                        .staff()
+                        .catalog()
+                        .resolve(id)
+                        .map_or_else(|| id.clone(), |c| c.id.clone())
+                });
                 let mut machine = world
                     .ecs_mut()
                     .get::<&mut Machine>(entity)
@@ -1807,7 +1833,7 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                         required_ticks,
                     });
                 machine.load = load;
-                machine.refused_by = saved.refused_by.clone();
+                machine.refused_by = refused_by;
                 machine.refusal_hold = saved.refusal_hold;
                 // The establishment is recomputed once after every body is
                 // restored (see `load`), so setting this here is enough to

@@ -13,7 +13,7 @@
 # Verifies:
 #   * a row's words and bar are pure functions of the wire's category
 #     (`hired N`, `assigned / demand` printed on the meter, `N short` in
-#     the warning colour, FIRE disabled at 0, the maintenance idle note),
+#     the warning colour, FIRE disabled at 0, the engineering idle note),
 #   * HIRE is gated on the establishment alone and the wire's own
 #     `hire_warns` only warns beside it (2026-09-26 — it used to refuse),
 #     and a row's `status_text` names heads idled or lost by a payday,
@@ -170,11 +170,11 @@ func _run_checks() -> void:
 	if bool(full["short_row"]):
 		_fail("a crewed row is not flagged short")
 	var idle: Dictionary = main._staff_row_state({
-		"id": "maintenance", "name": "Maintenance", "headcount": 0, "wage": 2,
+		"id": "engineering", "name": "Engineering", "headcount": 0, "wage": 2,
 		"demand": 0, "assigned": 0, "required": 0, "short": 0,
 	})
-	if idle["note"] != "nothing needs maintenance yet — nothing to hire for":
-		_fail("maintenance with nothing hired and nothing asked reads 'nothing needs maintenance yet — nothing to hire for', got '%s'" % idle["note"])
+	if idle["note"] != "nothing needs engineering yet — nothing to hire for":
+		_fail("engineering with nothing hired and nothing asked reads 'nothing needs engineering yet — nothing to hire for', got '%s'" % idle["note"])
 	if bool(idle["fire_enabled"]):
 		_fail("FIRE is disabled at headcount 0")
 	if idle["state_text"] != "":
@@ -184,7 +184,7 @@ func _run_checks() -> void:
 		"demand": 0, "assigned": 0, "required": 0, "short": 0,
 	})
 	if idle_logistics["note"] != "" or idle_logistics["meter_text"] != "0 / 0":
-		_fail("an emptied logistics crew keeps its (empty) meter, not maintenance's note")
+		_fail("an emptied logistics crew keeps its (empty) meter, not engineering's note")
 	var nobody_asked: Dictionary = main._staff_row_state({
 		"id": "packaging", "name": "Packaging", "headcount": 2, "wage": 2,
 		"demand": 0, "assigned": 0, "required": 0, "short": 0,
@@ -194,7 +194,7 @@ func _run_checks() -> void:
 	if not bool(nobody_asked["fire_enabled"]):
 		_fail("heads nothing needs must still be fireable — otherwise the payroll is a trap")
 	if bool(nobody_asked["hire_enabled"]):
-		_fail("HIRE is closed on a category with no establishment (the maintenance money sink)")
+		_fail("HIRE is closed on a category with no establishment (the engineering money sink)")
 
 	# --- 1b. HIRE is gated on the ESTABLISHMENT ALONE, and a payday that
 	# cannot cover the hire warns beside a button that still works
@@ -261,7 +261,7 @@ func _run_checks() -> void:
 		_fail("a missing row is no sources, not a crash")
 
 	# --- 1d. what each category does, one sentence per id (ticket 4) --------
-	for id in ["manufacturing", "maintenance", "packaging", "logistics"]:
+	for id in ["manufacturing", "engineering", "packaging", "logistics"]:
 		if String(main.STAFF_CATEGORY_BLURBS.get(id, "")) == "":
 			_fail("category %s has no blurb in STAFF_CATEGORY_BLURBS" % id)
 
@@ -319,7 +319,7 @@ func _run_checks() -> void:
 	# --- 1g. the panel leads with a verdict (requirement 2) ------------------
 	var verdict_short: Dictionary = main._staff_summary_state({"categories": [
 		{"id": "manufacturing", "name": "Manufacturing", "required": 5, "demand": 4, "short": 1},
-		{"id": "maintenance", "name": "Maintenance", "required": 0, "demand": 0, "short": 0},
+		{"id": "engineering", "name": "Engineering", "required": 0, "demand": 0, "short": 0},
 		{"id": "packaging", "name": "Packaging", "required": 3, "demand": 2, "short": 1},
 	]})
 	if verdict_short["text"] != "▲ 2 short — hire 1 manufacturing, 1 packaging":
@@ -398,7 +398,7 @@ func _run_checks() -> void:
 		"walked_out_last_payday": 0, "money": 500.0,
 		"categories": [
 			{"id": "manufacturing", "name": "Manufacturing", "headcount": 4, "wage": 2, "demand": 4, "assigned": 4, "short": 0},
-			{"id": "maintenance", "name": "Maintenance", "headcount": 0, "wage": 2, "demand": 0, "assigned": 0, "short": 0},
+			{"id": "engineering", "name": "Engineering", "headcount": 0, "wage": 2, "demand": 0, "assigned": 0, "short": 0},
 			{"id": "packaging", "name": "Packaging", "headcount": 2, "wage": 3, "demand": 2, "assigned": 2, "short": 0},
 			{"id": "logistics", "name": "Logistics", "headcount": 1, "wage": 2, "demand": 1, "assigned": 1, "short": 0},
 		],
@@ -453,7 +453,7 @@ func _run_checks() -> void:
 		"money": 8.0,
 		"categories": [
 			{"id": "manufacturing", "wage": 2, "owed": 4},
-			{"id": "maintenance", "wage": 2, "owed": 0},
+			{"id": "engineering", "wage": 2, "owed": 0},
 			{"id": "packaging", "wage": 2, "owed": 2},
 			{"id": "logistics", "wage": 2, "owed": 1},
 		],
@@ -462,7 +462,7 @@ func _run_checks() -> void:
 		_fail("the cascade leaves 3 unpaid (2 packaging + 1 logistics), got %d" % main._staff_unpaid_count_if_payday_now(cascade_snapshot))
 	var zero_wage_snapshot := {
 		"money": 0.0,
-		"categories": [{"id": "maintenance", "wage": 0, "owed": 5}],
+		"categories": [{"id": "engineering", "wage": 0, "owed": 5}],
 	}
 	if main._staff_unpaid_count_if_payday_now(zero_wage_snapshot) != 0:
 		_fail("a zero-wage head is never unpaid, even mid-cascade, got %d" % main._staff_unpaid_count_if_payday_now(zero_wage_snapshot))
@@ -719,21 +719,21 @@ func _run_checks() -> void:
 		_fail("FIRE removes one manufacturing head on the wire")
 	if _row("manufacturing")["hired_label"].text != "hired %d" % before:
 		_fail("the row follows a FIRE on the same call")
-	var maintenance_index: int = main._staff_row_ids.find("maintenance")
-	if maintenance_index >= 0 and int(_category("maintenance").get("headcount", 0)) == 0:
-		if not _row("maintenance")["fire_button"].disabled:
+	var engineering_index: int = main._staff_row_ids.find("engineering")
+	if engineering_index >= 0 and int(_category("engineering").get("headcount", 0)) == 0:
+		if not _row("engineering")["fire_button"].disabled:
 			_fail("FIRE is disabled on a category with nobody hired")
-		main._staff_fire(maintenance_index)
-		if int(_category("maintenance").get("headcount", 0)) != 0:
+		main._staff_fire(engineering_index)
+		if int(_category("engineering").get("headcount", 0)) != 0:
 			_fail("FIRE at 0 is a no-op")
-		main._staff_hire(maintenance_index)
-		if int(_category("maintenance").get("headcount", 0)) != 1:
-			_fail("HIRE on maintenance adds a head")
-		if _row("maintenance")["fire_button"].disabled:
+		main._staff_hire(engineering_index)
+		if int(_category("engineering").get("headcount", 0)) != 1:
+			_fail("HIRE on engineering adds a head")
+		if _row("engineering")["fire_button"].disabled:
 			_fail("FIRE is enabled once a head is hired")
-		if not _row("maintenance")["meter"].visible or _row("maintenance")["note_label"].visible:
-			_fail("a hired maintenance head replaces the idle note with the meter")
-		main._staff_fire(maintenance_index)
+		if not _row("engineering")["meter"].visible or _row("engineering")["note_label"].visible:
+			_fail("a hired engineering head replaces the idle note with the meter")
+		main._staff_fire(engineering_index)
 	main._staff_fire(-1)
 	main._staff_hire(99)
 	main._set_staff_open(false)
@@ -800,9 +800,9 @@ func _run_checks() -> void:
 	var short_border: StyleBoxFlat = short_row["panel"].get_theme_stylebox("panel")
 	if short_border.border_color != main.METER_FILL_WARN:
 		_fail("a short row is bordered in the warning colour")
-	if _row("maintenance")["state_label"].visible:
+	if _row("engineering")["state_label"].visible:
 		_fail("a category with nothing asking for it wears no chip")
-	if _row("maintenance")["panel"].get_theme_stylebox("panel").border_color == main.METER_FILL_WARN:
+	if _row("engineering")["panel"].get_theme_stylebox("panel").border_color == main.METER_FILL_WARN:
 		_fail("a row that is not short keeps the plain hairline border")
 	if short_row["meter_label"].text != "%d / %d" % [int(manufacturing.get("headcount", 0)), int(manufacturing.get("required", 0))]:
 		_fail("the manufacturing meter prints the wire's hired / required, got '%s'" % short_row["meter_label"].text)

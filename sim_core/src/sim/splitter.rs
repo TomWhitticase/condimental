@@ -323,6 +323,38 @@ impl Splitter {
         self.due = sides[(Self::position(sides, side) + 1) % sides.len()];
     }
 
+    /// The side each of the next `count` items will leave by, front item
+    /// first, if the sides marked in `open` (indexed by [`Side::index`])
+    /// keep taking and the rest keep refusing — this splitter's own dealing
+    /// rule run forward on a copy, so it never disagrees with
+    /// [`Self::offer_order`] and [`Self::record_output`].
+    ///
+    /// **Presentation only.** The hand-off at the tile's end still decides
+    /// (the module doc's rule, fallback included); this is what lets a
+    /// renderer turn an item toward its exit while it is still crossing the
+    /// tile instead of carrying it straight on and popping it sideways at
+    /// the end (the owner's report, 2026-10-02). It is a prediction from the
+    /// state as it stands: a side that fills or clears while an item is
+    /// mid-tile can still change where that item actually goes.
+    ///
+    /// With no side open nothing can leave, and every item is planned for
+    /// the due side — where it will go first the moment anything clears.
+    pub fn planned_exits(&self, open: [bool; 3], count: usize) -> Vec<Side> {
+        let mut cursor = *self;
+        (0..count)
+            .map(|_| {
+                let taker = cursor.offer_order().find(|side| open[side.index()]);
+                match taker {
+                    Some(side) => {
+                        cursor.record_output(side);
+                        side
+                    }
+                    None => cursor.due,
+                }
+            })
+            .collect()
+    }
+
     fn position(sides: &[Side], side: Side) -> usize {
         sides
             .iter()
@@ -483,6 +515,43 @@ mod tests {
                 assert!(mode.deals_to(restored.due()), "{mode:?} {due:?}");
             }
         }
+    }
+
+    /// The plan is the dealing rule run forward: with every side open it is
+    /// the strict rotation, a closed side is skipped exactly as the fallback
+    /// skips it, nothing open plans every item for the due side, and the
+    /// splitter itself is left untouched.
+    #[test]
+    fn planned_exits_follow_the_dealing_rule() {
+        use Side::*;
+        for mode in SplitMode::ALL {
+            let mut splitter = Splitter::new();
+            splitter.set_mode(mode);
+            let mut dealt = splitter;
+            assert_eq!(
+                splitter.planned_exits([true; 3], 6),
+                deal(&mut dealt, 6),
+                "{mode:?}"
+            );
+        }
+        let mut three = Splitter::new();
+        three.set_mode(SplitMode::ThreeWay);
+        three.record_output(Straight);
+        assert_eq!(three.due(), Left);
+        assert_eq!(
+            three.planned_exits([true, false, true], 4),
+            vec![Right, Straight, Right, Straight],
+            "left is closed, so the rotation skips it"
+        );
+        assert_eq!(three.due(), Left, "planning never moves the cursor");
+        assert_eq!(three.planned_exits([false; 3], 3), vec![Left, Left, Left]);
+        let mut left = Splitter::new();
+        left.set_mode(SplitMode::Left);
+        assert_eq!(
+            left.planned_exits([true, true, true], 3),
+            vec![Straight, Left, Straight],
+            "a side the mode does not deal to is never planned, open or not"
+        );
     }
 
     #[test]
