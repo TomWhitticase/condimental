@@ -1660,6 +1660,8 @@ var _shop_section_list: Array = []
 var _shop_search: LineEdit
 var _shop_no_match: Label
 ## The most of the query the no-match line repeats back before it ends in "…".
+## It holds the width only because the full catalog is wider than the line at
+## this length; `test_shop_search.gd` types a 120-character miss to check it.
 const SHOP_NO_MATCH_QUERY_CHARS := 32
 var _shop_open := false
 ## How many icon slots fit across before wrapping. **SIX**, and the number
@@ -6774,6 +6776,12 @@ func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	panel_style.border_width_bottom = _ui_i(2)
 	panel_style.set_content_margin_all(_ui_px(16.0))
 
+	# A rebuilt HUD (a second `_ready`, as every `--script` test gets) starts
+	# these over: kept, `_shop_grid_for` found the OLD menu's section first,
+	# so every card went into a panel no longer on screen and the new one was
+	# measured, and drawn, empty.
+	_shop_section_list.clear()
+	_shop_slots.clear()
 	_shop_menu = PanelContainer.new()
 	_shop_menu.name = "ShopMenu"
 	_shop_menu.add_theme_stylebox_override("panel", panel_style)

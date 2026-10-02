@@ -201,6 +201,16 @@ func _initialize() -> void:
 ## that left the panel a different size from the whole catalog's — or "".
 ## Fitted to its matches, the panel shrank and re-centred on every keystroke.
 func _size_drift(main) -> String:
+	# The panel measured must be the one holding the cards: an empty one is
+	# the same size whatever is typed, and would pass this with no fix at all.
+	for slot in main._shop_slots:
+		if not main._shop_menu.is_ancestor_of(slot["button"]):
+			return "slot '%s' is not in the build menu on screen — the size checks below would measure an empty panel" % slot["kind"]
+	# A real window's size: the headless root is too short for the catalog,
+	# so its scroll sat at the same floor height whatever matched and an
+	# unpinned panel kept its size by accident.
+	root.size = Vector2i(1600, 900)
+	main._position_shop_menu()
 	var full: Vector2 = main._shop_menu.get_combined_minimum_size()
 	var pos: Vector2 = main._shop_menu.position
 	for text in [_query, "zzqqxx".repeat(20), ""]:
