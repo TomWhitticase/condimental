@@ -13111,6 +13111,34 @@ var _config_machine_state: Label
 var _config_mothball_button: Button
 var _config_mothball_note: Label
 var _config_mothballed := false
+## The close hint along the panel's foot — the first line the yield ladder
+## sheds (`_fit_config_panel`).
+var _config_footer: Label
+## The picker's note both ways the ladder can show it: every gate spelled
+## out, or folded to one line (`_set_config_picker_note`).
+var _config_note_full := ""
+var _config_note_condensed := ""
+## How far down the yield ladder the panel went this frame (issue #206).
+var _config_yielded := 0
+
+## The configuration panel's yield ladder (issue #206), in the order its rungs
+## are shed: §5c's "a cursor panel with nowhere to stand yields lines" rule,
+## applied to the one panel that commands. At 1280x720 the band above the
+## hotbar is 510px and a hopper with two gates still shut was 821px tall, so
+## its gate lines and footer were drawn off the bottom of the window. Each
+## rung loses only what is said again elsewhere on the same frame or under
+## the pointer: the close hint is the ✕ button's tooltip, the level bar's
+## number is printed in the line above it, the auto-fill note is the
+## AUTO-FILL button's tooltip, the picker's heading is what the title and the
+## slots already say, and each gate keeps its sentence on its padlocked
+## slot's tooltip once the lines fold to one.
+const CONFIG_YIELD_FOOTER := 1
+const CONFIG_YIELD_LEVEL_BAR := 2
+const CONFIG_YIELD_AUTO_NOTE := 3
+const CONFIG_YIELD_PICKER_HEADING := 4
+const CONFIG_YIELD_GATE_LINES := 5
+const CONFIG_CLOSE_HINT := "ESC, ✕, or the building again: close"
+const CONFIG_AUTO_NOTE := "tops up from stock every tick; never buys"
 
 ## What the picker's note says under a HOPPER's slots. A tank's is chosen
 ## per state by `_tank_picker_note`, because an undeclared tank has
@@ -13120,7 +13148,7 @@ const HOPPER_PICKER_NOTE := "switching empties the hopper"
 ## And under a RACK's. A rack's pick moves no stock — the ledger is the same
 ## ledger, only which shelves it may stand on changes — so there is nothing
 ## to warn about, only what the pick means.
-const RACK_PICKER_NOTE := "a picked ingredient has these shelves to itself — Any shares them"
+const RACK_PICKER_NOTE := "a pick has these shelves to itself — Any shares them"
 ## The rack picker's "any" slot, which is also what an open rack's `filter`
 ## (`null` on the wire) reads as here — see `_rack_filter_of`.
 const RACK_ANY_CHOICE := ""
@@ -13139,7 +13167,16 @@ const SPLITTER_PICKER_NOTE := "items take turns among the open exits"
 ## clipboard at 1280x720. There is no position for a panel that wide, so it
 ## was drawn straight over the clipboard. `CONFIG_PICKER_COLUMNS` is why the
 ## row cannot do that again.
-const CONFIG_PANEL_WIDTH := 260.0 * UI_SCALE
+##
+## Wide enough for SIX slots a row (issue #206). At four, a hopper's six raw
+## solids took two rows and a rack's nine took three, and every row is 117px of
+## a 510px band at 1280x720 — width is the cheap axis, height the dear one.
+## The 572px clear of a signed clipboard above is the ceiling, so the slots
+## and gaps narrowed to make room rather than the panel crossing it: 554px
+## outside the margins, which leaves 18px. `test_hud_plates.gd` holds it to
+## that. The width also takes a rack's title ("Stock Shelving — Tomato only"),
+## which at the old width made the panel wider than this constant says.
+const CONFIG_PANEL_WIDTH := 345.0 * UI_SCALE
 ## Where the panel sits relative to the building's projected centre — up and
 ## to the right, so it stands BESIDE the thing it configures rather than on
 ## top of it. `_position_config_panel` flips and clamps from here.
@@ -13149,15 +13186,20 @@ const CONFIG_LEVEL_BAR_HEIGHT := 14.0 * UI_SCALE
 ## picker was hoppers only and every raw solid was one short word; the fluid
 ## side brought "Liquid Smoke", which wrapped and spilled out of the slot
 ## over the note beneath it.
-const CONFIG_PICKER_SLOT_SIZE := Vector2(58.0, 78.0) * UI_SCALE
+##
+## 54 wide rather than 58 since issue #206, so six fit a row. 54 is the
+## narrowest at which "Molasses" still fits whole at the name's floor size
+## (`CONFIG_PICKER_NAME_MIN_FONT_DELTA`); at 52 it broke as `Molasse` / `s`,
+## issue #106's defect again.
+const CONFIG_PICKER_SLOT_SIZE := Vector2(54.0, 78.0) * UI_SCALE
 ## The gap between slots, in both axes now that they wrap.
-const CONFIG_PICKER_SLOT_GAP := 6.0 * UI_SCALE
+const CONFIG_PICKER_SLOT_GAP := 4.0 * UI_SCALE
 ## How many slots fit across `CONFIG_PANEL_WIDTH` — the picker WRAPS at this
 ## many rather than growing the panel sideways for ever (see the width's own
 ## note). Derived rather than typed so a slot resize cannot leave a stale
 ## number behind, and floored at one so a hypothetical slot wider than the
-## panel still lays out. Four at today's sizes: 4x87 + 3x9 = 375 of the
-## available 390.
+## panel still lays out. Six at today's sizes: 6x81 + 5x6 = 516 of the
+## available 517.5.
 const CONFIG_PICKER_COLUMNS := maxi(
 	1, int((CONFIG_PANEL_WIDTH + CONFIG_PICKER_SLOT_GAP) / (CONFIG_PICKER_SLOT_SIZE.x + CONFIG_PICKER_SLOT_GAP))
 )
@@ -13227,6 +13269,9 @@ func _build_config_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void
 	close_button.text = "✕"
 	close_button.focus_mode = Control.FOCUS_NONE
 	close_button.custom_minimum_size = _ui_v(Vector2(24, 22))
+	# The footer's words, kept under the pointer for when the yield ladder
+	# sheds the footer itself (issue #206).
+	close_button.tooltip_text = CONFIG_CLOSE_HINT
 	for state in ["normal", "hover", "pressed", "disabled", "focus"]:
 		close_button.add_theme_stylebox_override(state, _shop_slot_style(state))
 	close_button.pressed.connect(_close_config_panel)
@@ -13303,6 +13348,7 @@ func _build_config_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void
 	_config_auto_button.name = "ConfigAutoFill"
 	_config_auto_button.focus_mode = Control.FOCUS_NONE
 	_config_auto_button.custom_minimum_size = Vector2(CONFIG_PANEL_WIDTH, _ui_px(30))
+	_config_auto_button.tooltip_text = CONFIG_AUTO_NOTE
 	_config_auto_button.pressed.connect(_on_config_auto_pressed)
 	body.add_child(_config_auto_button)
 	_apply_config_auto_state(false)
@@ -13319,7 +13365,7 @@ func _build_config_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void
 	auto_note.label_settings = note_settings
 	auto_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	auto_note.custom_minimum_size.x = CONFIG_PANEL_WIDTH
-	auto_note.text = "tops up from stock every tick; never buys"
+	auto_note.text = CONFIG_AUTO_NOTE
 	body.add_child(auto_note)
 
 	# --- The contents picker (hoppers and, since issue #43, tanks) ---------
@@ -13388,7 +13434,9 @@ func _build_config_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void
 	_config_machine_box.add_child(_config_mothball_note)
 	_apply_config_mothball_state(false)
 
-	var footer := Label.new()
+	_config_footer = Label.new()
+	var footer := _config_footer
+	footer.name = "ConfigFooter"
 	footer.label_settings = note_settings
 	# Pinned and wrapping, like every other note on this panel. It was
 	# neither, and at 489px it was the widest thing in a panel that declares
@@ -13398,7 +13446,7 @@ func _build_config_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void
 	# also said the same thing twice; one of them is enough.
 	footer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	footer.custom_minimum_size.x = CONFIG_PANEL_WIDTH
-	footer.text = "ESC, ✕, or the building again: close"
+	footer.text = CONFIG_CLOSE_HINT
 	body.add_child(footer)
 
 
@@ -13654,9 +13702,10 @@ func _open_config_panel(origin: Vector2i, kind: String) -> void:
 	_config_fill_button.visible = not rack
 	_config_fill_reason.visible = false
 	_config_auto_button.visible = not crewed and not rack and not splitter
-	_config_auto_note.visible = not crewed and not rack and not splitter
 	_config_level_label.visible = not splitter
-	_config_level_track.visible = not splitter
+	# The auto-fill note and the level bar are not set here: they follow the
+	# AUTO-FILL button and the level line, unless the yield ladder has shed
+	# them (`_apply_config_yield`).
 	if kind == HOPPER_KIND:
 		_refresh_hopper_items()
 	elif kind == FLUID_TANK_KIND:
@@ -13800,6 +13849,7 @@ func _update_config_panel() -> void:
 		_update_config_splitter(placement)
 	else:
 		_update_config_machine(key)
+	_fit_config_panel()
 	_position_config_panel()
 	_config_panel.visible = true
 
@@ -13825,7 +13875,7 @@ func _update_config_hopper(key: String) -> void:
 	# Shared label, two kinds — a hopper's sentence is a constant, a tank's
 	# depends on its state (see `_tank_picker_note`). Either way the padlocks
 	# get their own line under it when there are any.
-	_config_picker_note.text = _with_gate_note(HOPPER_PICKER_NOTE, _hopper_items)
+	_set_config_picker_note(HOPPER_PICKER_NOTE, _hopper_items)
 
 
 func _update_config_tank(key: String) -> void:
@@ -13855,7 +13905,7 @@ func _update_config_tank(key: String) -> void:
 	# below says which of the two the panel is showing.
 	var declared := _declared_fluid_of(snapshot)
 	_update_config_picker(declared)
-	_config_picker_note.text = _with_gate_note(
+	_set_config_picker_note(
 		_tank_picker_note(declared, fluid, _tank_doomed_volume(snapshot)), _tank_fluids
 	)
 
@@ -13889,9 +13939,7 @@ func _update_config_rack(key: String) -> void:
 	_config_stock_label.text = _rack_contents_text(contents).replace("  ·  ", "\n")
 	var blocked: Array = snapshot.get("blocked_filters", [])
 	_update_config_picker(filter, blocked)
-	_config_picker_note.text = _with_gate_note(
-		_rack_picker_note(blocked), _hopper_items + _tank_fluids
-	)
+	_set_config_picker_note(_rack_picker_note(blocked), _hopper_items + _tank_fluids)
 
 
 ## A splitter's panel: the four modes, the current one ticked. The mode is
@@ -13905,7 +13953,7 @@ func _update_config_splitter(placement: Dictionary) -> void:
 	]
 	_config_title_icon.texture = _icon_for_asset(SPLITTER_MODE_ASSETS.get(mode, SPLITTER_ASSET))
 	_update_config_picker(mode)
-	_config_picker_note.text = SPLITTER_PICKER_NOTE
+	_set_config_picker_note(SPLITTER_PICKER_NOTE, [])
 
 
 func _splitter_mode_of(placement: Dictionary) -> String:
@@ -13995,12 +14043,19 @@ func _tank_picker_note(declared: String, carried: String, doomed: float) -> Stri
 ## Sorted by gate name, since two gates counting different products have no
 ## comparable thresholds to order by. Sorting and formatting only — the gate,
 ## its name, its product and both counts are all the simulation's.
-func _with_gate_note(note: String, choices: Array) -> String:
+##
+## `condensed` folds every gate into ONE line that counts the padlocks and
+## points at their tooltips — the yield ladder's last rung (issue #206). The
+## gates' own words are not lost: each padlocked slot carries its line as a
+## tooltip (`_gate_line_for`), on every rung.
+func _with_gate_note(note: String, choices: Array, condensed := false) -> String:
 	var by_gate := {}
+	var locked := 0
 	for item in choices:
 		var gate: Dictionary = _ingredient_gates.get(String(item), {})
 		if gate.is_empty():
 			continue
+		locked += 1
 		var key := "%s\t%s\t%d\t%d" % [
 			String(gate["name"]), String(gate["item"]), int(gate["sold"]), int(gate["required"])
 		]
@@ -14009,19 +14064,81 @@ func _with_gate_note(note: String, choices: Array) -> String:
 		by_gate[key].append(_item_display_name(String(item)))
 	if by_gate.is_empty():
 		return note
+	if condensed:
+		return "%s\n🔒 %d locked — hover a padlock for its gate" % [note, locked]
 	var lines: Array = []
 	var keys: Array = by_gate.keys()
 	keys.sort()
 	for key in keys:
-		var parts: PackedStringArray = String(key).split("\t")
-		lines.append("🔒 %s — %s, %d of %d boxes of %s" % [
-			", ".join(PackedStringArray(by_gate[key])),
-			parts[0],
-			int(parts[2]),
-			int(parts[3]),
-			_item_display_name(parts[1]),
-		])
+		lines.append(_gate_line(PackedStringArray(by_gate[key]), String(key).split("\t")))
 	return "\n".join(PackedStringArray([note] + lines))
+
+
+## One gate's sentence: the ingredients it holds back, the unlock's name and
+## the distance to it. `parts` is `_with_gate_note`'s key — name, product,
+## sold, required.
+func _gate_line(names: PackedStringArray, parts: PackedStringArray) -> String:
+	return "🔒 %s — %s, %d of %d boxes of %s" % [
+		", ".join(names), parts[0], int(parts[2]), int(parts[3]), _item_display_name(parts[1]),
+	]
+
+
+## The gate sentence for ONE padlocked choice — its slot's tooltip, so the
+## words survive the gate lines folding to one (issue #206). "" for a choice
+## no gate holds.
+func _gate_line_for(item: String) -> String:
+	var gate: Dictionary = _ingredient_gates.get(item, {})
+	if gate.is_empty():
+		return ""
+	return _gate_line(PackedStringArray([_item_display_name(item)]), PackedStringArray([
+		String(gate["name"]), String(gate["item"]), str(int(gate["sold"])), str(int(gate["required"]))
+	]))
+
+
+## Sets the picker's note both ways the yield ladder can show it, and shows
+## the full one; `_fit_config_panel` decides which stays.
+func _set_config_picker_note(note: String, choices: Array) -> void:
+	_config_note_full = _with_gate_note(note, choices)
+	_config_note_condensed = _with_gate_note(note, choices, true)
+	_config_picker_note.text = _config_note_full
+
+
+## The tallest the panel may be and still stand between the window's top
+## margin and the hotbar — the same band `_position_config_panel` clamps to.
+func _config_panel_available_height(bounds: Vector2) -> float:
+	return maxf(0.0, bounds.y - _hotbar_reserved_height() - 8.0)
+
+
+## Climbs the yield ladder (see `CONFIG_YIELD_FOOTER`) one rung at a time
+## until the panel fits the band above the hotbar, or the rungs run out.
+## Judged from the FULL panel every frame, so a bigger window, or a gate
+## opening and taking its line with it, gives the lines straight back. Each
+## rung is re-measured off the live panel rather than summed from typed
+## heights: the gate lines wrap, and how many lines a fold saves is the
+## font's answer.
+func _fit_config_panel() -> void:
+	var vp := get_viewport()
+	var bounds := vp.get_visible_rect().size if vp != null else Vector2(1600, 900)
+	var available := _config_panel_available_height(bounds)
+	var rungs := 0
+	_apply_config_yield(rungs)
+	while rungs < CONFIG_YIELD_GATE_LINES and _config_panel.get_combined_minimum_size().y > available:
+		rungs += 1
+		_apply_config_yield(rungs)
+	_config_yielded = rungs
+
+
+## Shows the panel as it stands `rungs` down the yield ladder. Every row a
+## rung touches is set here and nowhere else, so climbing back down is the
+## same call with a smaller number.
+func _apply_config_yield(rungs: int) -> void:
+	_config_footer.visible = rungs < CONFIG_YIELD_FOOTER
+	_config_level_track.visible = _config_level_label.visible and rungs < CONFIG_YIELD_LEVEL_BAR
+	_config_auto_note.visible = _config_auto_button.visible and rungs < CONFIG_YIELD_AUTO_NOTE
+	_config_picker_heading.visible = rungs < CONFIG_YIELD_PICKER_HEADING
+	_config_picker_note.text = (
+		_config_note_condensed if rungs >= CONFIG_YIELD_GATE_LINES else _config_note_full
+	)
 
 
 ## How much fluid a declaration change would destroy: what the tank holds
@@ -14251,6 +14368,10 @@ func _update_config_picker(current: String, blocked: Array = []) -> void:
 		locked = locked or refused
 		slot["column"].modulate = Color(1, 1, 1, 0.45 if locked else 1.0)
 		var button: Button = slot["button"]
+		# A padlock's gate, under the pointer, on every rung of the yield
+		# ladder — the one place it is still spelled out once the gate lines
+		# fold to one (issue #206).
+		button.tooltip_text = _gate_line_for(String(slot["item"]))
 		# Literally the hotbar's own selected/stocked socket styles, so "the
 		# thing I have chosen" looks the same wherever the game asks. A locked
 		# slot takes the empty socket's, for the same reason.
@@ -14311,7 +14432,7 @@ func _position_config_panel() -> void:
 	# the same way). At 1280x720 a tank's panel is taller than the band below
 	# the clipboard, so the clamp lifted it up into the clipboard's rows after
 	# a test against its old `y` had decided the clipboard was nowhere near it.
-	pos.y = clampf(pos.y, 8.0, maxf(8.0, bounds.y - _hotbar_reserved_height() - size.y))
+	pos.y = clampf(pos.y, 8.0, maxf(8.0, 8.0 + _config_panel_available_height(bounds) - size.y))
 	var right_bound := bounds.x
 	for plate in [_contract_panel_rect(), _stock_rect(), _crew_rect()]:
 		if plate.size.y <= 0.0:
