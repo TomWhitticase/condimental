@@ -414,11 +414,7 @@ fn a_reference_chain_world_owns_nothing_and_has_spent_everything() {
     // ...and the whole production chain is standing, built entirely out of
     // Purchase + Place commands.
     assert_eq!(
-        world
-            .world_layout()
-            .iter()
-            .filter(|p| p.recipe.is_some())
-            .count(),
+        world.world_layout().iter().filter(|p| p.machine).count(),
         linear_prefix(&recipes()).len(),
         "one placed machine per stage of the reference LINE — the ketchup line, not every \
          recipe in the file: the BBQ branch has its own fixture"

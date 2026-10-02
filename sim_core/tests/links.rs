@@ -898,7 +898,9 @@ fn every_link_in_the_reference_chain_is_mirrored_by_its_neighbour() {
 
 /// The documented JSON shape, exactly: `links` last, present on a belt and
 /// a pipe, **absent** (not null) on a hopper, a machine and a tank, and
-/// inside it the documented keys in the documented order.
+/// inside it the documented keys in the documented order. `machine` is
+/// present on the machine alone, and the never-fed crusher's `recipe` is
+/// `null` — undecided, not its kind's first recipe (2026-10-02).
 #[test]
 fn world_layout_json_matches_the_documented_shape_byte_for_byte() {
     let mut world = funded();
@@ -916,7 +918,7 @@ fn world_layout_json_matches_the_documented_shape_byte_for_byte() {
         ",",
         r#"{"kind":"belt","tile":[0,0],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[0,0]],"recipe":null,"crewed":true,"links":{"inputs":[{"from":"west","kind":"hopper"}],"output":{"to":"east","kind":"machine"}}}"#,
         ",",
-        r#"{"kind":"crusher","tile":[1,0],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[1,0]],"recipe":"tomato_paste","crewed":true}"#,
+        r#"{"kind":"crusher","tile":[1,0],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[1,0]],"recipe":null,"crewed":true,"machine":true}"#,
         ",",
         r#"{"kind":"fluid_tank","tile":[0,1],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[0,1]],"recipe":null,"crewed":true}"#,
         ",",

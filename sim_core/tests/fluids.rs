@@ -247,7 +247,7 @@ fn a_stage_stalls_without_its_fluid_and_runs_once_the_fluid_is_available() {
     let mut paste_waiting = 0;
     for chunk in starved.all_chunks() {
         for machine in starved.chunk_snapshot(chunk).machines {
-            if machine.recipe == FLUID_GATED_RECIPE {
+            if machine.recipe.as_deref() == Some(FLUID_GATED_RECIPE) {
                 assert!(
                     machine.process.is_none(),
                     "a fluid-starved machine must be idle, not mid-craft"
@@ -297,14 +297,24 @@ fn the_shipped_chain_consumes_fluid_as_it_produces() {
         .taps
         .first()
         .expect("a machine must be tapping the run");
+    // Read by KIND: before its first tick the mixer is undecided and names
+    // no recipe (`Machine::choose`'s rule 4), so the tap's `machine_recipe`
+    // is null here.
     assert_eq!(
-        tap.machine_recipe, FLUID_GATED_RECIPE,
+        kind_at(&world, tap.machine_tile),
+        recipe_kind(FLUID_GATED_RECIPE),
         "the vinegar requirement is on the mixing stage — which machine taps the run follows \
          the data file and the placement, not a hardcoded stage"
     );
     assert!(
-        tap.units_per_craft > 0,
+        shipped_recipes()
+            .get(FLUID_GATED_RECIPE)
+            .is_some_and(|recipe| recipe.fluid_inputs.iter().any(|(_, units)| *units > 0)),
         "the fluid recipe must consume a non-zero amount"
+    );
+    assert_eq!(
+        tap.units_per_craft, 0,
+        "and an undecided mixer is costed at nothing: it is drawing for no recipe yet"
     );
     assert!(
         before.producers.is_empty(),
@@ -550,7 +560,11 @@ fn fluid_snapshot_json_has_the_documented_shape() {
         "the tapped segment {inlet_tile:?} must touch the machine's footprint {:?}",
         machine.occupies
     );
-    assert_eq!(tap.machine_recipe, FLUID_GATED_RECIPE);
+    assert_eq!(machine.kind, recipe_kind(FLUID_GATED_RECIPE));
+    assert_eq!(
+        tap.machine_recipe, None,
+        "nothing has flowed yet, so the mixer has not been told its sauce"
+    );
     assert_eq!(
         snapshot.tank_tiles.len(),
         1,
@@ -610,7 +624,7 @@ fn pipes_appear_in_chunk_snapshots_and_query_tile() {
     // Pipes must not have displaced anything: every belt/machine tile still
     // answers as it did before (the pipe run is on its own row).
     for placement in world.world_layout() {
-        let expected_machine = placement.recipe.is_some();
+        let expected_machine = placement.machine;
         match world.query_tile(placement.tile) {
             Some(TileSnapshot::Machine { .. }) => assert!(expected_machine),
             Some(_) => assert!(!expected_machine),
@@ -757,7 +771,7 @@ fn the_tank_stands_immediately_west_of_the_pipe_runs_first_tile() {
 
     // ...and the chain's own tiles are exactly where they were: the tank is
     // beside the run, not in it.
-    for placement in world.world_layout().iter().filter(|p| p.recipe.is_some()) {
+    for placement in world.world_layout().iter().filter(|p| p.machine) {
         assert!(matches!(
             world.query_tile(placement.tile),
             Some(TileSnapshot::Machine { .. })
@@ -956,7 +970,7 @@ fn the_tank_drains_as_the_mixer_crafts_and_the_mixer_stalls_once_it_is_dry() {
 fn mixer_is_starved(world: &World) -> bool {
     for chunk in world.all_chunks() {
         for machine in world.chunk_snapshot(chunk).machines {
-            if machine.recipe == FLUID_GATED_RECIPE {
+            if machine.recipe.as_deref() == Some(FLUID_GATED_RECIPE) {
                 let waiting = machine
                     .input
                     .iter()
@@ -1066,4 +1080,23 @@ fn tank_volume_is_fixed_point_simulation_state() {
         quantity,
         "snapshot quantity must be an exactly-representable Fx value"
     );
+}
+
+/// The kind of whatever stands on `tile`.
+fn kind_at(world: &World, tile: (i32, i32)) -> String {
+    world
+        .world_layout()
+        .into_iter()
+        .find(|p| p.tile == tile)
+        .map(|p| p.kind)
+        .unwrap_or_else(|| panic!("nothing placed at {tile:?}"))
+}
+
+/// The machine kind a shipped recipe runs on.
+fn recipe_kind(recipe: &str) -> String {
+    shipped_recipes()
+        .get(recipe)
+        .unwrap_or_else(|| panic!("no recipe {recipe}"))
+        .machine
+        .clone()
 }

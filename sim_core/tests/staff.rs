@@ -509,11 +509,15 @@ fn an_understaffed_machine_stays_understaffed() {
     fire(&mut world, "manufacturing");
 
     // Short from the start, but nothing has reached the vat yet: it is
-    // waiting for its input, which a hire would not fix.
+    // waiting for its input — so far any sauce's (`undecided`) — which a
+    // hire would not fix.
     assert!(matches!(
         stall_of(&world, vat),
         Some((
-            StallKind::Input | StallKind::FluidInput | StallKind::NoSupplyPipe,
+            StallKind::Input
+                | StallKind::FluidInput
+                | StallKind::NoSupplyPipe
+                | StallKind::Undecided,
             _
         ))
     ));
@@ -1594,8 +1598,8 @@ fn a_staff_stall_never_masks_an_input_shortfall() {
     let crusher = tile_of(&world, "crusher");
     assert_eq!(
         stall_of(&world, crusher).map(|(k, _)| k),
-        Some(StallKind::Input),
-        "an unfed crusher wants tomatoes, not people"
+        Some(StallKind::Undecided),
+        "an unfed crusher wants ingredients — any sauce's — not people"
     );
     for c in &world.staff_snapshot().categories {
         assert_eq!(

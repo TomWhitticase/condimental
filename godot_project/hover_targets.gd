@@ -172,7 +172,7 @@ static func first_of_kind(layout: Array, kind: String) -> Vector2i:
 ## The first placement that RUNS A RECIPE — a machine, as opposed to a belt,
 ## a pipe or one of the buffer buildings, none of which carry one.
 static func first_machine(layout: Array) -> Vector2i:
-	return first_matching(layout, func(p): return p.get("recipe") != null)
+	return first_matching(layout, func(p): return bool(p.get("machine", false)))
 
 
 ## The FAR CORNER of the first multi-tile machine — NOT its origin. "Hovering
@@ -180,6 +180,11 @@ static func first_machine(layout: Array) -> Vector2i:
 ## there to photograph, and the origin is the one tile that would not show it.
 static func multi_tile_far_corner(layout: Array, footprint_size: Callable) -> Vector2i:
 	for placement in layout:
+		# A MACHINE, as the flag's `looks_for` says: the 1x2 warehouse rack is
+		# multi-tile too, and a line whose racks come first in the layout had
+		# --hover-vat photographing a shelf.
+		if not bool(placement.get("machine", false)):
+			continue
 		var size: Vector2i = footprint_size.call(placement.get("footprint"))
 		if size == Vector2i.ONE:
 			continue

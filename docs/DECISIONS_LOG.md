@@ -18,6 +18,23 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-02 **A machine nothing has fed is undecided, not ketchup.** A
+  kind with several recipes is placed with `Machine::recipe = None` and
+  keeps it until something it is HANDED picks one: any amount of a recipe's
+  solid in its buffer, or fluid of that id in a touching run, counts
+  (`Machine::fed`, `Machine::choose`'s rule 4). Everything else in the
+  2026-09-21 rule stands — first fully-satisfied wins, file order is the
+  tiebreak, a decided machine keeps its pick on a zero tie — but file order
+  never decides a machine with nothing in it. A kind with ONE recipe holds
+  it from placement. On the wire `recipe`/`machine_recipe` are `null` for an
+  undecided machine, the layout gains `machine: true` (so `recipe != null`
+  no longer means "is a machine"), and the stall is the new `undecided`
+  kind. Godot draws it as handling any sauce: "Mixer · any sauce", "waiting
+  for ingredients", product mesh left on its neutral `fluid_pale`. No save
+  format change: an undecided machine writes `recipe: None`, and an old save
+  mid-craft with no recipe loads on the kind's first recipe. Owner's
+  request. Full record in `docs/DECISIONS.md`.
+
 - 2026-10-02 **Mustard is yellow and white, not yellow and black.** The
   owner's ruling. The mustard bottle (`item_bottle_mustard`) is a
   `mustard_gold` body with a WHITE label band and cap — both

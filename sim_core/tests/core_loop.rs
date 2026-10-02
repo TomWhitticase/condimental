@@ -167,7 +167,12 @@ fn total_raw_equivalent(world: &World, raw: &str, recipes: &RecipeRegistry) -> F
             // deposited yet. That in-flight mass is the raw content of what
             // the batch will become — solid, fluid, or both.
             let recipe = recipes
-                .get(&machine.recipe)
+                .get(
+                    machine
+                        .recipe
+                        .as_ref()
+                        .expect("a machine mid-craft holds a recipe"),
+                )
                 .expect("machine must reference a real recipe");
             for (item, qty) in recipe.outputs.iter().chain(recipe.fluid_outputs.iter()) {
                 total += value(item) * Fx::from_num(*qty);
@@ -418,21 +423,30 @@ fn the_middle_of_the_chain_moves_product_through_pipes_with_no_tank_behind_them(
         1,
         "the mixer is on the producing end of it"
     );
-    assert_eq!(mix.producers[0].machine_recipe, "ketchup_mix");
+    assert_eq!(
+        mix.producers[0].machine_recipe.as_deref(),
+        Some("ketchup_mix")
+    );
     assert_eq!(
         mix.taps.len(),
         1,
         "and the cooking vat is on the drawing end"
     );
-    assert_eq!(mix.taps[0].machine_recipe, "ketchup");
+    assert_eq!(mix.taps[0].machine_recipe.as_deref(), Some("ketchup"));
 
     let cooked = networks
         .iter()
         .find(|n| n.fluid.as_deref() == Some("ketchup"))
         .expect("the vat's output run must carry finished ketchup");
     assert!(cooked.tank_tiles.is_empty());
-    assert_eq!(cooked.producers[0].machine_recipe, "ketchup");
-    assert_eq!(cooked.taps[0].machine_recipe, "bottled_ketchup");
+    assert_eq!(
+        cooked.producers[0].machine_recipe.as_deref(),
+        Some("ketchup")
+    );
+    assert_eq!(
+        cooked.taps[0].machine_recipe.as_deref(),
+        Some("bottled_ketchup")
+    );
     assert!(
         cooked.total_volume > 0.0,
         "a run that has been primed keeps a standing charge — that is the pressure model, \
@@ -529,7 +543,7 @@ fn query_tile_reflects_every_stage_belt_and_machine_position() {
     // still come out in recipes.ron order because that is the order the
     // reference chain lays them out in, west to east.
     let layout = world.world_layout();
-    let machines: Vec<_> = layout.iter().filter(|p| p.recipe.is_some()).collect();
+    let machines: Vec<_> = layout.iter().filter(|p| p.machine).collect();
     assert_eq!(
         machines.len(),
         ordered.len(),
@@ -537,10 +551,16 @@ fn query_tile_reflects_every_stage_belt_and_machine_position() {
     );
 
     for (placement, recipe) in machines.iter().zip(ordered.iter()) {
-        assert_eq!(
-            placement.recipe.as_deref(),
-            Some(recipe.id.as_str()),
-            "machine order must follow recipes.ron order"
+        // One tick in, only the head of the line has been handed anything:
+        // every machine further down is still UNDECIDED (`recipe: None`,
+        // `Machine::choose`'s rule 4) rather than on its kind's first
+        // recipe. Whatever it does name has to be its own stage's.
+        assert!(
+            placement.recipe.is_none() || placement.recipe.as_deref() == Some(recipe.id.as_str()),
+            "machine order must follow recipes.ron order: {:?} at {:?} is not {}",
+            placement.recipe,
+            placement.tile,
+            recipe.id
         );
         assert_eq!(
             placement.kind, recipe.machine,
@@ -558,7 +578,7 @@ fn query_tile_reflects_every_stage_belt_and_machine_position() {
                     machine_kind,
                     ..
                 }) => {
-                    assert_eq!(found, recipe.id, "at {tile:?}");
+                    assert_eq!(found, placement.recipe, "at {tile:?}");
                     assert_eq!(machine_kind, recipe.machine, "at {tile:?}");
                     assert_eq!(
                         origin_tile, placement.tile,

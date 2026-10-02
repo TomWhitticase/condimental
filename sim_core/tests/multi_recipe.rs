@@ -81,7 +81,7 @@ fn place(world: &mut World, kind: &str, tile: (i32, i32), direction: Direction) 
 /// a hover tooltip reads.
 fn recipe_of(world: &World, tile: (i32, i32)) -> String {
     match world.query_tile(tile) {
-        Some(TileSnapshot::Machine { recipe, .. }) => recipe,
+        Some(TileSnapshot::Machine { recipe, .. }) => recipe.unwrap_or_default(),
         other => panic!("{tile:?} is not a machine: {other:?}"),
     }
 }
@@ -261,9 +261,9 @@ fn a_two_fluid_recipe_draws_from_two_distinct_networks_matched_by_id() {
 
     // The second vat is tapped into two networks, one per fluid its recipe
     // draws, each reporting the units that recipe takes from *that* run.
-    // Read after ticking, because until the vat's first idle tick it is
-    // still on its kind's first recipe and draws neither of these.
-    let mut taps: Vec<(String, String, u32)> = world
+    // Read after ticking, because until something reaches the vat it is
+    // undecided and draws for no recipe at all.
+    let mut taps: Vec<(String, Option<String>, u32)> = world
         .fluid_snapshots()
         .into_iter()
         .filter_map(|n| {
@@ -279,8 +279,8 @@ fn a_two_fluid_recipe_draws_from_two_distinct_networks_matched_by_id() {
     assert_eq!(
         taps,
         vec![
-            ("ketchup".to_string(), "tangy_ketchup".to_string(), 1),
-            ("vinegar".to_string(), "tangy_ketchup".to_string(), 1),
+            ("ketchup".to_string(), Some("tangy_ketchup".to_string()), 1),
+            ("vinegar".to_string(), Some("tangy_ketchup".to_string()), 1),
         ],
         "two taps on two distinct networks: one per fluid input, each costed against the run \
          that carries the fluid it names"
@@ -501,9 +501,11 @@ fn a_save_mid_craft_restores_the_recipe_that_craft_is() {
 /// The forward-compatibility half. `recipe` was added to `SavedMachine`
 /// without bumping `SAVE_SCHEMA_VERSION`, on the rule that an additive
 /// `#[serde(default)]` field is not a shape change, so a save written before
-/// it still has to load — on the kind's first recipe in file order, which is
-/// where a freshly placed machine starts anyway and which it re-picks from
-/// on its next idle tick.
+/// it still has to load. An idle machine loads UNDECIDED — where a freshly
+/// placed one starts since 2026-10-02 — and re-picks from its inputs on its
+/// next idle tick; one saved MID-CRAFT loads on its kind's first recipe in
+/// file order, because that is what every machine held when such a save
+/// was written, so it is the craft actually in flight.
 #[test]
 fn a_save_without_the_recipe_field_still_loads() {
     let mut world = tangy_line();
@@ -524,10 +526,52 @@ fn a_save_without_the_recipe_field_still_loads() {
         ContractRegistry::bundled(),
     )
     .expect("a save without the field is not corrupt, it is old");
-    assert_eq!(
-        recipe_of(&loaded, (10, 0)),
-        "ketchup",
-        "with nothing saved the vat falls back to its kind's first recipe in file order"
+    let vat = (10, 0);
+    let expected = if process_of(&loaded, vat).is_some() {
+        "ketchup" // mid-craft: the first recipe, the only one it could have been on
+    } else {
+        "" // idle: undecided until its inputs pick
+    };
+    assert_eq!(recipe_of(&loaded, vat), expected);
+}
+
+/// A machine saved mid-craft with no `recipe` field finishes the craft. It
+/// is the one case where "undecided on load" would be a bug: a process with
+/// no recipe behind it can never deposit, so the vat would hang for good.
+#[test]
+fn a_legacy_save_mid_craft_finishes_the_craft() {
+    let mut world = tangy_line();
+    let vat = (7, 0);
+    // Run until the plain-ketchup vat is cooking.
+    for _ in 0..2_000 {
+        supply(&mut world);
+        world.tick();
+        if process_of(&world, vat).is_some() && recipe_of(&world, vat) == "ketchup" {
+            break;
+        }
+    }
+    assert!(process_of(&world, vat).is_some(), "the vat never started");
+    let mut data = world.to_save();
+    for placement in &mut data.placements {
+        if let SavedBody::Machine(machine) = &mut placement.body {
+            machine.recipe = None;
+        }
+    }
+    let mut loaded = World::from_save_with_content(
+        data,
+        tangy_branch(),
+        MachineRegistry::bundled(),
+        ContractRegistry::bundled(),
+    )
+    .expect("an old save loads");
+    assert_eq!(recipe_of(&loaded, vat), "ketchup");
+    for _ in 0..400 {
+        loaded.tick();
+    }
+    assert_ne!(
+        process_of(&loaded, vat),
+        process_of(&world, vat),
+        "the in-flight craft must finish rather than hang on a missing recipe"
     );
 }
 

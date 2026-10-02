@@ -502,8 +502,10 @@ func _run_checks() -> void:
 		return
 	for tile in [MIXER, MIXER_FAR]:
 		var hover: String = line._hover_text_at_tile(tile)
-		if not hover.contains("Ketchup Mix"):
-			_fail("hover at %s should resolve the mixer's recipe by name, got '%s'" % [str(tile), hover])
+		# Unfed, the mixer is undecided and titled by its kind (2026-10-02);
+		# what is under test is that BOTH tiles resolve to the one machine.
+		if not hover.begins_with(line._kind_display_name("mixer")):
+			_fail("hover at %s should resolve the mixer by name, got '%s'" % [str(tile), hover])
 			return
 
 	# Both machine-to-machine runs exist, carry the right fluid, and draw two
