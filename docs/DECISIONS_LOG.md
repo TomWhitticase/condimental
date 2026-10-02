@@ -1040,8 +1040,9 @@ See [WORKFLOW.md](WORKFLOW.md).
   machine**, running or not — recomputed only when the factory changes
   (place/remove/rotate, mothballing, a splitter's mode, a tank's fluid) and
   after a load, never per tick. `short` on the wire means
-  `required - headcount`: "hire this many", and it holds still. The per-tick `demand`/`assigned` figures are kept and still shown,
-  demoted to "what is working right now". This contradicts GAMEPLAY §7 as
+  `required - headcount`: "hire this many", and it holds still. The
+  per-tick `demand`/`assigned` figures are kept and still shown, demoted
+  to "what is working right now". This contradicts GAMEPLAY §7 as
   written ("*while actively running*"), which is amended with it: the old
   model made the hire advice move with the belts, so it had changed by the
   time the player acted on it. No save-schema bump — `required` is derived.
