@@ -259,6 +259,23 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-02 — The contract board doubles, 17 offers to 36
+
+The owner: "add more contracts, aren't enough". The board is a fixed list
+(one signature per offer, every offer always listed, no refresh — nothing to
+tune in Rust), so the fix is content: `data/contracts.ron` gains 19 orders
+and `data/unlocks.ron` gates the BBQ and mustard ones. A new game now offers
+16 ketchup orders from one case to twenty, the BBQ gate releases 9 and the
+mustard gate 11, and the mustard tier (the last gate) includes three orders
+that name all three sauces. Each sauce has a single-sauce ladder of five or
+more sizes, every new payout is derived from its ladder's per-case rates
+and written beside it, and no single order exceeds twenty cases, so the
+dock's places stand. A new test,
+`the_contract_pool_covers_every_sauce_and_every_gate_stage`, fails on the
+old board (BBQ had two single-sauce sizes, mustard's gate four offers).
+The Cookbook's ketchup pay range now reads up to 51.1 a case because a
+mixed order's rate is its payout over all its cases.
+
 ### 2026-10-02 — A big save loads in linear time
 
 The scale sweep's other finding: loading the owner's factory tiled 20×

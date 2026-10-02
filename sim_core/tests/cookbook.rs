@@ -467,20 +467,33 @@ fn a_page_carries_the_prose_its_recipe_authored_and_nothing_it_did_not() {
 }
 
 /// Contract pay is a range across the board, and `None` — not zero — when
-/// nothing wants the thing. The two overlap on the shipped content because
-/// the mixed orders ask for both sauces at once, which is exactly what a
-/// player reading both pages should be able to see.
+/// nothing wants the thing. The ranges overlap on the shipped content because
+/// the mixed orders ask for several sauces at once, which is exactly what a
+/// player reading the pages should be able to see. A mixed order's rate is
+/// its payout over ALL its cases, so the three-sauce orders (2026-10-02) lift
+/// ketchup's high above any ketchup-only order and drop BBQ's low below any
+/// BBQ-only one.
+///
+/// Fixed point (ARCHITECTURE.md §3.2) cannot hold a blended rate like 40.8
+/// or 51.1 exactly, so every rung is read to the penny.
 #[test]
 fn a_sauce_page_says_what_the_board_pays_for_a_case_of_it() {
     let book = book();
+    let near = |got: Option<f64>, want: f64, what: &str| {
+        let got = got.unwrap_or_else(|| panic!("{what} reads no pay"));
+        assert!((got - want).abs() < 0.001, "{what} read {got}, want {want}");
+    };
     let ketchup = sauce(&book, "boxed_ketchup");
-    assert_eq!(ketchup.pay_low, Some(24.0));
-    assert_eq!(ketchup.pay_high, Some(44.0));
+    // Low: `market_stall`'s 24 a case. High: `national_condiments`' 1022
+    // over twenty cases of three sauces.
+    near(ketchup.pay_low, 24.0, "ketchup's low");
+    near(ketchup.pay_high, 51.1, "ketchup's high");
     assert!(ketchup.contracts.contains(&"Grill Pub Chain".to_string()));
 
     let bbq = sauce(&book, "boxed_bbq");
-    assert_eq!(bbq.pay_low, Some(42.0));
-    assert_eq!(bbq.pay_high, Some(65.0));
+    // Low: `picnic_caterer`'s 120 over three cases. High: `bbq_festival`.
+    near(bbq.pay_low, 40.0, "BBQ's low");
+    near(bbq.pay_high, 65.0, "BBQ's high");
     assert!(
         bbq.pay_low.unwrap() > bbq.cost_per_unit,
         "every sauce has to be worth making"
@@ -488,16 +501,14 @@ fn a_sauce_page_says_what_the_board_pays_for_a_case_of_it() {
 
     // Mustard's band, read off `data/contracts.ron` the same way: the low is
     // `deli_chain`'s blended 204 over five cases, the high is
-    // `sandwich_franchise`'s 416 over eight.
+    // `charcuterie_supplier`'s 636 over twelve (and `burger_bar`'s 212 over
+    // four, which ties it).
     let mustard = sauce(&book, "boxed_mustard");
-    // 204 over five cases is 40.8, which fixed point (ARCHITECTURE.md §3.2)
-    // cannot hold exactly, so the page is read to the penny rather than
-    // compared for equality. The other three rungs are whole numbers.
     let low = mustard
         .pay_low
         .expect("the board pays for a case of mustard");
     assert!((low - 40.8).abs() < 0.001, "pay_low read {low}");
-    assert_eq!(mustard.pay_high, Some(52.0));
+    near(mustard.pay_high, 53.0, "mustard's high");
     assert!(
         low > mustard.cost_per_unit,
         "every sauce has to be worth making"

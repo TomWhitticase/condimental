@@ -326,7 +326,15 @@ implementation history (epics, tickets, balancing passes) behind each one.
   tier one kept-fed line can just serve, plus a growth tier of larger,
   slower orders sized so a second/third/fourth line always has an order to
   go after. Per-box payout never falls as order size rises; file order
-  (smallest first) is the scarcity tiebreak.
+  (smallest first) is the scarcity tiebreak. **Every gate stage releases a
+  full ladder** (2026-10-02, the owner's "add more contracts, aren't
+  enough"): the board is a fixed list with no refresh, so a stage with few
+  offers is a stage where the board runs dry. A new game offers 16 ketchup
+  orders (1 to 20 cases), the BBQ gate releases 9, and the mustard gate —
+  the last — releases 11, including orders that name all three sauces.
+  `tests/contract_board.rs` holds every sauce to a ladder of at least four
+  sizes and every stage to at least five offers, one small, one large, and
+  more than one line's output.
 - Multi-stage aged/fermented recipes (tier 6) are exactly what the generic
   `TimedProcess` component (ARCHITECTURE.md §3.5) was designed for — a
   chain of stages feeding into each other, no new architecture needed.

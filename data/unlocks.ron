@@ -232,7 +232,11 @@
             // `roadhouse_group`, which ask for ketchup as well. A mixed
             // order is still a BBQ order — signing one before the branch
             // exists would be signing up to strike out.
-            contracts: ["smokehouse_trial", "grill_pub", "roadhouse_group", "bbq_festival"],
+            contracts: [
+                "rib_shack", "smokehouse_trial", "picnic_caterer", "grill_pub",
+                "steakhouse_group", "roadhouse_group", "smokehouse_wholesale",
+                "bbq_festival", "county_fair",
+            ],
         ),
 
         // THE SECOND GATE (the mustard epic, 2026-09-26; re-triggered on
@@ -394,7 +398,11 @@
             // which asks for ketchup as well — a mixed order is still a
             // mustard order, and signing one without a mustard line is
             // signing up to strike out.
-            contracts: ["deli_counter", "hot_dog_stand", "deli_chain", "sandwich_franchise"],
+            contracts: [
+                "pretzel_cart", "deli_counter", "hot_dog_stand", "food_court",
+                "ballpark_vendor", "burger_bar", "deli_chain", "sandwich_franchise",
+                "charcuterie_supplier", "festival_caterers", "national_condiments",
+            ],
         ),
     ],
 )
