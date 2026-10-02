@@ -51,6 +51,10 @@
     "metal",
     "emissive"
   ],
+  "crossing": [
+    "matte",
+    "metal"
+  ],
   "crush_bit": [
     "matte"
   ],
@@ -284,6 +288,9 @@
   "pipe_cross": [
     "metal"
   ],
+  "pipe_crossing": [
+    "metal"
+  ],
   "pipe_end": [
     "metal"
   ],
@@ -303,6 +310,9 @@
     "liquid"
   ],
   "pipe_fluid_cross": [
+    "liquid"
+  ],
+  "pipe_fluid_crossing": [
     "liquid"
   ],
   "pipe_fluid_end": [

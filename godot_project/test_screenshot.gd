@@ -343,6 +343,7 @@ const FIXTURE_NAMES: PackedStringArray = [
 	"pipes", "gallery", "items", "fluid_gallery", "bottleneck", "bbq",
 	"stalled_run", "understaffed", "shortfall", "payday_warning", "full_dock",
 	"unclerked_dock", "warehouse", "split_docks", "mustard", "splitter_modes",
+	"crossing",
 ]
 
 ## The fixtures whose whole claim is a factory that is WORKING, and which are
@@ -360,6 +361,20 @@ const FIXTURE_NAMES: PackedStringArray = [
 ## outside this list still get the `SCREENSHOT_HEALTH:` line; they are just
 ## not failed on it.
 const HEALTHY_FIXTURES: PackedStringArray = ["bbq", "bottleneck", "full_dock", "mustard"]
+
+## The fixtures that are meaningless standing still, and so are settled
+## whether or not `--populate` was asked for. A fixture whose subject is
+## something MOVING — product under a crossing's arch, fluid along a run —
+## photographs as bare geometry when it is only built, and bare geometry
+## looks like art that has not landed rather than like a fixture nobody ran.
+##
+## This list cannot be the only protection, because a list is what gets
+## forgotten: `crossing` shipped absent from it and every frame of a dead
+## line passed. So the fixture ALSO carries a check that it is showing what
+## it claims (`Layouts.crossing_line_idle`), run below just before the
+## shutter. The list makes the good frame the default; the check makes the
+## bad frame impossible.
+const SETTLED_FIXTURES: PackedStringArray = ["crossing"]
 
 var _frames := 0
 var _on_screen := false
@@ -628,6 +643,11 @@ var _dock_lamp_dark := false
 const FULL_DOCK_HOLD_TICK_LIMIT := 2000
 var _ghost_kind := ""
 var _ghost_blocked := false
+## --ghost-at TX,TY[,FACING]: the tile the ghost is held over, and the facing
+## it is held at, instead of --ghost's open ground or --ghost-blocked's first
+## machine. Whether that reads as valid is the sim's answer, not the flag's.
+var _ghost_at := HOVER_NONE
+var _ghost_facing := ""
 var _remove_mode := false
 ## `--menu` renders menu.tscn rather than main.tscn; `--pause` renders the
 ## in-game pause menu over a running factory. See the header.
@@ -886,7 +906,15 @@ func _initialize() -> void:
 		return
 	if not _parse_closeup(args):
 		return
+	if not _parse_ghost_at(args):
+		return
 	_resolve_fixture()
+	# Applied AFTER `_resolve_fixture`, so it covers a fixture named with
+	# `--fixture` as well as one a convenience flag picked — which is the gap
+	# `crossing` fell through, having no flag of its own to set `_populate`
+	# beside (see the settings above that do).
+	if SETTLED_FIXTURES.has(_fixture):
+		_populate = true
 	_apply_fluid_gallery_defaults(args)
 	_apply_warehouse_defaults(args)
 	# The world this frame actually came from, printed whether or not
@@ -1162,6 +1190,17 @@ func _build_fixture() -> void:
 				)
 				_refuse()
 				return
+		"crossing":
+			# Like `split_docks`, this one can be built and not BE itself: a
+			# Place the simulation refuses is silent, and a frame of a belt
+			# running past two gaps in two pipe runs looks like a render
+			# problem rather than a rule change. Refuse instead.
+			Layouts.build_crossing_line(_main.sim)
+			var crossing_failure := Layouts.crossing_line_failure(_main.sim)
+			if crossing_failure != "":
+				printerr("SCREENSHOT_FAIL: --fixture crossing built no crossing — %s" % crossing_failure)
+				_refuse()
+				return
 		"demo":
 			Layouts.build_demo_line(_main.sim)
 		_:
@@ -1233,6 +1272,41 @@ func _reframe() -> void:
 	_main._camera_base_size = _main._framing_size(_main._camera.transform.basis)
 	_main._camera_size = _main._camera_base_size
 	_main._update_camera_transform()
+
+
+## `--ghost-at TX,TY[,FACING]`, refused rather than half-read: a malformed
+## value, or one with no `--ghost`/`--ghost-blocked` to aim, would otherwise
+## photograph the default tile (or no ghost at all) and pass. The facing's
+## spelling is checked in `_enter_ghost_mode`, against main's DIRECTIONS.
+func _parse_ghost_at(args: Array) -> bool:
+	var value := _string_arg(args, "--ghost-at")
+	if value == "":
+		var given := false
+		for arg in args:
+			given = given or String(arg) == "--ghost-at" or String(arg).begins_with("--ghost-at=")
+		if given:
+			printerr("SCREENSHOT_FAIL: --ghost-at wants TX,TY[,FACING] as one comma-separated token")
+			_refuse()
+			return false
+		return true
+	var parts: PackedStringArray = value.split(",")
+	if parts.size() < 2 or parts.size() > 3 \
+			or not parts[0].is_valid_int() or not parts[1].is_valid_int() \
+			or (parts.size() == 3 and parts[2] == ""):
+		printerr(
+			"SCREENSHOT_FAIL: --ghost-at wants TX,TY[,FACING] as one comma-separated token, got '%s'"
+			% value
+		)
+		_refuse()
+		return false
+	if _ghost_kind == "":
+		printerr("SCREENSHOT_FAIL: --ghost-at aims a ghost, but no --ghost KIND or --ghost-blocked KIND names one")
+		_refuse()
+		return false
+	_ghost_at = Vector2i(int(parts[0]), int(parts[1]))
+	if parts.size() == 3:
+		_ghost_facing = parts[2]
+	return true
 
 
 ## `--closeup TX,TY[,SIZE]` — the argument is one comma-separated token so
@@ -1927,8 +2001,16 @@ func _enter_ghost_mode() -> void:
 		printerr("SCREENSHOT_NOTE: could not afford one '%s' after building the fixture — no ghost to show" % _ghost_kind)
 		return
 	_main._enter_build_mode(_ghost_kind)
+	if _ghost_facing != "":
+		if not _main.DIRECTIONS.has(_ghost_facing):
+			printerr("SCREENSHOT_FAIL: --ghost-at's facing '%s' is not one of %s" % [_ghost_facing, str(_main.DIRECTIONS)])
+			_refuse()
+			return
+		_main._build_direction = _ghost_facing
 	var target := _open_ground_tile()
-	if _ghost_blocked:
+	if _ghost_at != HOVER_NONE:
+		target = _ghost_at
+	elif _ghost_blocked:
 		var occupied := _first_machine_tile()
 		if occupied == HOVER_NONE:
 			occupied = _first_tile_of(func(_p): return true)
@@ -2388,6 +2470,26 @@ func _stand_item_gallery() -> void:
 		)
 
 
+## `--fixture crossing --first-person`: puts the player on the floor beside
+## the crossing whose belt was laid across a pipe, looking up the belt at it.
+## First person otherwise drops the camera over the world's origin, nine
+## tiles short of it — and eye level is where "is this a thing a person
+## walks under" actually gets answered. Isometric needs nothing: the fixture
+## frames itself like every other.
+func _frame_crossing_first_person() -> void:
+	if not _in_first_person():
+		return
+	_main._fp_position = Vector3(
+		7.0 * _main.TILE, _main.TILE * 1.5, -2.2 * _main.TILE
+	)
+	_main._fp_yaw = atan2(
+		-(float(Layouts.CROSSING_BELT_ONTO_PIPE_X) * _main.TILE - _main._fp_position.x),
+		-(0.0 - _main._fp_position.z)
+	)
+	_main._fp_pitch = 0.0
+	_main._update_fp_camera_transform()
+
+
 ## `--pause`: the in-game menu, over a factory that has been running.
 func _open_pause_menu() -> void:
 	_main._set_pause_open(true)
@@ -2526,6 +2628,8 @@ func _process(delta: float) -> bool:
 		_enter_closeup()
 	if _frames == 2 and _item_gallery:
 		_stand_item_gallery()
+	if _frames == 2 and _fixture == "crossing":
+		_frame_crossing_first_person()
 	if _frames == 2 and _after_machine_hover:
 		_hover_machine_first()
 		if _refused:
@@ -2722,6 +2826,15 @@ func _frame_health() -> String:
 	print("SCREENSHOT_HEALTH: contracts=%d lost=%d made=%s" % [
 		active, lost, ",".join(made) if made.size() > 0 else "nothing",
 	])
+	# Asked of every fixture that has its own "am I showing what I claim"
+	# check, ahead of the `HEALTHY_FIXTURES` gate rather than inside it: the
+	# crossing line makes nothing and ships nothing, so `produced == 0` is
+	# its healthy state and the contract/production test says nothing at all
+	# about it. What it has to prove instead is that it MOVED.
+	if _fixture == "crossing" and not _allow_unhealthy:
+		var idle := Layouts.crossing_line_idle(_main.sim)
+		if idle != "":
+			return "the crossing line is built but dead — %s" % idle
 	if _allow_unhealthy or not HEALTHY_FIXTURES.has(_fixture):
 		return ""
 	if lost > 0:

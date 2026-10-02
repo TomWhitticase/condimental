@@ -368,6 +368,20 @@ pub const ASSETS: &[Asset] = &[
         name: "pipe_fluid_end",
         build: pipe_fluid_end,
     },
+    // The belt/pipe crossing: the pipe half the scene stacks over a belt, its
+    // liquid, and the two merged for the icon. See the "Crossings" section.
+    Asset {
+        name: "pipe_crossing",
+        build: pipe_crossing,
+    },
+    Asset {
+        name: "pipe_fluid_crossing",
+        build: pipe_fluid_crossing,
+    },
+    Asset {
+        name: "crossing",
+        build: crossing,
+    },
     Asset {
         name: "item_tomato",
         build: item_tomato,
@@ -3383,6 +3397,216 @@ pub fn understaffed_marker(p: &Palette) -> VoxModel {
     m
 }
 
+// --- Crossings --------------------------------------------------------------
+//
+// The pipe half of a `crossing` tile: one entity carrying both a belt segment
+// and a pipe tile (docs/BELT_PIPE_CROSSING_PLAN.md). The shape was found by a
+// visual spike on 2026-09-25 that drew the design doc's flat bridge beside a
+// raised gantry and rendered both with items on the belt; the gantry is what
+// shipped and why is [`CROSSING_ITEM_TOP_Z`].
+//
+// Authored with the BELT running +X — the crossing's own `Direction` — and the
+// PIPE along Y, so one yaw turns the pair exactly as it turns every other
+// tile. [`pipe_crossing`] does not draw the belt: the scene stacks it over an
+// ordinary `belt_f*` instance, so a crossing keeps the belt's four animation
+// frames for nothing. [`crossing`] is the two merged, for the icon alone.
+//
+// **Everything here is symmetric about [`PIPE_C`] on BOTH horizontal axes**
+// (§2b point 20; `a_crossing_is_symmetric_about_the_tile_midline`). A crossing
+// turns four ways, and a belt running west is this model turned twice: an arch
+// half a voxel off-centre would step at both of its joints with the run.
+
+/// What a crossing actually has to clear, and it is NOT the belt.
+///
+/// The design doc's arithmetic stopped at the conveyor: the cleat tops out at
+/// [`BELT_CLEAT_Z`] = 10 and the run's tube starts at 11, so a pipe left at
+/// [`PIPE_AXIS_Z`] misses it by a voxel. But the belt is a floor for things
+/// standing on it. An item is placed with its base on the running surface at
+/// `BELT_SURFACE_VOXELS` = [`BELT_CLEAT_Z`] and `item_bottle` is 15 voxels
+/// tall, so the tallest thing the line carries reaches z = 24 — a foot and a
+/// half INTO a tube whose bore is z 12..19. Every solid on that belt would
+/// pass through the pipe.
+///
+/// A measured fact about today's item models, not a derivation: the bottles
+/// and the molasses jar tie for tallest. The vinegar jug stands at 25, but
+/// vinegar is stock and never rides a belt. The value is enforced by
+/// `a_crossing_clears_every_item_the_line_can_carry`, so a taller item fails
+/// `cargo test` and does not quietly graze the arch.
+const CROSSING_ITEM_TOP_Z: i32 = BELT_CLEAT_Z + 14;
+/// Where the belt's traffic runs in plan: the widest *fill* among today's
+/// item models, stood centred on the tile. An item's box is [`ITEM_VOXELS`]
+/// = 16 wide, which centred is y 8..23, and `item_mustard_seed`'s sack fills
+/// it to the edge — so the lane is the whole box. (It was 10..21, the boxes'
+/// width, until mustard landed beside the crossing work.) The same test as
+/// [`CROSSING_ITEM_TOP_Z`] holds this range to the real models. With that
+/// constant, this is the box a crossing must leave empty.
+const CROSSING_ITEM_Y: (i32, i32) = (8, 23);
+/// Height of the raised run, one full tile above the floor. Measured, the
+/// lowest voxel of [`pipe_crossing`] BETWEEN THE RISERS — y 8..23, which
+/// contains [`CROSSING_ITEM_Y`] — is z = 28, which leaves three voxels of
+/// daylight (25..27) over [`CROSSING_ITEM_TOP_Z`]. Not "over the lane": the
+/// risers stand on the lane's own boundary rows, y 7 and y 24, and carry
+/// steel from z 13 up. Nothing travels those rows.
+/// Lower and the bottles graze it, which reads as the same mistake as
+/// passing through it.
+const GANTRY_AXIS_Z: i32 = TILE_VOXELS as i32;
+/// How far the crossing's run sits above an ordinary run — **mirrored by
+/// `main.gd`**, which stands every per-tile pipe overlay on a crossing this
+/// many voxels higher than on any other pipe tile: the liquid body at
+/// `PIPE_BORE_FLOOR_VOXELS + CROSSING_LIFT` and the fault clamp at the floor
+/// plus it. Both overlays are authored at the run's own height so that one
+/// constant is the whole difference; change one side, change the other.
+pub const CROSSING_LIFT: i32 = GANTRY_AXIS_Z - PIPE_AXIS_Z;
+/// Tall enough for the raised tube's crown at z = 36 plus the window carve.
+const GANTRY_MODEL_Z: u32 = 38;
+/// Where the run turns up, and (mirrored about [`PIPE_C`]) back down. Fixed
+/// by the items again, this time in plan: the lane's traffic occupies
+/// [`CROSSING_ITEM_Y`], so the free bands either side are y 0..7 and y
+/// 24..31. Measured, everything the gantry has below the span (riser, elbow
+/// castings and posts) fills y 0..7 and y 24..31. The lane is open from y 8
+/// to 23 — exactly [`CROSSING_ITEM_Y`], with no row to spare: the seed sack
+/// passes between the risers touching neither.
+const GANTRY_ELBOW_Y: f32 = 3.0;
+/// The elbow casting, and NOT [`PIPE_HUB_R`]. A corner tile carries one hub
+/// and can afford the swelling that says "fitting"; a gantry carries four
+/// within a third of a tile, and at the run's own hub radius the first render
+/// came back with a lumpy pale column at each end of the arch instead of two
+/// elbows. Half a voxel of swell is enough to break the line and little
+/// enough to keep the silhouette a pipe's.
+const GANTRY_HUB_R: f32 = PIPE_OUTER_R + 0.5;
+/// The sight glass over the lane, in Y — centred on the belt, so the
+/// liquid shows directly over the product passing under it.
+const GANTRY_WINDOW: (i32, i32) = (12, 19);
+
+const _: () = assert!(
+    PIPE_BORE_Z0 + CROSSING_LIFT > CROSSING_ITEM_TOP_Z,
+    "the raised run's bore floor must stand above the tallest item on the belt"
+);
+// `<=`, not `<`: the casting's equator reaches y = 8.0 exactly, but only on
+// the x = 15.5 axis ([`PIPE_C`]), where no voxel centre sits, so it fills
+// nothing past y 7. `a_crossing_clears_what_the_belt_is_carrying` is the
+// voxel-level proof; this is the cheap tripwire for a bigger casting.
+const _: () = assert!(
+    GANTRY_ELBOW_Y + GANTRY_HUB_R <= CROSSING_ITEM_Y.0 as f32,
+    "the elbow casting must stand clear of the lane's traffic in plan"
+);
+
+/// The two posts a crossing stands on, replacing [`pipe_stand`]'s single
+/// central one — which cannot stay, because it stands in the belt's lane.
+/// Both sit clear of the conveyor's side frames (y 4..6 and 25..27) and of
+/// its legs, so the two models never share a voxel.
+fn crossing_posts(m: &mut VoxModel, p: &Palette) {
+    let steel = p.idx("steel");
+    for (y0, y1) in [(1, 3), (28, 30)] {
+        m.cuboid((13, 18), (y0, y1), (0, 0), steel);
+        m.cuboid((14, 17), (y0, y1), (1, PIPE_AXIS_Z - 7), steel);
+        m.cuboid(
+            (13, 18),
+            (y0 - 1, y1 + 1),
+            (PIPE_AXIS_Z - 6, PIPE_AXIS_Z - 5),
+            steel,
+        );
+    }
+}
+
+/// **The crossing's pipe: a gantry.** The run arrives at [`PIPE_AXIS_Z`] on
+/// the tile's edge, elbows up at [`GANTRY_ELBOW_Y`], crosses the lane at
+/// [`GANTRY_AXIS_Z`] — clear over the tallest bottle — and comes back down
+/// to meet its neighbour at the far face. Both open faces are a plain bore on
+/// the run's own axis, so a crossing drops into an existing north–south run
+/// with no fitting and no change to the tiles either side of it.
+///
+/// Drawn solid and hollowed afterwards, the rule every junction shape here
+/// follows: legs and elbow castings then open into one another instead of
+/// meeting as two separately-bored tubes. The sight glass is on the span over
+/// the lane ([`GANTRY_WINDOW`]), the only length of this run that is ever
+/// level at a height the liquid body can stand in.
+pub fn pipe_crossing(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, GANTRY_MODEL_Z]);
+    let last = TILE_VOXELS as i32 - 1;
+    let low = PIPE_AXIS_Z as f32;
+    let high = GANTRY_AXIS_Z as f32;
+    let near = GANTRY_ELBOW_Y;
+    let far = PIPE_C * 2.0 - GANTRY_ELBOW_Y;
+    let steel = p.idx("steel_light");
+
+    crossing_posts(&mut m, p);
+
+    pipe_leg_y(&mut m, p, (0, near as i32));
+    pipe_leg_y(&mut m, p, (far as i32, last));
+    for y in [near, far] {
+        m.cylinder_z_f(
+            (PIPE_C, y),
+            PIPE_OUTER_R,
+            (PIPE_AXIS_Z, GANTRY_AXIS_Z),
+            steel,
+        );
+        m.sphere_f((PIPE_C, y, low), GANTRY_HUB_R, steel);
+        m.sphere_f((PIPE_C, y, high), GANTRY_HUB_R, steel);
+    }
+    m.cylinder_y_f(
+        (PIPE_C, high),
+        PIPE_OUTER_R,
+        (near as i32, far as i32),
+        steel,
+    );
+
+    pipe_bore_y(&mut m, (0, near as i32));
+    pipe_bore_y(&mut m, (far as i32, last));
+    for y in [near, far] {
+        m.carve_cylinder_z_f((PIPE_C, y), PIPE_BORE_R, (PIPE_AXIS_Z, GANTRY_AXIS_Z));
+        m.carve_sphere_f((PIPE_C, y, low), PIPE_BORE_R);
+        m.carve_sphere_f((PIPE_C, y, high), PIPE_BORE_R);
+    }
+    m.carve_cylinder_y_f((PIPE_C, high), PIPE_BORE_R, (near as i32, far as i32));
+    // [`pipe_window_x`] turned along Y and lifted: from just above the
+    // raised bore's floor to the top of the model.
+    let top = m.size[2] as i32 - 1;
+    m.carve_cuboid(
+        PIPE_BORE_Y,
+        GANTRY_WINDOW,
+        (PIPE_BORE_Z0 + CROSSING_LIFT + 1, top),
+    );
+    m
+}
+
+/// The crossing as the player knows it — belt, arch and a bottle passing
+/// under it — **for the icon pass alone** (§2b point 35). The scene never
+/// places this: it stacks [`pipe_crossing`] over the live belt frames, and an
+/// item here would stand still on a moving line. The icon is the only place a
+/// crossing is shown with nothing around it, and the arch on its own reads
+/// as a bent pipe, not as something a line runs under.
+pub fn crossing(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([TILE_VOXELS, TILE_VOXELS, GANTRY_MODEL_Z]);
+    m.merge(&belt_f0(p));
+    // Stood the way `main.gd` stands a carried item: centred on the tile,
+    // base on the running surface.
+    let inset = (TILE_VOXELS - ITEM_VOXELS) as i32 / 2;
+    for (&(x, y, z), &idx) in &item_bottle(p).voxels {
+        m.set(
+            x as i32 + inset,
+            y as i32 + inset,
+            z as i32 + BELT_CLEAT_Z,
+            idx,
+        );
+    }
+    m.merge(&pipe_crossing(p));
+    m
+}
+
+/// The liquid in a [`pipe_crossing`]'s raised span — the one-voxel slab every
+/// other fluid body is, authored at the run's own height like them, and
+/// stood [`CROSSING_LIFT`] higher by `main.gd`. It runs elbow to elbow and no
+/// further: the low stubs either side have no window to show liquid through,
+/// and a slab reaching the tile face at the raised height would poke out of
+/// the elbow casting into open air.
+pub fn pipe_fluid_crossing(p: &Palette) -> VoxModel {
+    let mut m = pipe_fluid_slab();
+    let near = GANTRY_ELBOW_Y as i32;
+    pipe_fluid_y(&mut m, p, (near, TILE_VOXELS as i32 - 1 - near));
+    m
+}
+
 // --- Fluid bodies ----------------------------------------------------------
 //
 // One per shape, each **one voxel tall**: `main.gd` scales the node
@@ -6317,6 +6541,273 @@ mod tests {
 
     fn palette() -> Palette {
         Palette::load()
+    }
+
+    /// Whether `m`, placed on a crossing tile, has any voxel in the box an
+    /// item riding the belt occupies ([`CROSSING_ITEM_Y`] across the whole
+    /// lane, up to [`CROSSING_ITEM_TOP_Z`]). `lift` stands `m` that many
+    /// voxels higher first, the way `main.gd` stands a crossing's overlays.
+    fn fouls_belt_traffic(m: &VoxModel, lift: i32) -> bool {
+        m.voxels.keys().any(|&(_, y, z)| {
+            let (y, z) = (y as i32, z as i32 + lift);
+            (CROSSING_ITEM_Y.0..=CROSSING_ITEM_Y.1).contains(&y) && z <= CROSSING_ITEM_TOP_Z
+        })
+    }
+
+    /// The crossing spike's finding (2026-09-25), as an assertion. An item
+    /// rides the belt with its base on the running surface and its model
+    /// centred on the tile, so a solid on a crossing tile fills
+    /// [`CROSSING_ITEM_Y`] up to [`CROSSING_ITEM_TOP_Z`] — NOT the same box as
+    /// the belt's own. The shipped crossing leaves it empty.
+    ///
+    /// The other half is the regression guard. The spike proved the lift was
+    /// needed with a rejected `pipe_bridge_flat` model; that model was the
+    /// ordinary straight turned across the lane on two posts, so the straight
+    /// turned across the lane is the same witness without keeping a model
+    /// nothing ships in `ASSETS`. If it ever stops fouling the box, the belt or
+    /// the items changed and the gantry may no longer be needed.
+    #[test]
+    fn a_crossing_clears_what_the_belt_is_carrying() {
+        let p = palette();
+        assert!(
+            !fouls_belt_traffic(&pipe_crossing(&p), 0),
+            "the crossing stands in the space an item on the belt occupies"
+        );
+        assert!(
+            fouls_belt_traffic(&pipe(&p).rotated_cw(1), 0),
+            "a pipe left at the run's own height no longer fouls the item box — \
+             the belt or the items changed and the gantry may be unneeded"
+        );
+        // The bottle is the tallest item, and the box has to hold it.
+        let bottle_top = item_bottle(&p)
+            .voxels
+            .keys()
+            .map(|&(_, _, z)| z as i32)
+            .max();
+        assert_eq!(
+            bottle_top.map(|z| z + BELT_CLEAT_Z),
+            Some(CROSSING_ITEM_TOP_Z),
+            "the tallest item's top moved; CROSSING_ITEM_TOP_Z must follow it"
+        );
+    }
+
+    /// [`CROSSING_ITEM_Y`] and [`CROSSING_ITEM_TOP_Z`] are hand-written
+    /// numbers claiming to be facts about the item models, and the crossing's
+    /// compile-time clearance asserts rest on them. This makes the claim
+    /// true: every `item_*` model in `ASSETS`, stood the way `main.gd` stands
+    /// a carried item (centred on the tile, base on the running surface),
+    /// must fill no voxel outside that box.
+    ///
+    /// It walks `ASSETS` rather than naming the belt items, so a new item is
+    /// covered the moment it ships (the issue #108 shape was a guard holding
+    /// a list of what existed when it was written). The exemptions go the
+    /// other way: a model that never rides a belt has to be named here, with
+    /// its reason.
+    #[test]
+    fn a_crossing_clears_every_item_the_line_can_carry() {
+        // `main.gd`'s FLUID_MODELS: stock icons for the market and the larder
+        // that nothing carries on a belt. The vinegar jug stands at z = 25.
+        const NEVER_ON_A_BELT: [&str; 2] = ["item_vinegar", "item_liquid_smoke"];
+        let p = palette();
+        let inset = (TILE_VOXELS - ITEM_VOXELS) as i32 / 2;
+        let items: Vec<_> = ASSETS
+            .iter()
+            .filter(|a| a.name.starts_with("item_"))
+            .collect();
+        for name in NEVER_ON_A_BELT {
+            assert!(
+                items.iter().any(|a| a.name == name),
+                "{name} is exempted but no longer ships; drop the exemption"
+            );
+        }
+        let mut reach: Option<(i32, i32, i32)> = None;
+        for a in items.iter().filter(|a| !NEVER_ON_A_BELT.contains(&a.name)) {
+            for &(_, y, z) in (a.build)(&p).voxels.keys() {
+                let (y, z) = (y as i32 + inset, z as i32 + BELT_CLEAT_Z);
+                assert!(
+                    (CROSSING_ITEM_Y.0..=CROSSING_ITEM_Y.1).contains(&y),
+                    "{} fills y = {y} on the belt, outside CROSSING_ITEM_Y {:?} \
+                     that the crossing is built to clear",
+                    a.name,
+                    CROSSING_ITEM_Y
+                );
+                assert!(
+                    z <= CROSSING_ITEM_TOP_Z,
+                    "{} reaches z = {z} on the belt, above CROSSING_ITEM_TOP_Z = {} \
+                     that the crossing is built to clear",
+                    a.name,
+                    CROSSING_ITEM_TOP_Z
+                );
+                let (y0, y1, top) = reach.unwrap_or((y, y, z));
+                reach = Some((y0.min(y), y1.max(y), top.max(z)));
+            }
+        }
+        // And the other direction: the constants are the items' real extent,
+        // not a loose bound, so the comments that quote them stay true.
+        assert_eq!(
+            reach,
+            Some((CROSSING_ITEM_Y.0, CROSSING_ITEM_Y.1, CROSSING_ITEM_TOP_Z)),
+            "the belt items no longer reach the edges of the crossing's box; \
+             tighten CROSSING_ITEM_Y / CROSSING_ITEM_TOP_Z to match"
+        );
+    }
+
+    /// The crossing and the belt it is stacked over are two meshes in one
+    /// place, so they must never share a voxel — a shared voxel is a pair of
+    /// coincident faces, z-fighting on every crossing in the factory. Every
+    /// straight frame, since the cleats move.
+    #[test]
+    fn a_crossing_shares_no_voxel_with_the_belt_under_it() {
+        let p = palette();
+        let crossing = pipe_crossing(&p);
+        for (frame, belt) in [belt_f0(&p), belt_f1(&p), belt_f2(&p), belt_f3(&p)]
+            .iter()
+            .enumerate()
+        {
+            for &(x, y, z) in belt.voxels.keys() {
+                assert!(
+                    !crossing.filled(x as i32, y as i32, z as i32),
+                    "belt_f{frame} and the crossing share voxel ({x}, {y}, {z})"
+                );
+            }
+        }
+    }
+
+    /// Open on exactly the two faces its pipe runs through, at the run's own
+    /// axis — so it drops into a north–south run with no fitting — and closed
+    /// on the two the belt runs through, which a pipe beside the belt must
+    /// never join (the plan's open-sides mask).
+    #[test]
+    fn a_crossing_is_open_only_on_its_pipe_axis() {
+        let p = palette();
+        let crossing = pipe_crossing(&p);
+        for face in ALL_FACES {
+            let open = matches!(face, PipeFace::North | PipeFace::South);
+            assert_eq!(
+                face_open(&crossing, face),
+                open,
+                "pipe_crossing: face {face:?} should be {}",
+                if open { "open" } else { "closed" }
+            );
+        }
+    }
+
+    /// Mirror-symmetric about [`PIPE_C`] on both horizontal axes (§2b point
+    /// 20), so a crossing on a westbound belt — this model turned twice —
+    /// lands on exactly the voxels an eastbound one does, and both of its
+    /// joints meet the run without a step at any of the four facings.
+    #[test]
+    fn a_crossing_is_symmetric_about_the_tile_midline() {
+        let p = palette();
+        let last = TILE_VOXELS - 1;
+        for (name, m) in [
+            ("pipe_crossing", pipe_crossing(&p)),
+            ("pipe_fluid_crossing", pipe_fluid_crossing(&p)),
+        ] {
+            for (&(x, y, z), &c) in &m.voxels {
+                for (mx, my) in [(last - x, y), (x, last - y)] {
+                    assert_eq!(
+                        m.voxels.get(&(mx, my, z)),
+                        Some(&c),
+                        "{name}: ({x}, {y}, {z}) has no mirror at ({mx}, {my}, {z})"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The crossing shows its liquid the way every other pipe tile does: a
+    /// one-voxel slab that, stood [`CROSSING_LIFT`] up, lies inside the raised
+    /// run's bore at every voxel, is seen through the sight glass, and has
+    /// tube wall beside it all the way to a full column (§2b point 19).
+    #[test]
+    fn a_crossings_fluid_body_lies_in_its_raised_bore_under_the_sight_glass() {
+        let p = palette();
+        let (shape, fluid) = (pipe_crossing(&p), pipe_fluid_crossing(&p));
+        assert_eq!(fluid.size[2], 1, "the fluid body must be one voxel tall");
+        assert!(
+            !fluid.voxels.is_empty(),
+            "the crossing carries no fluid body"
+        );
+        let floor = PIPE_BORE_Z0 + CROSSING_LIFT;
+        for &(x, y, _) in fluid.voxels.keys() {
+            let (x, y) = (x as i32, y as i32);
+            // The family test's band, lifted: the bore is empty above the
+            // slab up to the axis. Higher, a column at an elbow meets the
+            // casting's round crown — wall around liquid, which hides it.
+            for z in floor + 1..=GANTRY_AXIS_Z {
+                assert!(
+                    !shape.filled(x, y, z),
+                    "fluid at ({x}, {y}) is inside the crossing's wall at z = {z}"
+                );
+            }
+            for z in floor..floor + PIPE_BORE_HEIGHT {
+                // Walled in along X outside the sight glass: a side face that
+                // met open air there would be the old coloured-stripe bug on
+                // the raised run. Inside it, being seen is the point.
+                if (GANTRY_WINDOW.0..=GANTRY_WINDOW.1).contains(&y) {
+                    continue;
+                }
+                for step in [-1, 1] {
+                    let walled = (1..TILE_VOXELS as i32).any(|d| shape.filled(x + step * d, y, z));
+                    assert!(
+                        walled,
+                        "a full column's side face at ({x}, {y}, {z}) faces open air"
+                    );
+                }
+            }
+        }
+        let seen = fluid.voxels.keys().any(|&(x, y, _)| {
+            (PIPE_BORE_Y.0..=PIPE_BORE_Y.1).contains(&(x as i32))
+                && (GANTRY_WINDOW.0..=GANTRY_WINDOW.1).contains(&(y as i32))
+        });
+        assert!(seen, "no fluid lies under the crossing's sight glass");
+        for y in [0, TILE_VOXELS as i32 - 1] {
+            assert!(
+                !(0..TILE_VOXELS as i32).any(|x| fluid.filled(x, y, 0)),
+                "the raised slab reaches the tile face at y = {y}, where there is no \
+                 raised tube to hold it"
+            );
+        }
+    }
+
+    /// The fault clamp is overlaid on a crossing too — a crossing's pipe is a
+    /// pipe tile of its run like any other — and `main.gd` lifts it by the
+    /// same [`CROSSING_LIFT`] as the liquid. Lifted, it must still cover the
+    /// raised tube it marks and must no longer stand in the belt's traffic,
+    /// or a faulted run would stop the line it crosses.
+    #[test]
+    fn a_lifted_fault_clamp_covers_a_crossing_and_clears_its_belt() {
+        let p = palette();
+        let clamp = pipe_fault(&p);
+        assert!(
+            fouls_belt_traffic(&clamp, 0),
+            "the clamp at run height no longer fouls the lane, so a crossing may \
+             not need it lifted at all"
+        );
+        assert!(
+            !fouls_belt_traffic(&clamp, CROSSING_LIFT),
+            "the fault clamp lifted onto a crossing stands in the belt's traffic"
+        );
+        let crossing = pipe_crossing(&p);
+        let lifted = |x: i32, y: i32, z: i32| clamp.filled(x, y, z - CROSSING_LIFT);
+        let mut covered = 0;
+        for &(x, y, z) in crossing.voxels.keys() {
+            let (x, y, z) = (x as i32, y as i32, z as i32);
+            // The raised span's tube, where the clamp straddles it.
+            if z < GANTRY_AXIS_Z - PIPE_OUTER_R as i32 || !lifted(PIPE_C as i32, y, z) {
+                continue;
+            }
+            assert!(
+                lifted(x, y, z),
+                "the raised tube at ({x}, {y}, {z}) pokes out of the lifted clamp"
+            );
+            covered += 1;
+        }
+        assert!(
+            covered > 0,
+            "the lifted clamp covers none of the raised tube"
+        );
     }
 
     /// Every kind's junction geometry, so a new machine kind added to

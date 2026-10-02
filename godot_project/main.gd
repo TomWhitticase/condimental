@@ -227,8 +227,31 @@ const PIPE_FLUID_ASSETS := {
 	"pipe_tee": "pipe_fluid_tee",
 	"pipe_cross": "pipe_fluid_cross",
 	"pipe_end": "pipe_fluid_end",
+	"pipe_crossing": "pipe_fluid_crossing",
 }
 const PIPE_FLUID_ASSET := "pipe_fluid"
+## A crossing's pipe half (the belt/pipe crossing epic,
+## `docs/BELT_PIPE_CROSSING_PLAN.md`): the raised gantry, stacked over the
+## crossing's own belt frames. Authored with its run along the model's Y, so
+## it takes the BELT's yaw and lands across the lane at every facing — the
+## model is symmetric about the tile midline, so which of the two ways along
+## its axis it points never shows. The fluid body is the table entry above.
+##
+## **Fallback:** a stale name here (the art was renamed once already, from
+## `pipe_gantry`) would draw an empty node with every test green. So if the
+## gantry's meshes are not staged, the crossing draws the plain straight
+## `PIPE_ASSET` lifted by `CROSSING_LIFT_VOXELS` instead — still a pipe over
+## the belt, still clear of what the belt carries, visibly not the real art.
+const CROSSING_GANTRY_ASSET := "pipe_crossing"
+const CROSSING_GANTRY_FALLBACK := PIPE_ASSET
+## How far a crossing's run stands above an ordinary run, in voxels.
+## **Mirrors `assets.rs`'s `CROSSING_LIFT`** (the raised axis minus
+## `PIPE_AXIS_Z`); change one, change the other. Every per-tile pipe overlay
+## on a crossing — the liquid body and the fault clamp — is authored at the
+## ordinary run's height and stood this much higher here, so this one number
+## is the whole difference between the two.
+const CROSSING_LIFT_VOXELS := 17
+const CROSSING_LIFT_Y := CROSSING_LIFT_VOXELS * VOXEL_UNIT
 ## The hazard clamp overlaid on a run the simulation cannot name, and the
 ## two `FluidSnapshot.naming` verdicts that put it there (issue #54). The
 ## other two — `carries` and `unplumbed` — are not faults: the first works,
@@ -1342,6 +1365,17 @@ var _ghost_asset := ""
 var _ghost_tile := Vector2i.ZERO
 var _ghost_valid := false
 var _ghost_reason := "" # "", "blocked", "none_owned", "nothing_here", "rack_needed"
+## The simulation's own sentence for a refused placement (`preview_command`'s
+## `reason`), shown verbatim under "✗ BLOCKED". Empty unless the ghost is blocked.
+var _ghost_refusal := ""
+## What the simulation says the ghost's tile would END UP as
+## (`preview_command`'s `result_kind`) — the ghost's kind, or `crossing` for a
+## pipe across a belt or a belt across a pipe. Empty unless valid.
+var _ghost_result_kind := ""
+## The last `preview_command_json` answer, keyed on the command and the sim's
+## revision, so a ghost held still asks once per change rather than per frame.
+var _ghost_preview_key := ""
+var _ghost_preview: Dictionary = {}
 var _owned_counts: Dictionary = {} # kind -> owned count, repolled while building
 var _shop_prices: Dictionary = {} # kind -> price, from the same poll
 var _shop_affordable: Dictionary = {} # kind -> can the balance cover one, same poll
@@ -3279,7 +3313,8 @@ func _is_building_tile(tile: Vector2i) -> bool:
 	if placement.is_empty():
 		return false
 	var kind := String(placement.get("kind", ""))
-	return kind != BELT_KIND and kind != PIPE_KIND and kind != SPLITTER_KIND
+	return kind != BELT_KIND and kind != PIPE_KIND and kind != SPLITTER_KIND \
+		and kind != CROSSING_KIND
 
 
 ## The shape one pipe tile draws, from the sides it is joined on.
@@ -3403,6 +3438,43 @@ func _pipe_fitting_key(tile: Vector2i, to: String) -> String:
 	return "fitting:%s:%s" % [_tile_key(tile), to]
 
 
+## The instance key of a crossing's gantry. The tile's own key is its belt,
+## because that is what `_set_belt_surface_ticks` animates and what an item's
+## lane is read from; the gantry is a second instance on the same tile, like
+## a fitting.
+func _crossing_gantry_key(tile: Vector2i) -> String:
+	return "gantry:%s" % _tile_key(tile)
+
+
+## The pipe-shape record (`_pipe_shape_for`'s keys) of a crossing whose belt
+## faces `belt_direction`, plus the two lifts only a crossing has:
+## `lift_y`, what its per-tile overlays (liquid body, fault clamp) stand
+## above an ordinary run's, and `model_lift_y`, what the model itself must be
+## raised by — zero for the gantry, which is authored raised, and
+## `CROSSING_LIFT_Y` for the fallback straight, which is not.
+##
+## No connection list: a crossing is one shape whatever it is joined to (its
+## two open faces are the plain bores its neighbours already meet), and which
+## sides those are is the simulation's open-sides mask, not this file's.
+func _crossing_shape_for(belt_direction: String) -> Dictionary:
+	var asset := CROSSING_GANTRY_ASSET
+	var model_lift := 0.0
+	if not ResourceLoader.exists(VOX_DIR + asset + ".vox"):
+		asset = CROSSING_GANTRY_FALLBACK
+		model_lift = CROSSING_LIFT_Y
+	# The fallback straight is authored along X, a quarter turn off the
+	# gantry's Y, so it takes one turn more to lie across the same belt.
+	var turns := DIRECTIONS.find(belt_direction) + (1 if model_lift > 0.0 else 0)
+	return {
+		"asset": asset,
+		"fluid_asset": String(PIPE_FLUID_ASSETS.get(asset, PIPE_FLUID_ASSET)),
+		"turns": posmod(turns, 4),
+		"yaw": deg_to_rad(float(posmod(turns, 4)) * 90.0),
+		"lift_y": CROSSING_LIFT_Y,
+		"model_lift_y": model_lift,
+	}
+
+
 ## Which voxel asset draws one placement — for a belt, frame 0 of the shape
 ## its `links` give it (the frame set itself is `_tile_frames_for`); pipes
 ## have context-dependent variants (above); everything else goes through the
@@ -3413,7 +3485,9 @@ func _asset_for_placement(placement: Dictionary) -> String:
 	var origin := _placement_origin(placement)
 	if kind == BELT_KIND:
 		return _tile_frames_for(placement)[0]
-	if kind == PIPE_KIND:
+	if kind == PIPE_KIND or kind == CROSSING_KIND:
+		# A crossing answers with its PIPE half, the gantry: that is the part
+		# no other tile draws, and the belt frames under it are the belt's.
 		return _pipe_asset_for(origin)
 	if kind == SPLITTER_KIND:
 		return SPLITTER_MODE_ASSETS.get(String(placement.get("split_mode", "left")), SPLITTER_ASSET)
@@ -3445,6 +3519,14 @@ const WAREHOUSE_RACK_KIND := "warehouse_rack"
 ## belt-LIKE rather than a buffer: it carries product at belt speed and hands
 ## it on, so `_is_building_tile` deliberately groups it with the conveyor.
 const SPLITTER_KIND := "splitter"
+## A belt and a pipe on one tile (the belt/pipe crossing epic). Never bought
+## and never on the hotbar: the simulation ASSEMBLES one when a pipe is laid
+## across a belt or a belt across a pipe, so it reaches this file only through
+## `world_layout_json`. It is both halves at once — belt `links` and pipe
+## `connections` in one flattened object, one entry in a chunk's `belts` and
+## one in its `pipes` — and is drawn, hovered and filled as both. Its
+## `direction` is the belt's. Rust twin: `sim::world::CROSSING_KIND`.
+const CROSSING_KIND := "crossing"
 
 
 ## Rebuilds the entire rendered world from `world_layout_json` plus the
@@ -3463,7 +3545,8 @@ func _rebuild_world() -> void:
 	_pipe_shapes.clear()
 	_pipe_fittings.clear()
 	for placement in _placements:
-		if String(placement.get("kind", "")) != PIPE_KIND:
+		var pipe_kind := String(placement.get("kind", ""))
+		if pipe_kind != PIPE_KIND and pipe_kind != CROSSING_KIND:
 			continue
 		var origin := _placement_origin(placement)
 		var key := _tile_key(origin)
@@ -3477,7 +3560,10 @@ func _rebuild_world() -> void:
 			var fitting := _pipe_fitting_for(connection)
 			if not fitting.is_empty():
 				fittings.append(fitting)
-		_pipe_shapes[key] = _pipe_shape_for(faces, _placement_direction(placement))
+		if pipe_kind == CROSSING_KIND:
+			_pipe_shapes[key] = _crossing_shape_for(_placement_direction(placement))
+		else:
+			_pipe_shapes[key] = _pipe_shape_for(faces, _placement_direction(placement))
 		if not fittings.is_empty():
 			_pipe_fittings[key] = fittings
 	_last_fluid = _read_fluid_snapshots()
@@ -3623,7 +3709,23 @@ func _build_placement(placement: Dictionary) -> void:
 		# turn is decided by its connections, not its facing (see the pipe
 		# constants' doc), a belt corner's (ticket 5) likewise, and this is
 		# the one place that decides.
-		if kind == PIPE_KIND:
+		if kind == CROSSING_KIND:
+			# Both halves: the belt's frames at the belt's yaw (below, like any
+			# belt — so its surface clock and its items are a belt's), and the
+			# gantry over them under a key of its own, the way a fitting is.
+			_belt_shapes[key] = _belt_shape_for(placement.get("links", {}), direction)
+			var gantry := _pipe_shape_at(origin)
+			_stage_tile_instance(
+				[String(gantry.get("asset", CROSSING_GANTRY_ASSET))], _crossing_gantry_key(origin),
+				centre + Vector3(0.0, float(gantry.get("model_lift_y", 0.0)), 0.0),
+				float(gantry.get("yaw", yaw))
+			)
+			for fitting in _pipe_fittings_at(origin):
+				_stage_tile_instance(
+					[String(fitting["asset"])], _pipe_fitting_key(origin, String(fitting["to"])),
+					centre, float(fitting["yaw"])
+				)
+		elif kind == PIPE_KIND:
 			yaw = float(_pipe_shape_at(origin).get("yaw", yaw))
 			# The fittings are instances too — a fitting has no live state —
 			# each under its own key, turned to the side it stands on.
@@ -3981,7 +4083,8 @@ func _splitter_effective_side(snapshot: Dictionary) -> int:
 
 ## The kinds drawn as instances. Everything else is a node (see above).
 func _is_instanced_kind(kind: String) -> bool:
-	return kind == BELT_KIND or kind == PIPE_KIND or kind == SPLITTER_KIND
+	return kind == BELT_KIND or kind == PIPE_KIND or kind == SPLITTER_KIND \
+		or kind == CROSSING_KIND
 
 
 ## The frame set one tile draws with: a list of asset names, one per
@@ -3990,7 +4093,10 @@ func _is_instanced_kind(kind: String) -> bool:
 ## a splitter or pipe is a one-frame set of whatever `_asset_for_placement`
 ## picks.
 func _tile_frames_for(placement: Dictionary) -> Array:
-	if String(placement.get("kind", "")) == BELT_KIND:
+	var kind := String(placement.get("kind", ""))
+	# A crossing's tile key draws its BELT: the gantry is staged beside it
+	# under `_crossing_gantry_key` (`_build_placement`).
+	if kind == BELT_KIND or kind == CROSSING_KIND:
 		return _belt_frames_for_shape(
 			_belt_shape_for(placement.get("links", {}), _placement_direction(placement))
 		)
@@ -4730,7 +4836,11 @@ func _update_pipe_fault_markers() -> void:
 		var tile: Vector2i = faulted[key]
 		var node := _asset_node(PIPE_FAULT_ASSET)
 		node.name = "%s_%s" % [PIPE_FAULT_ASSET, key]
-		node.position = _tile_origin(tile.x, tile.y, FLOOR_Y)
+		# A crossing's clamp rides its raised run (`CROSSING_LIFT_VOXELS`),
+		# where it still covers the tube and clears the belt's traffic.
+		node.position = _tile_origin(
+			tile.x, tile.y, FLOOR_Y + float(_pipe_shape_at(tile).get("lift_y", 0.0))
+		)
 		# No yaw: the clamp is square about the tile's midline and unchanged
 		# by a quarter turn (`a_pipe_fault_clamp_is_unchanged_by_a_quarter_turn`),
 		# so it covers a straight, a corner and a tee alike without ever
@@ -4867,7 +4977,10 @@ func _fluid_body_for(network_index: int, segment_index: int, segment: Dictionary
 	var fluid_asset := String(shape.get("fluid_asset", PIPE_FLUID_ASSET))
 	var node := _asset_node(fluid_asset)
 	node.name = "%s_%s" % [fluid_asset, _tile_key(tile)]
-	node.position = _tile_origin(tile.x, tile.y, PIPE_BORE_FLOOR_Y)
+	# A crossing's bore is its raised span, `lift_y` above everyone else's.
+	node.position = _tile_origin(
+		tile.x, tile.y, PIPE_BORE_FLOOR_Y + float(shape.get("lift_y", 0.0))
+	)
 	node.rotation.y = float(shape.get("yaw", _direction_yaw(String(segment.get("direction", "east")))))
 	_tint_level_body(node, material)
 	_world_root.add_child(node)
@@ -15286,25 +15399,7 @@ func _confirm_build() -> void:
 		return
 	if _build_kind == "" or not _ghost_valid:
 		return
-	var command := {
-		"type": "place",
-		"kind": _build_kind,
-		"tile": [tile.x, tile.y],
-		"direction": _build_direction,
-	}
-	# **A hopper says what it will hold.** `PlayerCommand::Place`'s `item` is
-	# optional only while the world has exactly one raw solid to infer from,
-	# and the shipped chain has had two since the chain rework — so omitting
-	# it (which this function did until then) is a silent refusal, and
-	# placing a hopper did nothing at all. Sent for the hopper and no other
-	# kind, because the field is ignored elsewhere and a command carrying a
-	# field that means nothing invites the next reader to think it does.
-	if _build_kind == HOPPER_KIND:
-		var item := _selected_hopper_item()
-		if item == "":
-			return
-		command["item"] = item
-	_issue_world_command(command)
+	_issue_world_command(_place_command_at(_build_kind, tile, _build_direction))
 	# The ghost said the click would work; the simulation has the final say.
 	# What is on the tile afterwards is the answer, and the sound says it.
 	var placed := not _placement_at_tile(tile).is_empty()
@@ -15455,18 +15550,38 @@ func _ghost_target_tile() -> Vector2i:
 	return _tile_under_screen_pos(query_pos)
 
 
-## Whether the rotated footprint of `kind` at `tile` would overlap anything
-## already placed. A pure Godot-side check against `_occupancy` — the same map
-## hover resolves through, which came from `world_layout_json`'s own
-## `occupies` lists — so aiming the ghost costs no simulation round trip at
-## all. The simulation still has the final say (`Place` refuses a collision
-## silently); this is what stops the player finding that out by clicking.
-func _ghost_blocked_tiles(kind: String, tile: Vector2i, direction: String) -> Array:
-	var blocked: Array = []
-	for covered in _placement_tiles(tile, _kind_footprint(kind), direction):
-		if _occupancy.has(_tile_key(covered)):
-			blocked.append(covered)
-	return blocked
+## The `Place` command a click on `tile` would send — ONE builder, used by
+## the click and by the ghost's preview alike, so what the ghost asks the
+## simulation about is exactly what the click will do.
+##
+## **A hopper says what it will hold.** `PlayerCommand::Place`'s `item` is
+## optional only while the world has exactly one raw solid to infer from, and
+## the shipped chain has had two since the chain rework — so omitting it is a
+## refusal, and the preview says which. Sent for the hopper and no other kind,
+## because the field is ignored elsewhere and a command carrying a field that
+## means nothing invites the next reader to think it does.
+func _place_command_at(kind: String, tile: Vector2i, direction: String) -> Dictionary:
+	var command := {"type": "place", "kind": kind, "tile": [tile.x, tile.y], "direction": direction}
+	if kind == HOPPER_KIND and _selected_hopper_item() != "":
+		command["item"] = _selected_hopper_item()
+	return command
+
+
+## The simulation's verdict on placing `kind` at `tile` facing `direction`:
+## `{valid, reason, result_kind}` from `preview_command_json` (ARCHITECTURE.md
+## §4) — the same validation pass the real command runs, so the ghost cannot
+## disagree with the click. Which tiles collide, and whether a pipe meets a
+## belt at right angles, are the SIM's rules, and nothing here re-derives
+## either. Cached on the command and `sim.revision()`: every placement,
+## purchase and tick moves the revision, and nothing else changes the answer.
+func _preview_place(kind: String, tile: Vector2i, direction: String) -> Dictionary:
+	var command_json := JSON.stringify(_place_command_at(kind, tile, direction))
+	var key := "%s@%d" % [command_json, sim.revision()]
+	if key != _ghost_preview_key:
+		var parsed = JSON.parse_string(sim.preview_command_json(command_json))
+		_ghost_preview = parsed if parsed is Dictionary else {}
+		_ghost_preview_key = key
+	return _ghost_preview
 
 
 ## Rebuilds the ghost's own body — one translucent copy of the kind's real
@@ -15486,7 +15601,7 @@ func _rebuild_ghost_body(asset_override := "") -> void:
 	_ghost_asset = asset
 	if asset == "":
 		return
-	var body := _asset_node(asset)
+	var body := _ghost_asset_node(asset)
 	body.name = "ghost_body"
 	# A ghost casts no shadow: a shadow on the floor is the strongest cue
 	# there IS something there, which is the opposite of what this node says.
@@ -15496,6 +15611,45 @@ func _rebuild_ghost_body(asset_override := "") -> void:
 	_ghost_root.add_child(body)
 	# A hopper ghost also previews its CONTENTS — see `_update_ghost_fill`.
 	_update_ghost_fill()
+
+
+## The separator in a ghost asset naming a STACK of models drawn as one body
+## — a crossing's belt with its gantry over it (`_crossing_ghost_asset`).
+## One string rather than a list so `_ghost_asset`'s rebuild-on-change check
+## stays a plain comparison; `+` because no asset name contains one.
+const GHOST_ASSET_STACK := "+"
+
+
+## One ghost body from `asset`, which may be several models joined by
+## `GHOST_ASSET_STACK`: every mesh of every model under one node, so
+## `_tint_ghost` and the no-shadow pass treat the stack as the one thing it
+## previews. The first model is the node; the rest are moved into it.
+func _ghost_asset_node(asset: String) -> Node3D:
+	var names := asset.split(GHOST_ASSET_STACK, false)
+	var body := _asset_node(names[0] if names.size() > 0 else asset)
+	for i in range(1, names.size()):
+		var extra := _asset_node(names[i])
+		for child in extra.get_children():
+			extra.remove_child(child)
+			child.name = "%s_%s" % [names[i], child.name]
+			body.add_child(child)
+		extra.free()
+	return body
+
+
+## The ghost that stands for a crossing — its belt's straight frame with the
+## gantry over it, both at the BELT's yaw like the placed tile
+## (`_crossing_shape_for`), so a remove ghost covers exactly what the click
+## would take away: both halves. Under `CROSSING_GANTRY_FALLBACK` the ghost is
+## the belt alone: a stack shares one yaw and no lift, and the fallback
+## straight needs a quarter turn and `CROSSING_LIFT_Y` that the placed tile
+## gives it, so stacking it would draw a pipe lying along the belt.
+func _crossing_ghost_asset(belt_direction: String) -> String:
+	var belt_frame := String(_belt_frames_for_shape(BELT_SHAPE_STRAIGHT)[0])
+	var gantry := _crossing_shape_for(belt_direction)
+	if String(gantry["asset"]) == CROSSING_GANTRY_FALLBACK:
+		return belt_frame
+	return "%s%s%s" % [belt_frame, GHOST_ASSET_STACK, String(gantry["asset"])]
 
 
 func _clear_ghost_body() -> void:
@@ -15584,22 +15738,31 @@ func _update_ghost() -> void:
 			var origin := _placement_origin(placement)
 			var direction := _placement_direction(placement)
 			var size := _rotated_footprint(_footprint_size(placement.get("footprint")), direction)
-			_rebuild_ghost_body(_asset_for_placement(placement))
+			if String(placement.get("kind", "")) == CROSSING_KIND:
+				_rebuild_ghost_body(_crossing_ghost_asset(direction))
+			else:
+				_rebuild_ghost_body(_asset_for_placement(placement))
 			_ghost_root.position = _footprint_centre(origin, size, FLOOR_Y)
 			_ghost_root.rotation.y = _direction_yaw(direction)
 			_tint_ghost(GHOST_TINT_REMOVE)
 			showing = true
 	elif tile != HOVER_NO_TILE:
-		var blocked := _ghost_blocked_tiles(_build_kind, tile, _build_direction)
+		var preview := _preview_place(_build_kind, tile, _build_direction)
+		_ghost_refusal = ""
+		_ghost_result_kind = ""
 		if _owned_of(_build_kind) <= 0:
+			# Ahead of the sim's own verdict, deliberately: whatever else is
+			# wrong, the way forward is the build menu, and this prompt says so.
 			_ghost_valid = false
 			_ghost_reason = "none_owned"
-		elif not blocked.is_empty():
+		elif not bool(preview.get("valid", false)):
 			_ghost_valid = false
 			_ghost_reason = "blocked"
+			_ghost_refusal = String(preview.get("reason", ""))
 		else:
 			_ghost_valid = true
 			_ghost_reason = ""
+			_ghost_result_kind = String(preview.get("result_kind", ""))
 		# **A ghost previews what the game's connection rules already make
 		# certain, and never what the simulation still has to decide.** That
 		# one rule is why the belt ghost and the pipe ghost look like they
@@ -15626,14 +15789,27 @@ func _update_ghost() -> void:
 		# fitting, because which tile of a run a machine taps IS the sim's
 		# choice — the same line, drawn in the same place.
 		#
-		# Where a would-be link is genuinely uncertain the answer is
-		# ARCHITECTURE.md §4's planned `preview_command`, a validation pass
-		# the sim itself answers; until it lands the belt ghost's job is the
-		# tile, the facing (named in the prompt's `facing east`) and whether
-		# the click will succeed.
+		# Whether the click will succeed at all is `preview_command`'s answer
+		# (ARCHITECTURE.md §4, `_preview_place`), a validation pass the sim
+		# itself runs; it does not preview links, so the belt ghost's job stays
+		# the tile, the facing (named in the prompt's `facing east`) and that
+		# verdict.
 		var ghost_asset := _shop_asset_for(_build_kind)
 		var ghost_yaw := _direction_yaw(_build_direction)
-		if _build_kind == PIPE_KIND:
+		#
+		# **A crossing is the sim's answer, not the ghost's guess.** When the
+		# preview says the tile would end up a `crossing`, the ghost is the
+		# whole stack — belt under gantry, at the BELT's yaw like the placed
+		# tile — so a pipe held across a belt shows the bridge it will build
+		# and one held along it stays the refused red pipe. Which facing is
+		# "across" is never worked out here.
+		if _ghost_result_kind == CROSSING_KIND:
+			var belt_direction := _build_direction
+			if _build_kind != BELT_KIND:
+				belt_direction = _placement_direction(_placement_at_tile(tile))
+			ghost_asset = _crossing_ghost_asset(belt_direction)
+			ghost_yaw = _direction_yaw(belt_direction)
+		elif _build_kind == PIPE_KIND:
 			var ghost_shape := _pipe_ghost_shape(tile, _build_direction)
 			ghost_asset = String(ghost_shape["asset"])
 			ghost_yaw = float(ghost_shape["yaw"])
@@ -15731,9 +15907,19 @@ func _placement_prompt_text() -> String:
 		"none_owned":
 			return "✗ NONE OWNED  %s\nbuy one in the build menu (E)\nESC: cancel" % kind_name
 		"blocked":
-			return "✗ BLOCKED  %s  ·  facing %s\nsomething is already there\nR: rotate    ESC: cancel%s" % [
-				kind_name, _build_direction, contents_hint
+			# The simulation's own sentence, verbatim — it is the one that knows
+			# whether the tile is taken or the pipe merely runs the wrong way.
+			var refusal := _ghost_refusal if _ghost_refusal != "" else "something is already there"
+			return "✗ BLOCKED  %s  ·  facing %s\n%s\nR: rotate    ESC: cancel%s" % [
+				kind_name, _build_direction, refusal, contents_hint
 			]
+	# A placement that assembles a crossing names both halves, the way the
+	# placed tile's hover will: the pipe goes OVER, the belt UNDER.
+	if _ghost_result_kind == CROSSING_KIND:
+		var other := BELT_KIND if _build_kind == PIPE_KIND else PIPE_KIND
+		kind_name = "%s %s %s" % [
+			kind_name, "over" if _build_kind == PIPE_KIND else "under", _kind_display_name(other)
+		]
 	return "✔ PLACE  %s  ·  facing %s\nclick to build    %d left to place\n%s\nR: rotate    ESC: cancel%s" % [
 		kind_name, _build_direction, owned, _auto_buy_hint_text(), contents_hint
 	]
@@ -17941,6 +18127,8 @@ func _hover_text_at_tile(tile: Vector2i, yielded := 0) -> String:
 			return _splitter_hover_text(key, direction)
 		PIPE_KIND:
 			return _pipe_hover_text(tile, direction)
+		CROSSING_KIND:
+			return _crossing_hover_text(placement, direction)
 		HOPPER_KIND:
 			return _hopper_hover_text(key, direction)
 		FLUID_TANK_KIND:
@@ -18024,7 +18212,9 @@ func _hover_panel_state(tile: Vector2i) -> Dictionary:
 					"color": METER_FILL_LEVEL,
 				}
 			return state
-		PIPE_KIND:
+		PIPE_KIND, CROSSING_KIND:
+			# A crossing's one ceiling is its pipe's bore — its belt, like
+			# every belt, has none.
 			var indices := _pipe_indices_at_tile(tile)
 			if indices.x >= 0 and indices.x < _last_fluid.size():
 				var segments: Array = _last_fluid[indices.x].get("segments", [])
@@ -18156,6 +18346,39 @@ func _belt_hover_text(placement: Dictionary, direction: String) -> String:
 		else:
 			hands = "hands to %s" % _link_neighbour_name(tile, to, kind)
 	return "%s\n%s\n%s" % [heading, fed, hands]
+
+
+## What a crossing's tooltip says: BOTH halves, each in the words its own
+## kind uses, under one line naming the pair — a tile that is two things
+## must not read as either one of them. The belt's three lines come from
+## `_belt_hover_text` off the crossing's belt `links`, the pipe's from
+## `_pipe_hover_text` off its `connections` and live segment, so neither half
+## can drift from what a plain belt or pipe says about the same state. The
+## heading also says what Remove does, since it is the one thing a crossing
+## does that neither half would: it gives BOTH pieces back.
+##
+## Which way the pipe lies comes from its fluid segment's own `direction`,
+## the simulation's pipe axis, not from turning the belt's here.
+func _crossing_hover_text(placement: Dictionary, direction: String) -> String:
+	var tile := _placement_origin(placement)
+	var axis := direction
+	var indices := _pipe_indices_at_tile(tile)
+	if indices.x >= 0 and indices.x < _last_fluid.size():
+		var segments: Array = _last_fluid[indices.x].get("segments", [])
+		if indices.y >= 0 and indices.y < segments.size():
+			axis = String(segments[indices.y].get("direction", direction))
+	var pipe_lines := _pipe_hover_text(tile, axis).split("\n")
+	# `_pipe_hover_text` opens with the bare kind name on a line of its own;
+	# here that name leads its connections line instead, so each half is
+	# introduced by its name.
+	if pipe_lines.size() >= 2:
+		pipe_lines[1] = "%s  ·  %s" % [pipe_lines[0], pipe_lines[1]]
+		pipe_lines.remove_at(0)
+	return "%s over %s  ·  remove returns both\n%s\n%s" % [
+		_kind_display_name(PIPE_KIND), _kind_display_name(BELT_KIND),
+		_belt_hover_text(placement, direction),
+		"\n".join(pipe_lines),
+	]
 
 
 ## The display name of whatever stands on the far side of `tile`'s `side`

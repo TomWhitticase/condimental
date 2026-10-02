@@ -58,6 +58,17 @@ See [WORKFLOW.md](WORKFLOW.md).
   asked for the worktree closed and still had to paste the command. Binds
   the `wrap-it-up` skill (step 8) and `docs/WORKFLOW.md`.
 
+- 2026-10-01 **A belt and a pipe cross as one `crossing` entity, never as two
+  layers.** Place a pipe across a belt (or a belt across a pipe) and that
+  tile becomes kind `crossing`, carrying a `BeltSegment` and a `PipeTile`;
+  `topology.grid` keeps one occupant per tile, so `Remove`/`Rotate`/hover/
+  the ghost never ask "which layer?". Right angles only; the placement's
+  `Direction` is the belt's and the pipe runs `rotate_cw` of it. Remove
+  refunds both parts; rotate turns both; nothing is bought. The pipe is a
+  gantry lifted a tile (`CROSSING_LIFT`) because the flat pipe runs through
+  the belt's items. The ghost obeys `preview_command_json`, which shares
+  `plan_place` with the command. Saves as `SavedBody::Crossing`, still
+  version 7. Full record in `docs/DECISIONS.md`.
 - 2026-10-01 **A red check that passes when rerun locally meets the
   green-checks gate.** When a PR check is red on GitHub, for any reason,
   merge `origin/main` into the branch, push, and run the same command

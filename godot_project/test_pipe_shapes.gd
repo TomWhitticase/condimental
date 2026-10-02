@@ -256,7 +256,12 @@ func _run_checks() -> void:
 			_fail("the liquid body '%s' rendered no meshes" % shape["fluid_asset"])
 			return
 		seen_bodies[String(shape["fluid_asset"])] = true
-	for fluid_asset in main.PIPE_FLUID_ASSETS.values():
+	for shape_asset in main.PIPE_FLUID_ASSETS.keys():
+		# The crossing's raised body is no shape of a pipe run, so the gallery
+		# cannot draw it; test_crossings.gd proves it on a real crossing.
+		if shape_asset == main.CROSSING_GANTRY_ASSET:
+			continue
+		var fluid_asset: String = main.PIPE_FLUID_ASSETS[shape_asset]
 		if not seen_bodies.has(fluid_asset):
 			_fail("the gallery never drew the '%s' body" % fluid_asset)
 			return
