@@ -395,7 +395,8 @@ pub struct EstablishmentEntry {
 /// `left_last_payday` persist (and ride the save); `available`, `demand`
 /// and `assigned` are this tick's tally, reset at the top of every tick;
 /// `required` is the ESTABLISHMENT, derived from what is placed and
-/// changed only by a topology change (see [`StaffPools::set_required`]).
+/// changed only when the player changes the factory (see
+/// [`StaffPools::set_required`]).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CategoryPool {
     pub headcount: u32,
@@ -420,8 +421,9 @@ pub struct CategoryPool {
     /// The ESTABLISHMENT: every head the placed machinery that is SWITCHED
     /// ON needs to be fully crewed, whether or not any of it is running
     /// this tick. Summed from the placements by
-    /// `World::recompute_establishment`, so it moves only when a machine is
-    /// placed, removed, rotated or mothballed — never with production flow.
+    /// `World::recompute_establishment`, so it moves only when the player
+    /// changes the factory or a save is loaded (`set_required` lists the
+    /// changes) — never with production flow.
     /// This is the number "do I need to hire?" is answered from; `demand`
     /// remains the honest per-tick activity figure beside it.
     pub required: u32,
@@ -671,15 +673,16 @@ impl StaffPools {
     /// Sets the ESTABLISHMENT — how many heads of each category the placed
     /// machinery needs to be fully crewed — from one line per category.
     ///
-    /// Called from `World::recompute_establishment`, which is reached by
-    /// `Place`, `Remove`, `Rotate` and `SetMothballed` — all four of them
-    /// deliberate player actions — so this figure is **stable during
-    /// play**: it cannot move because a belt ran dry or a vat finished a
-    /// batch. That stability is the whole point. `demand` (what was asked
-    /// for this tick) breathes with production flow, which made
-    /// "do I need to hire?" unanswerable from the HUD — the number that
-    /// prompted a hire had already gone by the time the player acted
-    /// (docs/DECISIONS.md, the 2026-09-16 establishment record).
+    /// Called from `World::recompute_establishment`, which is reached only
+    /// when the player changes the factory — `Place`, `Remove`, `Rotate`,
+    /// `SetMothballed`, a splitter's mode or a tank's fluid — or a save is
+    /// loaded, so this figure is **stable during play**: it cannot move
+    /// because a belt ran dry or a vat finished a batch. That stability is
+    /// the whole point. `demand` (what was asked for this tick) breathes
+    /// with production flow, which made "do I need to hire?" unanswerable
+    /// from the HUD — the number that prompted a hire had already gone by
+    /// the time the player acted (docs/DECISIONS.md, the 2026-09-16
+    /// establishment record).
     ///
     /// Each entry carries three things the HUD must not re-derive: the
     /// heads the RUNNING machinery needs, the heads the MOTHBALLED
@@ -1116,9 +1119,10 @@ impl StaffPools {
 /// asked for and what was handed out — and both breathe with production
 /// flow. `required` and `short` do NOT: `required` is the establishment
 /// the PLACED machinery needs (`StaffPools::set_required`, recomputed only
-/// on a topology change) and `short` is `required - headcount`, the heads
-/// the player must HIRE. A panel answering "do I need staff?" reads
-/// `short`; one showing "what is working right now" reads `assigned`.
+/// when the player changes the factory) and `short` is
+/// `required - headcount`, the heads the player must HIRE. A panel
+/// answering "do I need staff?" reads `short`; one showing "what is
+/// working right now" reads `assigned`.
 /// Before 2026-09-16 `short` meant `demand - assigned`, which moved every
 /// tick and so could not be acted on. `money` is repeated here, as `shop_snapshot_json`
 /// does, so the staff panel needs one poll.

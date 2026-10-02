@@ -3639,6 +3639,14 @@ matches what code comments and data files cite.
   beside the establishment. That is a genuinely interesting number; it just
   was never the hiring question.
 
+  *Note, 2026-10-02 (#227):* "exactly one place … `Place`, `Remove` and
+  `Rotate` and nothing else" stopped being true as the factory grew more
+  settings. Mothballing (issue #19) calls `recompute_establishment` directly;
+  a splitter's mode and a tank's fluid reach it through
+  `recompute_topology`; and a load runs it after its bulk placement and
+  again after the restore. The decision stands — the establishment still
+  moves only when the player changes the factory, never with production.
+
   **Three things said the codebase already assumed this.** `data/staff.ron`
   ships manufacturing 4, packaging 2, logistics 1 — exactly crusher 1 +
   mixer 1 + vat 2, bottler 1 + packer 1, dock 1, and `tests/staff.rs`
