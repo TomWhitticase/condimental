@@ -325,6 +325,13 @@ func _initialize() -> void:
 		_fail("mouse motion under the pause menu must not swing the first-person camera")
 		return
 	main._set_pause_open(false)
+	# Closing it recaptures the pointer, and the first motion after a
+	# recapture is the OS warping it home, not a look: it is dropped
+	# (`_fp_skip_next_look`, test_ctrl_cursor.gd), and the next one looks.
+	main._unhandled_input(look_motion)
+	if not is_equal_approx(main._fp_yaw, yaw_under_pause):
+		_fail("the first motion after the pause menu recaptures the mouse must be dropped as the warp home")
+		return
 	main._unhandled_input(look_motion)
 	if is_equal_approx(main._fp_yaw, yaw_under_pause):
 		_fail("with nothing open, mouse motion should swing the first-person camera")
