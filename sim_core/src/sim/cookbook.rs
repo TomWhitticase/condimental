@@ -185,9 +185,11 @@ pub struct SaucePage {
     pub cost_per_unit: f64,
     /// Names of the contracts that ask for this, in board order.
     pub contracts: Vec<String>,
-    /// What those contracts pay per case, low and high. `None` when
-    /// nothing on the board wants it — which is a real state worth showing
-    /// rather than a zero.
+    /// What a case of this sauce is paid, low and high: over the orders
+    /// for this sauce alone, or over the mixed orders naming it when there
+    /// are none (a mixed order's rate is a blend of several sauces'). `None`
+    /// when nothing on the board wants it — which is a real state worth
+    /// showing rather than a zero.
     pub pay_low: Option<f64>,
     pub pay_high: Option<f64>,
     /// Whether a gate upstream is still shut. A locked sauce is drawn as a
@@ -564,9 +566,19 @@ pub fn build(input: &CookbookInput<'_>) -> CookbookSnapshot {
             .and_then(|index| input.unlocks.at(index))
             .map(|unlock| gate_line(unlock, input.sold));
 
+        // The pay range is read off the orders for THIS sauce alone when the
+        // board has any. A mixed order's payout over all its cases is a blend
+        // of several sauces' rates (2026-10-02: a three-sauce order made the
+        // ketchup page read "up to 51" when no ketchup case is paid more
+        // than 40), so it is not what a case of this sauce earns. A sauce
+        // that only mixed orders want still gets their blended range rather
+        // than "nothing asks for it", which would be false.
         let mut contracts: Vec<String> = Vec::new();
-        let mut pay_low: Option<Money> = None;
-        let mut pay_high: Option<Money> = None;
+        let mut single: Option<(Money, Money)> = None;
+        let mut mixed: Option<(Money, Money)> = None;
+        let widen = |range: Option<(Money, Money)>, rate: Money| {
+            Some(range.map_or((rate, rate), |(low, high)| (low.min(rate), high.max(rate))))
+        };
         for contract in input.contracts.ordered() {
             let cases: u32 = contract.mix.iter().map(|(_, n)| n).sum();
             if cases == 0 || !contract.mix.iter().any(|(id, _)| id == root) {
@@ -574,9 +586,13 @@ pub fn build(input: &CookbookInput<'_>) -> CookbookSnapshot {
             }
             contracts.push(contract.name.clone());
             let per_case = contract.payout / Money::from_num(cases);
-            pay_low = Some(pay_low.map_or(per_case, |low: Money| low.min(per_case)));
-            pay_high = Some(pay_high.map_or(per_case, |high: Money| high.max(per_case)));
+            if contract.mix.len() == 1 {
+                single = widen(single, per_case);
+            } else {
+                mixed = widen(mixed, per_case);
+            }
         }
+        let (pay_low, pay_high) = single.or(mixed).unzip();
 
         // The terminal recipe carries the sauce's own prose: it is the one
         // whose id a player would call the sauce by.
