@@ -1247,10 +1247,10 @@ running off the bottom** (2026-10-02, issue #206). At 1280x720 the band above
 the hotbar is 510px, and a hopper with two gates still shut was 821px: its
 gate lines and footer were drawn off-screen. Width is the cheap axis, so
 `CONFIG_PANEL_WIDTH` takes six slots a row — a hopper's raws are one row, a
-rack's ten are two. The slots narrowed from 58 to 54 to do it, which is the
-narrowest that still keeps "Molasses" whole by the rule above, so the panel
-stays inside the 572px left clear of a signed clipboard at 1280x720. What height is left over is §5c's #99 rule applied to
-this panel: a yield ladder (`_fit_config_panel`), climbed only as far as the
+rack's nine are two. The slots narrowed from 58 to 54 to do it, which is
+the narrowest that still keeps "Molasses" whole by the rule above, so the
+panel stays inside the 572px left clear of a signed clipboard at 1280x720.
+What height is left over is §5c's #99 rule applied to this panel: a yield ladder (`_fit_config_panel`), climbed only as far as the
 band needs and judged from the full panel every frame, so a bigger window
 gives every line back. The rungs, in order, are the close hint (it is the ✕
 button's tooltip), the level bar (its number is printed in the line above),

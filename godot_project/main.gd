@@ -13133,7 +13133,7 @@ const SPLITTER_PICKER_NOTE := "items take turns among the open exits"
 ## row cannot do that again.
 ##
 ## Wide enough for SIX slots a row (issue #206). At four, a hopper's six raw
-## solids took two rows and a rack's ten took three, and every row is 117px of
+## solids took two rows and a rack's nine took three, and every row is 117px of
 ## a 510px band at 1280x720 — width is the cheap axis, height the dear one.
 ## The 572px clear of a signed clipboard above is the ceiling, so the slots
 ## and gaps narrowed to make room rather than the panel crossing it: 554px
