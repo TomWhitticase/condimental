@@ -1027,7 +1027,7 @@ impl SimBridge {
     ///                "carries_fluid": false, "new_machine": true}],
     ///     "inputs": [{"id": "tomato", "quantity": 4.0, "fluid": false,
     ///                 "from_sauce": null, "locked": false}],
-    ///     "cost_per_unit": 11.0, "pay_low": 20.0, "pay_high": 42.0
+    ///     "cost_per_unit": 11.0, "pay_low": 24.0, "pay_high": 40.0
     ///   }],
     ///   "edges": [{"from": "boxed_ketchup", "to": "boxed_bbq", "via": "ketchup"}],
     ///   "machines": [], "ingredients": []
