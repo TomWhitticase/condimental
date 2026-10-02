@@ -18,6 +18,20 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-02 **An item on a splitter is drawn turning toward the exit it
+  will take.** `SplitterSnapshot::exits` gives each item on the tile a world
+  direction, front first. It is `Splitter::planned_exits`, the dealing rule
+  run forward on a copy, over the sides that would take an item right now
+  (`World::would_take`, the hand-offs' own refusal tests; a running belt is
+  never "full"). If no side would take one, it uses every connected side.
+  Godot draws a side exit as the corner belt's quarter arc from the back face
+  (`_quarter_arc_point`). The hand-off at the tile's end still decides, and
+  throughput and timing are unchanged. A side that fills or clears mid-tile
+  can still snap an item onto another path. The owner reported items
+  "continue forward until actually leave splitter". `tests/splitters.rs`
+  pins plan == destination for every mode. Full record in
+  `docs/DECISIONS.md`.
+
 - 2026-10-02 **Mustard is yellow and white, not yellow and black.** The
   owner's ruling. The mustard bottle (`item_bottle_mustard`) is a
   `mustard_gold` body with a WHITE label band and cap — both
@@ -31,6 +45,7 @@ See [WORKFLOW.md](WORKFLOW.md).
   legibility; brighten the white or move the neck instead.
   `mustard_gold` itself is unchanged, and so is the mustard case (gold
   print on cardboard). Full record in `docs/DECISIONS.md`.
+
 - 2026-10-02 **The game's typeface is Chakra Petch SemiBold.** It is set
   once, as `project.godot`'s `gui/theme/custom_font`, so every Label,
   Button and LabelSettings uses it and no GDScript names a font. The owner
