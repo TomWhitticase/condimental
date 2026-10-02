@@ -273,8 +273,14 @@ and written beside it, and no single order exceeds twenty cases, so the
 dock's places stand. A new test,
 `the_contract_pool_covers_every_sauce_and_every_gate_stage`, fails on the
 old board (BBQ had two single-sauce sizes, mustard's gate four offers).
-The Cookbook's ketchup pay range now reads up to 51.1 a case because a
-mixed order's rate is its payout over all its cases.
+The mixed orders are priced per side, each sauce at its own ladder's rate
+for that size. The Cookbook's pay range now reads off a sauce's own
+single-sauce orders (falling back to the blended mixed ones only when there
+are none). Counting the new three-sauce orders' blended rate had it showing
+ketchup "up to 51" a case and BBQ "from 40", and neither sauce is ever paid
+that. The extra BBQ demand moved the mustard gate from tick 131 000 to
+125 000 (`measure_gate_ticks.gd`), about three minutes sooner. The BBQ gate
+stays at 52 000.
 
 ### 2026-10-02 — A big save loads in linear time
 

@@ -467,55 +467,140 @@ fn a_page_carries_the_prose_its_recipe_authored_and_nothing_it_did_not() {
 }
 
 /// Contract pay is a range across the board, and `None` — not zero — when
-/// nothing wants the thing. The ranges overlap on the shipped content because
-/// the mixed orders ask for several sauces at once, which is exactly what a
-/// player reading the pages should be able to see. A mixed order's rate is
-/// its payout over ALL its cases, so the three-sauce orders (2026-10-02) lift
-/// ketchup's high above any ketchup-only order and drop BBQ's low below any
-/// BBQ-only one.
-///
-/// Fixed point (ARCHITECTURE.md §3.2) cannot hold a blended rate like 40.8
-/// or 51.1 exactly, so every rung is read to the penny.
+/// nothing wants the thing. The range is what a case of THIS sauce is paid,
+/// so it is read off the orders for this sauce alone: a mixed order's payout
+/// over all its cases is a blend of several sauces' rates. Before 2026-10-02
+/// it counted mixed orders too, and the three-sauce orders made the ketchup
+/// page read "up to 51" a case and BBQ "from 40" — rates no case of either is
+/// ever paid. The mixed orders are still LISTED on every page they name.
 #[test]
 fn a_sauce_page_says_what_the_board_pays_for_a_case_of_it() {
     let book = book();
-    let near = |got: Option<f64>, want: f64, what: &str| {
-        let got = got.unwrap_or_else(|| panic!("{what} reads no pay"));
-        assert!((got - want).abs() < 0.001, "{what} read {got}, want {want}");
+    let board = sim_core::sim::ContractRegistry::bundled();
+    // Derived from the board, so a balance pass moves the expectation: the
+    // lowest and highest per-case rate over the single-sauce orders.
+    let single_range = |id: &str| -> (f64, f64) {
+        let rates: Vec<f64> = board
+            .ordered()
+            .iter()
+            .filter_map(|c| match c.mix.as_slice() {
+                [(item, n)] if item == id => Some(c.payout.to_num::<f64>() / f64::from(*n)),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !rates.is_empty(),
+            "the board has single-sauce orders for {id}"
+        );
+        (
+            rates.iter().copied().fold(f64::MAX, f64::min),
+            rates.iter().copied().fold(f64::MIN, f64::max),
+        )
     };
-    let ketchup = sauce(&book, "boxed_ketchup");
-    // Low: `market_stall`'s 24 a case. High: `national_condiments`' 1022
-    // over twenty cases of three sauces.
-    near(ketchup.pay_low, 24.0, "ketchup's low");
-    near(ketchup.pay_high, 51.1, "ketchup's high");
-    assert!(ketchup.contracts.contains(&"Grill Pub Chain".to_string()));
+    for id in ["boxed_ketchup", "boxed_bbq", "boxed_mustard"] {
+        let page = sauce(&book, id);
+        let (low, high) = single_range(id);
+        assert_eq!(page.pay_low, Some(low), "{id}'s low");
+        assert_eq!(page.pay_high, Some(high), "{id}'s high");
+        assert!(
+            page.pay_low.unwrap() > page.cost_per_unit,
+            "every sauce has to be worth making"
+        );
+    }
+    // The shipped ladders, as the content reads today: `market_stall` to the
+    // pallets, `rib_shack` to `bbq_festival`, `pretzel_cart` to
+    // `charcuterie_supplier`. Whole numbers, so compared exactly.
+    assert_eq!(single_range("boxed_ketchup"), (24.0, 40.0));
+    assert_eq!(single_range("boxed_bbq"), (58.0, 65.0));
+    assert_eq!(single_range("boxed_mustard"), (44.0, 53.0));
 
-    let bbq = sauce(&book, "boxed_bbq");
-    // Low: `picnic_caterer`'s 120 over three cases. High: `bbq_festival`.
-    near(bbq.pay_low, 40.0, "BBQ's low");
-    near(bbq.pay_high, 65.0, "BBQ's high");
+    // A mixed order still belongs to every page it names.
     assert!(
-        bbq.pay_low.unwrap() > bbq.cost_per_unit,
-        "every sauce has to be worth making"
-    );
-
-    // Mustard's band, read off `data/contracts.ron` the same way: the low is
-    // `deli_chain`'s blended 204 over five cases, the high is
-    // `charcuterie_supplier`'s 636 over twelve (and `burger_bar`'s 212 over
-    // four, which ties it).
-    let mustard = sauce(&book, "boxed_mustard");
-    let low = mustard
-        .pay_low
-        .expect("the board pays for a case of mustard");
-    assert!((low - 40.8).abs() < 0.001, "pay_low read {low}");
-    near(mustard.pay_high, 53.0, "mustard's high");
-    assert!(
-        low > mustard.cost_per_unit,
-        "every sauce has to be worth making"
+        sauce(&book, "boxed_ketchup")
+            .contracts
+            .contains(&"Grill Pub Chain".to_string())
     );
     assert!(
-        mustard.contracts.contains(&"Deli Chain".to_string()),
+        sauce(&book, "boxed_mustard")
+            .contracts
+            .contains(&"Deli Chain".to_string()),
         "the mixed order belongs to both of its sauces' pages"
+    );
+}
+
+/// A sauce that ONLY mixed orders want still reads a pay range — the
+/// blended one — rather than "nothing on the board asks for it", which
+/// would be false. The board here is the shipped one with every
+/// single-sauce mustard order taken out.
+#[test]
+fn a_sauce_only_mixed_orders_want_reads_their_blended_pay() {
+    let shipped = sim_core::sim::ContractRegistry::bundled();
+    let kept: Vec<&sim_core::sim::Contract> = shipped
+        .ordered()
+        .iter()
+        .filter(|c| !matches!(c.mix.as_slice(), [(item, _)] if item == "boxed_mustard"))
+        .collect();
+    let mixed_rates: Vec<f64> = kept
+        .iter()
+        .filter(|c| c.mix.iter().any(|(item, _)| item == "boxed_mustard"))
+        .map(|c| {
+            let cases: u32 = c.mix.iter().map(|(_, n)| n).sum();
+            c.payout.to_num::<f64>() / f64::from(cases)
+        })
+        .collect();
+    assert!(
+        mixed_rates.len() >= 2,
+        "the shipped board has mixed mustard orders"
+    );
+    let entries: Vec<String> = kept
+        .iter()
+        .map(|c| {
+            let mix: Vec<String> = c
+                .mix
+                .iter()
+                .map(|(item, n)| format!("(\"{item}\", {n})"))
+                .collect();
+            format!(
+                "Contract(id: \"{}\", name: \"{}\", mix: [{}], cadence_ticks: {}, \
+                 payout: {}, price: {}, strikes: {})",
+                c.id,
+                c.name,
+                mix.join(", "),
+                c.cadence_ticks,
+                c.payout.to_num::<u32>(),
+                c.price.to_num::<u32>(),
+                c.strikes
+            )
+        })
+        .collect();
+    let text = format!("(schema_version: 2, contracts: [{}])", entries.join(", "));
+    let contracts = sim_core::sim::ContractRegistry::from_ron_str(&text).expect("a valid board");
+
+    let sold = BoxesSold::new();
+    let book = cookbook::build(&CookbookInput {
+        recipes: &recipes(),
+        machines: &sim_core::sim::MachineRegistry::bundled(),
+        ingredients: &sim_core::sim::IngredientCatalog::bundled(),
+        contracts: &contracts,
+        shop: &sim_core::sim::ShopCatalog::bundled(),
+        staff: &sim_core::sim::StaffCatalog::bundled(),
+        unlocks: &sim_core::sim::UnlockRegistry::bundled(),
+        guide: &sim_core::sim::GuideRegistry::bundled(),
+        sold: &sold,
+    });
+    let page = sauce(&book, "boxed_mustard");
+    let low = page.pay_low.expect("mixed orders still pay for mustard");
+    let high = page.pay_high.expect("mixed orders still pay for mustard");
+    let want_low = mixed_rates.iter().copied().fold(f64::MAX, f64::min);
+    let want_high = mixed_rates.iter().copied().fold(f64::MIN, f64::max);
+    // A blended rate like 40.8 is not exact in fixed point; read to the penny.
+    assert!(
+        (low - want_low).abs() < 0.01,
+        "low read {low}, want {want_low}"
+    );
+    assert!(
+        (high - want_high).abs() < 0.01,
+        "high read {high}, want {want_high}"
     );
 }
 
