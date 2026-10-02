@@ -8964,6 +8964,12 @@ func _fit_contract_board_split() -> bool:
 	_set_contract_board_split(0)
 	var offer_col: Control = _board_scroll.get_parent()
 	var room := available - (_board_panel.get_combined_minimum_size().x - offer_col.get_combined_minimum_size().x)
+	# A card has to fit beside the scroll bar the column is given below, not
+	# in the whole column: measured without it, the widest card fitted with
+	# 3px to spare and the board came out 5px past the modal limit once the
+	# bar was added (found when Chakra Petch's wider glyphs pushed a docket's
+	# countdown row past BOARD_ACTIVE_COLUMN_WIDTH).
+	room -= _board_scroll.get_v_scroll_bar().get_combined_minimum_size().x
 	var broke := false
 	for row in _board_rows:
 		for level in range(5):

@@ -38,9 +38,10 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
 
 - **Every animation/celebration clock is `sim.current_tick()`**, never wall
   time — pause freezes them and screenshot runs stay reproducible. The one
-  exception is the title screen (`title_scene.gd`'s camera drift,
-  `menu.gd`'s splash pulse): there is no simulation on that screen to take a
-  tick from.
+  exception is the title screen (`title_scene.gd`'s drift, running line,
+  sign and intro; `menu.gd`'s splash pulse and intro fade): there is no
+  simulation on that screen to take a tick from. A review shot still
+  repeats, because `screenshot-scene.sh` pins the frame delta.
 - **A session opens in the view `DEFAULT_VIEW_MODE` names** — first person
   since 2026-09-21 — and `_ready` applies it with one `_set_view_mode` call
   *after* `_build_ui`, because that call shows the crosshair, rewrites the
@@ -153,8 +154,9 @@ save-file rules** (dir, listing, slot sanitizer, reserved `autosave` slot);
 ducked (not stopped) under pause, skipped headless. `audio.gd` — every cue,
 synthesised. `menu.gd` — main menu; validates a save through a throwaway
 `SimBridge` **before** the scene changes. `title_scene.gd` — the menu's 3D
-backdrop, a hand-placed poster of the chain; **art, not a sim** (nothing
-ticks, nothing is placed by a command). `voxel_assets.gd` and
+backdrop, a hand-placed poster of the chain that runs on wall time, with
+the marquee sign `menu.gd` frames into its column; **art, not a sim**
+(nothing ticks, nothing is placed by a command). `voxel_assets.gd` and
 `factory_environment.gd` — the `.vox`/material loading and the hall's
 sky/lights, shared by `main.gd` and the title screen so the two cannot drift;
 neither is a place for new logic. `settings.gd` — autoload; the eight

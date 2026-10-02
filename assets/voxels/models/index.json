@@ -340,6 +340,26 @@
   "staff_packaging": [
     "matte"
   ],
+  "steam_puff": [
+    "matte"
+  ],
+  "title_sign": [
+    "matte",
+    "metal",
+    "emissive"
+  ],
+  "title_sign_bulbs_f0": [
+    "matte",
+    "emissive"
+  ],
+  "title_sign_bulbs_f1": [
+    "matte",
+    "emissive"
+  ],
+  "title_sign_bulbs_f2": [
+    "matte",
+    "emissive"
+  ],
   "understaffed_marker": [
     "emissive"
   ],

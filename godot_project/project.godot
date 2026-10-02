@@ -57,6 +57,16 @@ Music="*res://music.gd"
 ; godot_project/settings.gd.
 Settings="*res://settings.gd"
 
+[gui]
+
+; The game's one typeface (2026-10-02, the owner's pick): Chakra Petch
+; SemiBold, SIL OFL 1.1 (godot_project/fonts/OFL.txt). Set as the project's
+; theme font so every Label, Button and LabelSettings without a font of its
+; own uses it — one line, rather than a font threaded through every panel.
+; Squared, sturdy and readable at UI sizes, it matches the voxel title sign;
+; see UI_UX.md §5.
+theme/custom_font="res://fonts/ChakraPetch-SemiBold.ttf"
+
 [editor_plugins]
 
 ; Pinned .vox importer — see addons/MagicaVoxel_Importer_with_Extensions/VENDORED.md

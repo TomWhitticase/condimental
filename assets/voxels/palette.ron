@@ -484,5 +484,17 @@
         // flat plate of this colour is the one that would read as a
         // marking, whatever fraction of the frame it took.
         (name: "turmeric_orange", rgb: "#E3821A", class: "matte"),
+        // The title screen's marquee sign (`title_sign` in assets.rs). The
+        // letter faces are lit, not painted: the sign hangs in the hall over
+        // a menu, and a wordmark that does not glow is a plank with writing
+        // on it. Deeper than it renders: the emissive class burns a pale
+        // yellow out to cream (#FFD54A read as butter), and this lands on
+        // the mustard gold of the old outlined wordmark.
+        (name: "sign_neon", rgb: "#EC930B", class: "emissive"),
+        // The bulbs chasing round its frame, lit and dark. The lit one is a
+        // warm white so it blooms as light rather than as a coloured signal;
+        // the dark one is the same glass with the filament off.
+        (name: "marquee_bulb", rgb: "#FFF3D6", class: "emissive"),
+        (name: "marquee_bulb_off", rgb: "#5E5546", class: "matte"),
     ],
 )

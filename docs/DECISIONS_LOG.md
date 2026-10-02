@@ -18,6 +18,25 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-02 **The game's typeface is Chakra Petch SemiBold.** It is set
+  once, as `project.godot`'s `gui/theme/custom_font`, so every Label,
+  Button and LabelSettings uses it and no GDScript names a font. The owner
+  picked it from a side-by-side (Barlow, Rubik, Godot's default) and in the
+  running game. It closes UI_UX §9's "specific typeface". The font file and
+  its SIL OFL licence are in `godot_project/fonts/`. Full record in
+  `docs/DECISIONS.md`.
+
+- 2026-10-02 **The title screen's wordmark is a lit voxel sign, and the
+  poster runs.** The game's name is `title_sign`, a voxel model from
+  `assets.rs` (emissive letters, three chasing-bulb overlays) hung from the
+  title camera and framed into `menu.gd`'s empty `Title` slot. It is not a
+  Label. It is the one exception to "emissive is for status lamps only"
+  (UI_UX §2b point 42). The backdrop runs its belts, motion overlays,
+  product and steam on wall time, and the screen opens on a skippable
+  ~2.6 s intro. The front-page buttons are their own plates with no plate
+  round the column. The owner asked for a "visually stunning" title screen.
+  Binds `docs/UI_UX.md` §5d. Full record in `docs/DECISIONS.md`.
+
 - 2026-10-02 **The configuration panel is six slots wide and sheds lines to
   fit a short window.** `CONFIG_PANEL_WIDTH` fits six picker slots a row.
   When the panel is still taller than the band above the hotbar,

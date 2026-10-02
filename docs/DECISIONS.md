@@ -25,6 +25,68 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-02: **The game's typeface is Chakra Petch SemiBold.** (Owner,
+  after the title sign: "all the other text in the game (all other menus)
+  should probably be using a more suitable font that looks good, is easy to
+  read and fits with the game's aesthetic".)
+
+  **What it replaces.** Godot's built-in default font. UI_UX §5 already
+  asked for "a sturdy, slightly blocky sans-serif, readable at UI sizes;
+  not a novelty pixel font", and §9 left the actual typeface open.
+
+  **The rule.** Chakra Petch SemiBold, under the SIL OFL 1.1, set as the
+  project's theme font. The owner saw it against Barlow SemiBold, Rubik
+  Medium and the default in one rendered sheet of the HUD and the settings
+  page, then played with it in the running game. Its squared corners echo
+  the voxel title sign, which is what makes the title screen and the menus
+  after it read as one game. Barlow was the more compact, more neutral
+  option.
+
+  **Why one project setting.** `gui/theme/custom_font` reaches every
+  Control and every LabelSettings without a font of its own, which is all
+  of them. Threading a font through `main.gd`'s panels one by one would be
+  hundreds of edits and a new panel that forgot one. Sizes are unchanged:
+  they still come from `UI_FONT_BASE` and the per-panel offsets.
+
+- 2026-10-02: **The title screen's wordmark is a lit voxel sign, and the
+  poster runs.** (Owner: "make the intro screen more impressive and visually
+  stunning, currently the screen is like minecraft with a plain screen and
+  big title, i like it but think we can make ours amazing".)
+
+  **What it replaces.** A 114pt outlined Label over a still poster of the
+  chain: product placed by hand, machines drawn as bodies without their
+  motion overlays (so nothing on the poster could move), and a dark plate
+  holding the four buttons across the middle of the line.
+
+  **The rule.** The wordmark is `title_sign`, generated in `assets.rs` like
+  every other asset. It is a dark board in a steel rim with a hazard foot,
+  mustard-lit letters with a ketchup drop shadow, and bulbs in three overlay
+  frames that chase. It is a model rather than text because it is the first
+  asset the player sees, and making it outside the pipeline would make it
+  the one thing in the game that is not voxel art. It hangs from the title
+  camera, so the factory parallaxes behind it while it stays framed, and
+  `menu.gd` frames it every frame into an empty `Title` Control in its
+  column. That keeps the 2D column and the 3D sign agreeing at any window
+  size, and lets the settings page stand it down by hiding the slot, as it
+  did the Label.
+
+  Emissive letters and bulbs break UI_UX §2b point 8 ("emissive is for
+  status lamps only"), and that is recorded as an exception (§2b point 42)
+  rather than bent quietly. An illuminated sign is a lamp. It is never a
+  machine and never on the floor, so nothing in play can be read as a status
+  signal because of it.
+
+  The backdrop runs at the game's own paces on wall time, and the screen
+  opens on a skippable intro: the lights strike, the sign drops, the neon
+  catches, then the menu fades up. The front-page buttons are their own
+  plates, so the line shows between them. The load and settings views keep
+  the full plate.
+
+  **What it does not change.** No scrim (the owner's earlier call stands):
+  the hall is still not washed over. The column stays centred, the splash
+  line stays, and the poster still loads none of `main.tscn` and runs no
+  simulation.
+
 - 2026-10-02: **The configuration panel is six slots wide and sheds lines to
   fit a short window** (issue #206). **The defect.** At 1280x720 the band
   between the window's top margin and the hotbar is 510px. A hopper's panel

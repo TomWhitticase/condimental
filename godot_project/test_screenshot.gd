@@ -251,6 +251,9 @@
 # is the only way to review the hotbar's selected state without a live
 # session, exactly as `--ghost` is for build mode.
 #
+# `--intro-at SECONDS` (with `--title`) holds the title screen's intro at
+# that moment rather than skipping it — see `_intro_at`.
+#
 # `--title` photographs the TITLE SCREEN — the menu exactly as the player
 # first sees it, three buttons and the wordmark over the 3D factory backdrop
 # (`title_scene.gd`). `--menu` is the same scene with its LOAD LIST open,
@@ -654,6 +657,11 @@ var _menu := false
 ## list `--menu` opens. Both are worth a frame: the list is the half with the
 ## typography in it, and the title is the half that is a poster.
 var _title := false
+## `--intro-at SECONDS` holds the title screen at that moment of its intro
+## (the lights striking, the sign dropping in, the menu fading up) instead of
+## skipping to the settled screen — the only way to review the intro, which
+## every other menu shot jumps past. Seconds from the screen coming up.
+var _intro_at := ""
 var _pause := false
 ## `--settings` opens the settings page of whichever menu is being rendered;
 ## `--debug` opens the F3 development panel over the game. `--set key=value`
@@ -890,6 +898,7 @@ func _initialize() -> void:
 	_allow_unhealthy = args.has("--allow-unhealthy")
 	_remove_mode = args.has("--remove-mode")
 	_title = args.has("--title")
+	_intro_at = _string_arg(args, "--intro-at")
 	_menu = args.has("--menu") or _title
 	_pause = args.has("--pause")
 	_settings = args.has("--settings")
@@ -2547,6 +2556,17 @@ func _process(delta: float) -> bool:
 	# the "Real Placement" epic there is nothing to look at until one of the
 	# fixtures has been placed.
 	if _menu:
+		# The title screen opens on an intro (the lights strike, the sign
+		# drops in); a review shot is of the screen it settles into.
+		if _frames == 1 and _main.has_method("finish_intro"):
+			if _intro_at == "":
+				_main.finish_intro()
+			else:
+				# HELD there for the whole warm-up, not wound back by it: a
+				# clock started early by the warm-up's length could never
+				# show a moment earlier than the warm-up itself (0.73 s), and
+				# the lights strike at about 0.3.
+				_main._title_scene.intro_hold = maxf(0.0, float(_intro_at))
 		if _frames == 1 and _settings:
 			_main._on_settings_pressed()
 		elif _frames == 1 and not _title:

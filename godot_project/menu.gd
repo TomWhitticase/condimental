@@ -92,8 +92,8 @@ const SPLASH_LINES := [
 ## haze/shadowy effect behind the menu text"), which is decisive, and the
 ## rendered frame agrees: it read as a shadow lying on the picture, and it
 ## dimmed the one thing the screen exists to show. The contrast it was
-## buying is bought instead by the text carrying its own edge — the wordmark
-## and the strap get a heavier outline (`TITLE_OUTLINE`, `STRAP_OUTLINE`)
+## buying is bought instead by the text carrying its own edge — the strap
+## gets a heavier outline (`STRAP_OUTLINE`)
 ## than anything inside a plate needs — and by the menu plate below being a
 ## near-opaque plate in its own right (`PLATE_BG`).
 
@@ -113,26 +113,42 @@ var UI_SCALE: float = MainScript.UI_SCALE
 ## the decoration first. The backdrop was reframed around that instead.
 var COLUMN_MARGIN: float = 86.0 * UI_SCALE
 
-## Outline sizes for the labels that stand on the hall itself rather than on
-## a plate — the wordmark, and the tagline/splash row under it. Both are
-## deliberately heavier than any outline inside a plate: with the scrim gone
-## this is the only contrast they have, and the camera drifts a lit skylight
-## and a dark plinth behind them in turn.
-var TITLE_OUTLINE: int = int(round(14.0 * UI_SCALE))
+## The outline for the labels that stand on the hall itself rather than on
+## a plate — the tagline/splash row under the sign. Deliberately heavier
+## than any outline inside a plate: with no scrim this is the only contrast
+## they have, and the camera drifts a lit skylight and a dark plinth behind
+## them in turn. (The wordmark had one too until it became the lit sign.)
 var STRAP_OUTLINE: int = int(round(8.0 * UI_SCALE))
 
 ## The same 15px design base `main.gd`'s `UI_FONT_BASE` uses; every font
 ## size here is an offset from it, scaled — `main.gd`'s `_ui_font` rule.
 const BASE_FONT_SIZE := 15
 var BODY_FONT_SIZE: int = int(round(BASE_FONT_SIZE * UI_SCALE))
-## The wordmark stands on its own over the scene now instead of inside the
-## panel, so it is nearly twice the size it was.
-var TITLE_FONT_SIZE: int = int(round((BASE_FONT_SIZE + 61) * UI_SCALE))
+## The wordmark is not text any more: it is the lit marquee sign hanging in
+## the hall (`title_scene.gd`, `title_sign` in assets.rs). The column keeps
+## this much height free for it, and the sign is framed into whatever rect
+## that slot gets laid out at (`_frame_sign`), so the two halves of the title
+## cannot drift apart at any window size.
+var SIGN_SLOT_HEIGHT: float = 100.0 * UI_SCALE
 var SUBTITLE_FONT_SIZE: int = int(round((BASE_FONT_SIZE + 4) * UI_SCALE))
 var SPLASH_FONT_SIZE: int = int(round((BASE_FONT_SIZE + 4) * UI_SCALE))
 var BUTTON_FONT_SIZE: int = int(round((BASE_FONT_SIZE + 5) * UI_SCALE))
 var ROW_FONT_SIZE: int = int(round((BASE_FONT_SIZE + 2) * UI_SCALE))
 var BUTTON_MIN_SIZE: Vector2 = Vector2(260.0, 52.0) * UI_SCALE
+## The front page's buttons stand on their own over the hall, without the
+## plate the load list and settings rows sit in — narrower and a little
+## shorter than a list row, so the factory shows round them.
+var FRONT_BUTTON_SIZE: Vector2 = Vector2(330.0, 44.0) * UI_SCALE
+## The bar down a front-page button's left edge, its one hazard-yellow mark
+## until the pointer is on it and the whole plate turns yellow.
+var FRONT_BUTTON_BAR: int = int(round(6.0 * UI_SCALE))
+
+## The column's half of the intro (`title_scene.gd`'s `intro_time`): the
+## strap fades up as the sign lands, then each button in turn.
+const INTRO_STRAP_AT := 1.35
+const INTRO_BUTTONS_AT := 1.6
+const INTRO_BUTTON_STAGGER := 0.12
+const INTRO_FADE := 0.35
 var PANEL_MARGIN: float = 26.0 * UI_SCALE
 var PANEL_MIN_WIDTH: float = 560.0 * UI_SCALE
 ## The width left inside the panel's own margins — what every full-width
@@ -176,6 +192,9 @@ var _new_game_button: Button
 var _load_button: Button
 var _settings_button: Button
 var _quit_button: Button
+var _menu_panel: PanelContainer
+var _wordmark: Control
+var _strap: Control
 var _back_button: Button
 ## Which half of the menu is showing. The load list replaces the three
 ## buttons rather than opening beside them: this is one panel, and a modal
@@ -209,6 +228,7 @@ func _ready() -> void:
 	# window has nothing to follow.
 	if is_inside_tree():
 		get_viewport().size_changed.connect(_apply_list_height)
+	_apply_intro()
 	# The score starts here, on the first screen, and carries into the
 	# factory: the `Music` autoload outlives this scene (see music.gd).
 	var music := _music()
@@ -225,7 +245,7 @@ func _build_backdrop() -> void:
 
 	# And nothing over it. The hall is the screen; the text carries its own
 	# contrast in its outline — see the note on the scrim that used to be
-	# here, above `TITLE_OUTLINE`.
+	# here, above `STRAP_OUTLINE`.
 
 
 func _build_panel() -> void:
@@ -238,9 +258,9 @@ func _build_panel() -> void:
 	style.border_width_bottom = _i(2)
 	style.set_content_margin_all(PANEL_MARGIN)
 
-	# One column down the left of the screen: the wordmark, the splash line
-	# and the panel, vertically centred, with the factory filling the rest of
-	# the frame. A MarginContainer holds it off the edge and a VBox that
+	# One column down the middle of the screen: the sign's slot, the splash
+	# line and the panel, vertically centred, with the factory filling the
+	# rest of the frame. A MarginContainer holds it off the edge and a VBox that
 	# SHRINKS to its contents keeps the column as narrow as the panel, rather
 	# than stretching a plate across a backdrop that is the point of the
 	# screen. (It used to be a CenterContainer: that preset is computed from
@@ -274,7 +294,9 @@ func _build_panel() -> void:
 	panel.add_theme_stylebox_override("panel", style)
 	panel.custom_minimum_size = Vector2(PANEL_MIN_WIDTH, 0.0)
 	panel.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	panel.set_meta("plate", style)
 	column.add_child(panel)
+	_menu_panel = panel
 
 	_root_box = VBoxContainer.new()
 	_root_box.name = "MenuBody"
@@ -286,19 +308,19 @@ func _build_panel() -> void:
 	_button_box.add_theme_constant_override("separation", _i(10))
 	_root_box.add_child(_button_box)
 
-	_new_game_button = _menu_button("NewGameButton", "NEW GAME")
+	_new_game_button = _front_button("NewGameButton", "NEW GAME")
 	_new_game_button.pressed.connect(_on_new_game_pressed)
 	_button_box.add_child(_new_game_button)
 
-	_load_button = _menu_button("LoadGameButton", "LOAD GAME")
+	_load_button = _front_button("LoadGameButton", "LOAD GAME")
 	_load_button.pressed.connect(_on_load_pressed)
 	_button_box.add_child(_load_button)
 
-	_settings_button = _menu_button("SettingsButton", "SETTINGS")
+	_settings_button = _front_button("SettingsButton", "SETTINGS")
 	_settings_button.pressed.connect(_on_settings_pressed)
 	_button_box.add_child(_settings_button)
 
-	_quit_button = _menu_button("QuitButton", "QUIT")
+	_quit_button = _front_button("QuitButton", "QUIT")
 	_quit_button.pressed.connect(_on_quit_pressed)
 	_button_box.add_child(_quit_button)
 
@@ -316,6 +338,7 @@ func _build_panel() -> void:
 	_error_label.custom_minimum_size = Vector2(PANEL_INNER_WIDTH, 0.0)
 	_error_label.visible = false
 	_root_box.add_child(_error_label)
+	_apply_panel_mode()
 
 
 ## The wordmark, the tagline and the splash line — the top of the column,
@@ -324,14 +347,17 @@ func _build_panel() -> void:
 ## a title screen and a dialog. All of it is centred on the same axis as the
 ## plate below, so the screen reads as one column down the middle.
 func _build_wordmark(column: VBoxContainer) -> void:
-	var title := Label.new()
+	# The slot the marquee sign hangs in. Empty on purpose: the sign is a 3D
+	# model in the hall, framed into this rect every frame (`_frame_sign`),
+	# so the column lays out around it like any other child and hiding this
+	# (the settings page) hands its height to the plate.
+	var title := Control.new()
 	title.name = "Title"
-	# A heavier outline than anything else in the game: this text stands over
-	# a lit 3D frame with nothing behind it at all.
-	title.label_settings = _settings(TITLE_FONT_SIZE, HAZARD, TITLE_OUTLINE)
-	title.text = "CONDIMENTAL"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.custom_minimum_size = Vector2(PANEL_MIN_WIDTH, SIGN_SLOT_HEIGHT)
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	title.set_meta("wordmark", "CONDIMENTAL")
 	column.add_child(title)
+	_wordmark = title
 
 	# The tagline and the splash share one row, so the splash sits off the
 	# wordmark's bottom-right corner the way Minecraft's does rather than
@@ -341,6 +367,7 @@ func _build_wordmark(column: VBoxContainer) -> void:
 	strap.custom_minimum_size = Vector2(PANEL_MIN_WIDTH, 0.0)
 	strap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_child(strap)
+	_strap = strap
 
 	var subtitle := Label.new()
 	subtitle.name = "Subtitle"
@@ -400,11 +427,79 @@ func _splash_line() -> String:
 ## (`title_scene.gd`); there is no simulation on this screen to take a tick
 ## count from.
 func _process(delta: float) -> void:
+	_frame_sign()
+	_apply_intro()
 	if _splash_label == null:
 		return
 	_splash_beat += delta
 	var pulse := 1.0 + SPLASH_PULSE * absf(sin(_splash_beat * SPLASH_BEATS_PER_SECOND * PI))
 	_splash_label.scale = Vector2(pulse, pulse)
+
+
+## Hangs the 3D sign in the slot the column keeps for it. Every frame rather
+## than on resize: the slot moves whenever the column re-lays out (a view
+## swap, an error line), and the call is a handful of multiplications.
+func _frame_sign() -> void:
+	if _title_scene == null or _wordmark == null or not is_inside_tree():
+		return
+	_title_scene.frame_sign(_wordmark.get_global_rect(), get_viewport_rect().size)
+
+
+## The column's half of the intro: nothing until the sign has landed, then
+## the strap, then the buttons one after another. Modulate only — every
+## node is laid out from the first frame, so nothing jumps when it appears.
+func _apply_intro() -> void:
+	var t: float = INTRO_STRAP_AT + 10.0
+	if _title_scene != null:
+		t = _title_scene.intro_time
+	if _strap != null:
+		_strap.modulate.a = _intro_alpha(t, INTRO_STRAP_AT)
+	if _button_box != null:
+		var k := 0
+		for button in _button_box.get_children():
+			var alpha := _intro_alpha(t, INTRO_BUTTONS_AT + INTRO_BUTTON_STAGGER * float(k))
+			(button as Control).modulate.a = alpha
+			k += 1
+
+
+## Skips the intro to the settled screen. The screenshot harness calls this
+## on its first frame, so a review shot is the menu the player waits for.
+func finish_intro() -> void:
+	if _title_scene != null:
+		_title_scene.finish_intro()
+	_apply_intro()
+
+
+func _intro_alpha(t: float, start: float) -> float:
+	return clampf((t - start) / INTRO_FADE, 0.0, 1.0)
+
+
+func _intro_running() -> bool:
+	return _title_scene != null and _title_scene.intro_time < _title_scene.INTRO_LENGTH
+
+
+## Any click or key during the intro skips to its end — and is swallowed, so
+## the click that skips cannot also land on a button still fading in. `_input`
+## runs before the GUI does, so an event marked handled here never reaches a
+## Button; the decision itself is `_skip_intro_for`, which a headless test can
+## ask without a viewport.
+func _input(event: InputEvent) -> void:
+	if _skip_intro_for(event) and is_inside_tree():
+		get_viewport().set_input_as_handled()
+
+
+## True when `event` skipped the intro (and so must be swallowed): a press of
+## any key or mouse button while the intro is still running. Once it has
+## settled, nothing is consumed and the buttons get every click.
+func _skip_intro_for(event: InputEvent) -> bool:
+	if not _intro_running():
+		return false
+	var skip: bool = (event is InputEventKey and event.pressed) \
+			or (event is InputEventMouseButton and event.pressed)
+	if skip:
+		_title_scene.finish_intro()
+		_apply_intro()
+	return skip
 
 
 func _build_load_view() -> void:
@@ -519,6 +614,66 @@ func _menu_button(node_name: String, text: String) -> Button:
 	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
 		button.add_theme_stylebox_override(state, _button_style(state))
 	return button
+
+
+## A front-page button: its own near-opaque plate standing over the hall,
+## with a hazard bar down its left edge, that turns hazard-yellow outright
+## under the pointer — the one loud thing on the screen is the thing you are
+## about to press. Text stays INK on the dark plate and goes dark on the
+## yellow one, so it is legible in both states without colour alone (§7).
+func _front_button(node_name: String, text: String) -> Button:
+	var button := _menu_button(node_name, text)
+	button.custom_minimum_size = FRONT_BUTTON_SIZE
+	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	button.add_theme_color_override("font_hover_color", PLATE_BG)
+	button.add_theme_color_override("font_pressed_color", PLATE_BG)
+	button.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	button.add_theme_constant_override("outline_size", _i(3))
+	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+		button.add_theme_stylebox_override(state, _front_button_style(state))
+	return button
+
+
+func _front_button_style(state: String) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(PLATE_BG.r, PLATE_BG.g, PLATE_BG.b, 0.9)
+	style.border_color = PLATE_ACCENT
+	style.border_width_left = FRONT_BUTTON_BAR
+	style.border_width_bottom = _i(2)
+	style.border_width_top = 0
+	style.border_width_right = 0
+	match state:
+		"hover":
+			style.bg_color = HAZARD
+			style.border_color = PLATE_ACCENT
+		"pressed":
+			style.bg_color = PLATE_ACCENT
+			style.border_color = PLATE_ACCENT.darkened(0.3)
+		"focus":
+			style.draw_center = false
+			style.border_width_left = 0
+			style.border_width_bottom = 0
+	style.shadow_color = Color(0, 0, 0, 0.45)
+	style.shadow_size = _i(6)
+	style.shadow_offset = Vector2(0.0, _px(3.0))
+	style.set_content_margin_all(_px(8.0))
+	return style
+
+
+## The front page shows no plate — its buttons are their own — and the load
+## list and the settings rows get the full dark plate back, because a list
+## of rows standing straight on a lit hall is a list nobody can read.
+func _apply_panel_mode() -> void:
+	if _menu_panel == null:
+		return
+	var plate: StyleBoxFlat = _menu_panel.get_meta("plate")
+	var front := not _load_open and not _settings_open
+	plate.draw_center = not front
+	var edge := 0 if front else _i(2)
+	plate.border_width_left = edge
+	plate.border_width_right = edge
+	plate.border_width_bottom = edge
+	plate.border_width_top = 0 if front else _i(4)
 
 
 func _button_style(state: String) -> StyleBoxFlat:
@@ -714,6 +869,7 @@ func _set_load_open(open: bool) -> void:
 	# space the visible load view leaves.
 	if open:
 		_refresh_saves()
+	_apply_panel_mode()
 
 
 func _set_settings_open(open: bool) -> void:
@@ -733,6 +889,7 @@ func _set_settings_open(open: bool) -> void:
 	# decoration the rule is written to outrank. The player is one BACK press
 	# from all three, and the factory poster behind them never went anywhere.
 	_set_wordmark_visible(not open)
+	_apply_panel_mode()
 	# The rows read the autoload, and the pause menu's copy of this screen
 	# writes the same autoload — so what is shown is re-read on the way in
 	# rather than trusted from the last time this menu was built.
@@ -755,6 +912,8 @@ func _set_wordmark_visible(shown: bool) -> void:
 	for child in column.get_children():
 		if child is Control and child.name != "MenuPanel":
 			(child as Control).visible = shown
+	if _title_scene != null:
+		_title_scene.set_sign_visible(shown)
 
 
 func _on_quit_pressed() -> void:

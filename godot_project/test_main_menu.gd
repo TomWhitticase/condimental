@@ -226,9 +226,88 @@ func _initialize() -> void:
 			continue
 		_fail("'%s' covers the whole menu — the hall behind it is the screen, not a backing for text" % wash.name)
 		return
-	var wordmark: Label = menu.find_child("Title", true, false)
-	if wordmark.label_settings.outline_size < menu.TITLE_OUTLINE:
-		_fail("the wordmark stands on the hall with nothing behind it; its outline is the contrast")
+	# The wordmark is the lit marquee sign hanging in the hall, a voxel model
+	# from the asset pipeline (`title_sign`), not a Label. A missing model
+	# builds an empty node and every other check here stays green, so its
+	# meshes are counted — the board, the letters and a bulb frame.
+	var sign_rig: Node3D = backdrop.get_node_or_null("TitleCamera/TitleSign")
+	if sign_rig == null:
+		_fail("the title sign must hang from the title camera, so it stays framed while the hall drifts")
+		return
+	if _find_all(sign_rig, "MeshInstance3D", []).size() < 3:
+		_fail("the title sign has no meshes — is `title_sign` staged? (`cargo xtask`)")
+		return
+	# It hangs in the slot the column keeps for it: framing it into a rect
+	# moves it, and the settings page stands it down with the slot.
+	backdrop.frame_sign(Rect2(100, 40, 800, 150), Vector2(1280, 720))
+	var framed_at := sign_rig.position
+	backdrop.frame_sign(Rect2(300, 300, 400, 75), Vector2(1280, 720))
+	if framed_at.is_equal_approx(sign_rig.position) or sign_rig.scale.x >= 1.0e3:
+		_fail("frame_sign must follow the rect it is handed")
+		return
+
+	# The poster RUNS: belts march, product slides, and the intro can be
+	# skipped to its settled end. Wall time, so driven here by hand.
+	if backdrop._belt_sets.is_empty() or backdrop._motion_sets.is_empty() or backdrop._flow_items.is_empty():
+		_fail("the title line must have belt frames, machine motion and product on it")
+		return
+	# Any item, not one: an item off the end of its run is parked, hidden,
+	# inside the next machine until its slot comes round.
+	var items_from: Array = []
+	for flow_item in backdrop._flow_items:
+		items_from.append((flow_item["node"] as Node3D).position.x)
+	backdrop._process(0.4)
+	var moved := false
+	for k in range(items_from.size()):
+		if not is_equal_approx((backdrop._flow_items[k]["node"] as Node3D).position.x, items_from[k]):
+			moved = true
+	if not moved:
+		_fail("product on the title line must move along the belt")
+		return
+	# The intro, from the START: the clock above has already run past its end
+	# (the drift check fed it six seconds), so a skip tested from there would
+	# pass with a skip that does nothing (PR #226's review).
+	backdrop.intro_time = 0.0
+	backdrop._process(0.1)
+	menu._apply_intro()
+	if backdrop.intro_time >= backdrop.INTRO_LENGTH or not menu._intro_running():
+		_fail("the intro must still be running 0.1 s in")
+		return
+	if menu._button_box.get_child(0).modulate.a > 0.0:
+		_fail("the buttons must be hidden while the sign is still dropping in")
+		return
+	# A click during the intro skips it, shows the buttons and is consumed —
+	# the handler marks it handled, so it never reaches the button underneath.
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	if not menu._skip_intro_for(click):
+		_fail("a click during the intro must skip it and be swallowed")
+		return
+	if backdrop.intro_time < backdrop.INTRO_LENGTH:
+		_fail("skipping must leave the intro at its settled end")
+		return
+	for button in menu._button_box.get_children():
+		if not is_equal_approx((button as Control).modulate.a, 1.0):
+			_fail("a skipped intro must leave every button fully shown")
+			return
+	# ...and once it has settled, clicks belong to the buttons again.
+	if menu._skip_intro_for(click):
+		_fail("a click after the intro must not be swallowed — it is a button press")
+		return
+	# A release is not a skip (it would swallow the release of the click
+	# that pressed a button).
+	backdrop.intro_time = 0.0
+	backdrop._process(0.0)
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	if menu._skip_intro_for(release):
+		_fail("a button release must not count as a skip")
+		return
+	backdrop.finish_intro()
+	if backdrop.intro_time < backdrop.INTRO_LENGTH:
+		_fail("finish_intro must leave the intro at its settled end")
 		return
 
 	# The splash line, the one piece of pure decoration on the screen.

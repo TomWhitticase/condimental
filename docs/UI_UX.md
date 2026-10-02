@@ -151,6 +151,12 @@ number the same way on 2026-09-26. They sit where they were discovered.
     `MACHINE_PROGRESS_GAUGES` is sparse — a bar on a short cycle flickers.
 14. **Wood (`oak`) is the one exception to point 8** — in a barrel-aging
     room the wood IS the process.
+42. **The title sign is the one exception to "emissive is for status
+    lamps only"** (point 8): an illuminated sign is a lamp, and the title
+    screen's wordmark is one (`title_sign`, §5d). It is never a machine and
+    never on the factory floor, so nothing in play can be misread as a
+    status signal by it; its colours (`sign_neon`, `marquee_bulb`) are its
+    own palette entries for the same reason.
 15. **A machine with no mechanism is a legitimate silhouette** when it only
     waits (e.g. casks stand on end, not lying down).
 16. **An open-floored building puts height at the far side, content at the
@@ -659,7 +665,15 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   the amber progress bar. The words are the readout; the light and the bar
   are the same fact at two distances.
 - **Typography**: a sturdy, slightly blocky sans-serif, readable at UI
-  sizes; not a novelty pixel font.
+  sizes; not a novelty pixel font. **The typeface is Chakra Petch
+  SemiBold** (2026-10-02, the owner's pick from a side-by-side against
+  Barlow, Rubik and Godot's default). Its squared corners match the voxel
+  title sign (§5d), so the title and every panel after it read as one
+  product, and it stays legible at the HUD's smallest sizes. It is the
+  project's theme font (`project.godot`'s `gui/theme/custom_font`), so
+  every Label, Button and LabelSettings without a font of its own uses it;
+  nothing in GDScript names a font. The file and its SIL OFL licence are
+  in `godot_project/fonts/`.
 - **Layout**: hotbar along the bottom (§5b); build/recipe menus as icon
   grids; hover tooltips rather than dense always-on text.
 
@@ -905,10 +919,16 @@ player sees.
 
 **Main menu**: a **title screen** — the factory itself, in 3D, standing in
 the §3 hall behind the menu (`title_scene.gd`), the way Minecraft's panorama
-and Factorio's title art do. It is a hand-composed still life of the shipped
-chain, not `main.tscn` and not a simulation: nothing ticks, the items on the
-belts were put there by hand, and the camera drifts slowly so the screen
-reads as a place rather than as a paused game. Its models, materials, floor
+and Factorio's title art do. It is a hand-composed poster of the shipped
+chain, not `main.tscn` and not a simulation: nothing ticks and nothing is
+placed by a command. **But it runs** (2026-10-02, the owner asked for the
+screen to be "visually stunning", not a plain poster): the belts march
+through their frames, every machine works through its motion overlay,
+product slides along the belts on a loop between bodies and steam rises off
+the vat — all at the game's own paces (`BELT_TICKS_PER_TILE`,
+`MACHINE_TICKS_PER_CYCLE`) but on wall time, there being no tick to take.
+The camera drifts slowly, and a light depth of field softens the far hall
+so the frame reads as a photograph of a place rather than a paused game. Its models, materials, floor
 variants and lighting all come from the game's own pipeline
 (`voxel_assets.gd`, `factory_environment.gd`, `main.gd`'s floor helpers are
 shared, not copied), so the poster cannot go stale. The camera is
@@ -918,15 +938,40 @@ air is clear here where the game's is hazy (`TITLE_HAZE_DENSITY`) — the one
 parameter that differs between the two, because haze read as a grey wash
 lying on a single still frame rather than as distance.
 
-Over it: the wordmark, subtitle and a tilted yellow **splash line** (picked
-from a fixed list by the date, so it changes day to day and a review
-screenshot still repeats), then a dark plate with New Game / Load Game /
-Quit, **centred in the viewport**. **Nothing is washed over the hall**: a
+Over it: the **wordmark as a lit marquee sign** hanging from the roof on
+two rods — CONDIMENTAL in mustard-lit voxel letters with a ketchup drop
+shadow, on a dark board in a steel rim with a hazard-striped foot, bulbs
+chasing round its frame (`title_sign` and its three `title_sign_bulbs_f*`
+overlays, §2b point 42). It is a voxel model from the asset pipeline, not
+text: the game's name is the first asset the player sees, so it is made the
+way every other asset is. It hangs from the camera, so it stays framed while
+the factory parallaxes behind it, and `menu.gd` frames it into an empty
+`Title` slot in its column every frame, so the 3D sign and the 2D column
+cannot drift apart at any window size. Under it the subtitle and a tilted
+yellow **splash line** (picked from a fixed list by the date, so it changes
+day to day and a review screenshot still repeats), then New Game / Load
+Game / Settings / Quit, **centred in the viewport**. On the front page the
+buttons are **their own plates** — dark, a hazard bar down the left edge,
+turning hazard-yellow outright under the pointer — with no plate round the
+column, so the line shows between and beside them; the load list and the
+settings rows get the full dark plate back, because rows standing straight
+on a lit hall cannot be read.
+
+**The screen opens on an intro** (`title_scene.gd`'s `INTRO_*`, about 2.6
+seconds): the hall's lights strike from dark with one stutter, the sign
+drops in on its rods with a damped bounce, its letters flicker on like a
+struck tube, the bulbs start chasing, and the strap and buttons fade up one
+after another. Any click or key skips it and is swallowed, so the click
+that skips cannot also press a button still fading in.
+`scripts/screenshot-scene.sh --title` shoots the settled screen;
+`--intro-at SECONDS` holds a moment of the intro for review.
+
+**Nothing is washed over the hall**: a
 gradient scrim used to stand behind the column for legibility and read as a
 shadow lying on the picture, so it is gone (the owner's call). The text
-carries its own contrast instead — the wordmark and the strap take a heavier
-outline than anything inside a plate needs (`TITLE_OUTLINE`,
-`STRAP_OUTLINE`), and the button plate is near-opaque in its own right. (An
+carries its own contrast instead — the strap takes a heavier outline than
+anything inside a plate needs (`STRAP_OUTLINE`), the sign is lit, and each
+button is a near-opaque plate in its own right. (An
 earlier cut stood the column to one side so the plate would not cover the
 vanishing point; the owner asked for it centred, and the backdrop's framing
 was moved to suit — the chain now reads either side of the plate, tomatoes
@@ -1651,7 +1696,7 @@ suits the voxels.
 - Exact camera angle (true 2:1 isometric vs Sims-style dimetric): in
   practice true isometric via `CAMERA_DIRECTION`; a side-by-side is cheap.
 - Concrete palette hex ranges per material category.
-- Specific typeface.
+- ~~Specific typeface~~ — resolved: Chakra Petch SemiBold (§5).
 - Whether characters (if any) share the 32³ tile scale.
 - ~~`.vox` writer~~ — resolved: hand-written encoder (§2b point 1).
 - ~~`.vox` importer~~ — resolved: see ARCHITECTURE.md §1a.
