@@ -20,6 +20,8 @@
 #     contain the text, case-insensitively, and hides a section left empty,
 #   * text matching nothing hides every section and says so,
 #   * clearing the box shows everything again, and so does closing the menu,
+#   * the panel is the same size whatever the search shows — a few matches,
+#     none, or everything — so typing never resizes or re-centres it,
 #   * with the box FOCUSED, real key events (`root.push_input`) type into it
 #     and reach no hotkey — no digit selects a tool, no letter opens a panel
 #     or closes the menu, TAB leaves the view alone — then the first ESC only
@@ -44,6 +46,7 @@ var _main
 var _step := 0
 var _summary := ""
 var _view_before := 0
+var _query := ""
 
 
 func _fail(msg: String) -> void:
@@ -188,9 +191,37 @@ func _initialize() -> void:
 	_summary = "%d category sections headed from the snapshot, each holding its own entries; '%s' filtered %d slots to %d and hid %d section(s); a miss hid all and said so; clearing and reopening showed all %d" % [
 		sections.size(), query, entries.size(), shown.size(), hidden_sections, entries.size(),
 	]
+	_query = query
 	# The keyboard half needs frames: `push_input` is delivered through the
 	# viewport's GUI, which a SceneTree only runs from `_process` on.
 	_main = main
+
+
+## Types a partial match, a long miss and nothing, and reports the first one
+## that left the panel a different size from the whole catalog's — or "".
+## Fitted to its matches, the panel shrank and re-centred on every keystroke.
+func _size_drift(main) -> String:
+	# The panel measured must be the one holding the cards: an empty one is
+	# the same size whatever is typed, and would pass this with no fix at all.
+	for slot in main._shop_slots:
+		if not main._shop_menu.is_ancestor_of(slot["button"]):
+			return "slot '%s' is not in the build menu on screen — the size checks below would measure an empty panel" % slot["kind"]
+	# A real window's size: the headless root is too short for the catalog,
+	# so its scroll sat at the same floor height whatever matched and an
+	# unpinned panel kept its size by accident.
+	root.size = Vector2i(1600, 900)
+	main._position_shop_menu()
+	var full: Vector2 = main._shop_menu.get_combined_minimum_size()
+	var pos: Vector2 = main._shop_menu.position
+	for text in [_query, "zzqqxx".repeat(20), ""]:
+		_type(main, text)
+		var now: Vector2 = main._shop_menu.get_combined_minimum_size()
+		if now != full or main._shop_menu.position != pos:
+			return "searching '%s' moved the panel from %s at %s to %s at %s — it must keep the whole catalog's size" % [
+				text, full, pos, now, main._shop_menu.position,
+			]
+	_summary += "; the panel held %s through a match, a miss and a clear" % [full]
+	return ""
 
 
 ## A real key press and release, through the viewport the way a keyboard's
@@ -240,6 +271,13 @@ func _process(_delta: float) -> bool:
 			main._set_shop_menu_open(false)
 			main._set_shop_menu_open(true)
 			search = main._shop_search
+			# The panel's size, here rather than in `_initialize`: there is no
+			# viewport until frames run, and without one `_position_shop_menu`
+			# returns before it sizes anything, so every size would match.
+			var sized := _size_drift(main)
+			if sized != "":
+				_fail(sized)
+				return true
 			search.grab_focus()
 			_view_before = main._view_mode
 			for key in TYPED_KEYS:

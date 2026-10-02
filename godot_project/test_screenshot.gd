@@ -691,9 +691,10 @@ const ITEM_GALLERY_ASSETS := [
 ]
 var _item_gallery := false
 
-## Where `--fluid-gallery` puts the camera when nothing else says: the
-## centre of `build_fluid_gallery`'s 17x3 strip, at the widest zoom that
-## still has all six runs inside 1600x900 with a margin.
+## Where `--fluid-gallery` puts the camera when nothing else says, and at
+## what zoom. Set for the original 17x3 strip of six runs; mustard's three
+## runs added rows below it (the floor is 17x7 now) and all nine still sit
+## inside 1600x900 at this aim and zoom, so it was not moved.
 const FLUID_GALLERY_FOCUS := Vector2(8.0, 1.0)
 const FLUID_GALLERY_SIZE := 64.0
 
@@ -1364,13 +1365,13 @@ func _parse_closeup(args: Array) -> bool:
 ##
 ##   * The scene's auto-framing pads a world out to EMPTY_WORLD_FRAME_TILES
 ##     on both axes, which is right for a factory and wrong for this: the
-##     gallery is 17 tiles long and 3 deep, so the padding is most of the
-##     frame and the six colours the shot exists to compare come back a few
+##     gallery is 17 tiles long and 7 deep, so the padding is most of the
+##     frame and the nine colours the shot exists to compare come back a few
 ##     pixels wide each.
 ##   * The HUD goes, for the reason `_no_hud` already records one step
 ##     further on: the subject is a line of pipe running corner to corner,
 ##     and the legend and the clipboard sit on both ends of that diagonal.
-##     There is no framing that shows six runs and misses both panels.
+##     There is no framing that shows nine runs and misses both panels.
 func _apply_fluid_gallery_defaults(args: Array) -> void:
 	if _fixture != "fluid_gallery":
 		return

@@ -295,6 +295,37 @@ touches every model. The voxel contents are unchanged and the existing icons
 came back byte-identical. UI_UX §5d and §2b point 42 (the emissive exception)
 record it, and so does DECISIONS.
 
+### 2026-10-02 — A case of sauce is eight bottles
+
+A case used to hold one bottle, which read wrong on the belt: a stream of
+single bottles each becoming a box. The bottler now fills 8 bottles from
+each batch of sauce, and the packer packs 8 into a case. Nothing before
+the bottler changed, so prices, contracts and costs per case are as they
+were. **The belt is now the limit, by the owner's choice:** a belt into a
+packer carries about 5 cases per 1 000 ticks, so one bottling line keeps up
+with about 1.2 vats. A factory with more vats needs more bottlers, packers
+and belts, and an existing save with several vats on one bottler ships less
+until it adds them. The bottler takes 200 ticks per fill, matched to how fast a belt can
+carry 8 bottles away. One measured side effect: once the BBQ branch is
+built it gets closer to its designed share of the ketchup, and the mustard
+unlock comes about 13 minutes sooner (tick 131 000, down from 155 000).
+
+### 2026-10-02 — The fluid poll stops making a material per network per frame
+
+A scale sweep (the owner's 178-placement factory tiled 1×/5×/20×, frames
+timed headless against a release `sim_core`) found `_update_fluid_network`
+the largest script cost on a big floor: roughly 0.9 ms a frame at 1× and
+20 ms at 20× on a heavily loaded machine.
+`_fluid_material_for` duplicated a fresh `StandardMaterial3D` for every
+network on every polled frame, only for it to be thrown away unless a body
+was being created. It now caches one material per fluid id, shared by every
+body and tank fill of that fluid; nothing mutates it once assigned. Five polls
+at 20× made 700 materials before and 4 after; a frame's script time fell from
+31 ms to 12 ms on a heavily loaded machine, leaving the fluid poll to its JSON
+parse. `test_fluids.gd` checks a second poll reuses the material, and
+`test_fluid_gallery.gd` that every drawn run still carries its own fluid's
+tint — a wrong cache key would draw them all one colour.
+
 ### 2026-10-02 — Spoilage is out of the game
 
 The owner dropped spoilage. Nothing perishes, so the design no longer has a

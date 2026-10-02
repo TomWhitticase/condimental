@@ -1659,6 +1659,10 @@ var _shop_section_list: Array = []
 ## the sim never hears about it.
 var _shop_search: LineEdit
 var _shop_no_match: Label
+## The most of the query the no-match line repeats back before it ends in "…".
+## It holds the width only because the full catalog is wider than the line at
+## this length; `test_shop_search.gd` types a 120-character miss to check it.
+const SHOP_NO_MATCH_QUERY_CHARS := 32
 var _shop_open := false
 ## How many icon slots fit across before wrapping. **SIX**, and the number
 ## has been chased by the same constraint every time: the menu has to fit in
@@ -4513,17 +4517,19 @@ func _read_dock_states() -> void:
 ## But only when the warehouse has changed: `storage_revision` moves when the
 ## stock or the racks do, which is a hopper refill or a player action, not
 ## every tick. Read every polled frame, a 500-rack floor's snapshot cost 24 ms
-## to build and parse in a debug build.
+## to build and parse in a debug build even with the refusals shared (about
+## 40 ms before). The revision is only recorded once a read has parsed, so a
+## bad one is retried on the next poll rather than waiting for the stock.
 func _refresh_racks() -> void:
 	var revision: int = sim.storage_revision()
 	if revision == _storage_revision:
 		return
-	_storage_revision = revision
 	_rack_states.clear()
 	_storage_state = {}
 	var parsed = JSON.parse_string(sim.storage_snapshot_json())
 	if not (parsed is Dictionary):
 		return
+	_storage_revision = revision
 	_storage_state = parsed
 	for snapshot in parsed.get("racks", []):
 		if not (snapshot is Dictionary):
@@ -4709,6 +4715,8 @@ func _dock_lamp_lit(stocked: bool, full: bool, current_tick: int) -> bool:
 	return phase % 2 == 0
 
 
+var _fluid_materials: Dictionary = {} # fluid id -> its one shared StandardMaterial3D
+
 ## A network's or tank's fluid id, or "" — `fluid` is NULLABLE on the wire
 ## (a run no machine taps has not been told what it carries), and `String(null)`
 ## is a hard error in GDScript rather than an empty string.
@@ -4721,10 +4729,20 @@ func _fluid_id_of(snapshot: Dictionary) -> String:
 ## dielectric — UI_UX.md §4's "visible liquid surfaces ... with subtle
 ## shading/reflection"), tinted per fluid id. Only the tint is decided here;
 ## the shading numbers stay in palette.ron like every other material.
+##
+## One material per fluid, made the first time it is asked for and shared by
+## every pipe body and tank fill holding that fluid. Nothing mutates it once
+## assigned, and the fluid poll asks for every network's on every polled
+## frame: duplicating a fresh one each time cost a material per network per
+## frame, the largest script cost on a big pipe floor.
 func _fluid_material_for(fluid_id: String) -> StandardMaterial3D:
+	var cached: StandardMaterial3D = _fluid_materials.get(fluid_id, null)
+	if cached != null:
+		return cached
 	var base: StandardMaterial3D = _class_materials.get("liquid", null)
 	var mat: StandardMaterial3D = base.duplicate() if base != null else _make_material(0.0, 0.14)
 	mat.albedo_color = FLUID_TINTS.get(fluid_id, FLUID_TINT_FALLBACK)
+	_fluid_materials[fluid_id] = mat
 	return mat
 
 
@@ -4754,8 +4772,9 @@ func _set_machine_product(key: String, recipe) -> void:
 
 ## A machine's product material: the same `liquid` class numbers the fluid in
 ## a pipe uses — it is the same substance, seen through glass instead of
-## steel — tinted per recipe rather than per fluid. Built fresh per call like
-## `_fluid_material_for` above, and called about as often.
+## steel — tinted per recipe rather than per fluid. Built fresh per call,
+## unlike `_fluid_material_for` above: `_set_machine_product` only asks when a
+## machine's recipe changes, not on every poll, so there is nothing to cache.
 func _product_material_for(recipe_id: String) -> StandardMaterial3D:
 	var base: StandardMaterial3D = _class_materials.get("liquid", null)
 	var mat: StandardMaterial3D = base.duplicate() if base != null else _make_material(0.0, 0.14)
@@ -6772,6 +6791,12 @@ func _build_shop_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	panel_style.border_width_bottom = _ui_i(2)
 	panel_style.set_content_margin_all(_ui_px(16.0))
 
+	# A rebuilt HUD (a second `_ready`, as every `--script` test gets) starts
+	# these over: kept, `_shop_grid_for` found the OLD menu's section first,
+	# so every card went into a panel no longer on screen and the new one was
+	# measured, and drawn, empty.
+	_shop_section_list.clear()
+	_shop_slots.clear()
 	_shop_menu = PanelContainer.new()
 	_shop_menu.name = "ShopMenu"
 	_shop_menu.add_theme_stylebox_override("panel", panel_style)
@@ -6985,7 +7010,10 @@ func _on_shop_search_gui_input(event: InputEvent) -> void:
 func _apply_shop_search() -> void:
 	if _shop_search == null:
 		return
-	var query := _shop_search.text.strip_edges().to_lower()
+	_show_shop_matches(_shop_search.text.strip_edges().to_lower())
+
+
+func _show_shop_matches(query: String) -> void:
 	for slot in _shop_slots:
 		slot["button"].visible = query == "" \
 			or _kind_display_name(String(slot["kind"])).to_lower().contains(query)
@@ -6995,7 +7023,12 @@ func _apply_shop_search() -> void:
 		section["section"].visible = shown
 		any_shown = any_shown or shown
 	_shop_no_match.visible = not any_shown
-	_shop_no_match.text = "nothing matches \"%s\"" % _shop_search.text.strip_edges()
+	# The query is cut short so a long one cannot widen the panel past the
+	# size `_position_shop_menu` pinned it at.
+	var shown_query := _shop_search.text.strip_edges()
+	if shown_query.length() > SHOP_NO_MATCH_QUERY_CHARS:
+		shown_query = shown_query.left(SHOP_NO_MATCH_QUERY_CHARS) + "…"
+	_shop_no_match.text = "nothing matches \"%s\"" % shown_query
 
 
 # --- Width: what a modal panel gives up when the window is too narrow ------
@@ -7116,6 +7149,15 @@ func _position_shop_menu() -> void:
 		return
 	var reserved := _shop_reserved_height()
 	var bounds := vp.get_visible_rect().size
+	# Sized for the WHOLE catalog, whatever the search is showing, and pinned
+	# there: fitted to the matches, the panel shrank and re-centred on every
+	# keystroke (the owner's 2026-10-02 report). So the filter comes off for
+	# the measurement and goes back on once the size is pinned — all inside
+	# one frame, so nothing unfiltered is ever drawn.
+	var filtered := _shop_search != null and _shop_search.text.strip_edges() != ""
+	if filtered:
+		_show_shop_matches("")
+	_shop_menu.custom_minimum_size = Vector2.ZERO
 	# Each section's grid is fitted on its own, with every other grid first
 	# folded to one column: the panel is as wide as its widest grid, so a
 	# grid measured beside another still at six across would be squeezed
@@ -7129,8 +7171,11 @@ func _position_shop_menu() -> void:
 	var snapped := _shop_rows_height(fitted)
 	if snapped > 0.0:
 		_shop_grid_scroll.custom_minimum_size.y = snapped
-	_shop_menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
 	var menu_size := _shop_menu.get_combined_minimum_size()
+	_shop_menu.custom_minimum_size = menu_size
+	if filtered:
+		_apply_shop_search()
+	_shop_menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
 	_shop_menu.position.x = maxf(0.0, (bounds.x - menu_size.x) * 0.5)
 	_shop_menu.position.y = max(8.0, (bounds.y - reserved - menu_size.y) * 0.5)
 

@@ -10,7 +10,7 @@
 # The fixture exists because `bbq` and `bbq_mix` stood at zero pressure in
 # every other fixture, so the tints issue #68 gave them could not be
 # photographed at all. It is a claim about the SIMULATION as much as about a
-# frame — the six runs are named by topology, not by a label the fixture
+# frame — the nine runs are named by topology, not by a label the fixture
 # writes — and every way it can degrade is quiet: move one pipe and two
 # networks merge into a single unnameable run, add a machine and a run goes
 # ambiguous, get the fill wrong and a run is named but invisible. In each
@@ -47,6 +47,12 @@
 #     expected set now comes off `cookbook_json` and off the machines' own
 #     generated models — see `_wire_fluids()` and `_wire_products()` — so a
 #     fourth sauce is covered by the content landing and nothing else.
+#   * every DRAWN pipe body, after two polls, carries its own fluid's tint.
+#     The checks above read `FLUID_TINTS`, not the materials on screen, and
+#     since `_fluid_material_for` caches one material per fluid, a wrong
+#     cache key would draw every run one colour with all of them green
+#     (#220's review). That one material per fluid is SHARED is
+#     `test_fluids.gd`'s check, not this one's.
 extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
@@ -205,7 +211,7 @@ func _run_checks() -> void:
 		)
 		return
 
-	# --- 3. six runs, each carrying one of the six ------------------------
+	# --- 3. nine runs, each carrying one of the nine ----------------------
 	var snapshots: Array = JSON.parse_string(main.sim.fluid_snapshots_json())
 	var carried := {}
 	for run in snapshots:
@@ -321,7 +327,7 @@ func _run_checks() -> void:
 			)
 			return
 
-	# --- 6. six tints, all different, none of them grey -------------------
+	# --- 6. nine tints, all different, none of them grey ------------------
 	var seen := {}
 	for fluid in Layouts.FLUID_GALLERY_FLUIDS:
 		if not main.FLUID_TINTS.has(fluid):
@@ -359,6 +365,41 @@ func _run_checks() -> void:
 				)
 				return
 		seen[fluid] = tint
+
+	# --- 7. the DRAWN liquid is each run's own tint ----------------------
+	# The checks above read `FLUID_TINTS`, not what the pipes are drawn with.
+	# Pipe bodies share one cached material per fluid (`_fluid_material_for`),
+	# so a wrong cache key would draw every run one colour with all of the
+	# above still green. Poll twice, as the frame loop does, then read every
+	# body's material back.
+	main._update_fluid_network()
+	main._update_fluid_network()
+	var materials := {} # fluid id -> a material its bodies draw with
+	for n in range(main._last_fluid.size()):
+		var network: Dictionary = main._last_fluid[n]
+		var fluid: String = main._fluid_id_of(network)
+		var tint: Color = main.FLUID_TINTS.get(fluid, main.FLUID_TINT_FALLBACK)
+		for s in range(network.get("segments", []).size()):
+			var body: Node = main._pipe_fluid_nodes.get("%d:%d" % [n, s], null)
+			if body == null:
+				continue
+			for child in body.get_children():
+				if not (child is MeshInstance3D):
+					continue
+				var drawn: StandardMaterial3D = child.get_surface_override_material(0)
+				if drawn == null or not drawn.albedo_color.is_equal_approx(tint):
+					_fail(
+						"a '%s' pipe body is drawn %s, not its own tint %s"
+						% [fluid, str(drawn.albedo_color if drawn != null else null), str(tint)]
+					)
+					return
+				materials[fluid] = drawn
+	if materials.size() != expected.size():
+		_fail(
+			"liquid is drawn for %s, but the gallery's runs carry %s"
+			% [str(materials.keys()), str(expected.keys())]
+		)
+		return
 
 	print(
 		"FLUID_GALLERY_OK: %d placements stand %d runs, each named by topology alone, each above "

@@ -255,26 +255,29 @@
         // paid for them, and a mustard line costs 959.
         //
         // WHAT IT COSTS IN TIME, measured from a NEW GAME on 2026-09-29 by
-        // `godot_project/measure_gate_ticks.gd` (fully staffed, raws topped
+        // `godot_project/measure_gate_ticks.gd`, re-measured 2026-10-02 when a
+        // case became eight bottles (fully staffed, raws topped
         // up and money no object — a floor, not a typical run):
         //
         //   100th box of boxed_ketchup at tick 52 000, and the 100th box of
-        //   boxed_bbq at tick 155 000 — 86 minutes at 30 ticks/sec, of which
-        //   103 000 ticks (~57 min) are after the first gate opened, with
+        //   boxed_bbq at tick 131 000 — 73 minutes at 30 ticks/sec, of which
+        //   79 000 ticks (~44 min) are after the first gate opened, with
         //   every one of the four BBQ orders signed
         //
-        //   (the tool prints "88 000 ticks" for that gap because it starts
+        //   (the tool prints "64 000 ticks" for that gap because it starts
         //   its clock at the fixture's hand-off at tick 67 000, 15 000 ticks
         //   of branch-building and settling after the gate itself opened)
         //
         // THAT IS A FLAG, not a measurement in support: it puts mustard about
-        // an hour and a half into a session, where the old trigger put it
+        // an hour and a quarter into a session, where the old trigger put it
         // at eleven minutes. The cause is not the factory — with all four BBQ
         // orders signed the board asks for about 4.5 boxes per 1 000 ticks
         // (smokehouse_trial 2 boxes / 2 500 ticks = 0.80, grill_pub 2/3 000 =
         // 0.67, roadhouse_group 4/4 000 = 1.00, bbq_festival 10/5 000 = 2.00)
-        // and the branch put about 1.0 of them into paid windows (92 boxes in
-        // the 88 000 ticks measured), so it is the branch's throughput against the cadences
+        // and the branch put about 1.4 of them into paid windows (92 boxes in
+        // the 64 000 ticks measured; it was 1.0 and 88 000 ticks while a case
+        // was one bottle, when the 60-tick ketchup bottler took the vat's
+        // output before the BBQ mixer could), so it is the branch's throughput against the cadences
         // the orders keep, not a shortage of demand. Whoever wants
         // mustard sooner has three content-side levers and no Rust to write:
         // a smaller `boxes` here, more BBQ demand in `data/contracts.ron`, or

@@ -65,7 +65,7 @@
 //!    "tomato-equivalent" figure can no longer describe the whole system.
 //!    The check is run **once per raw ingredient**: how many tomatoes are
 //!    accounted for, and separately how many units of sugar. `raw_content`
-//!    below is the generalized version of the old `tomato_value` — it
+//!    (`common/mod.rs`) is the generalized version of the old `tomato_value` — it
 //!    recurses through solid *and* fluid production alike, and answers zero
 //!    for an item that embodies none of the raw it is asked about.
 //! 3. **Ingredients cost money** (GAMEPLAY.md §5). Nothing can be loaded
@@ -114,36 +114,6 @@ fn buy(world: &mut World, item: &str, quantity: u32) {
     common::buy(world, item, quantity);
 }
 
-/// How many units of raw ingredient `raw` one unit of `id` embodies, by
-/// recursing back through whichever recipe produces it — following **fluid**
-/// production as readily as solid, since the middle of the chain is piped.
-///
-/// Answers `1` for `raw` itself and `0` for anything nothing produces and
-/// that is not `raw` (i.e. a *different* raw ingredient: sugar carries no
-/// tomatoes). Relies on the chain's single-strand shape, which
-/// `validate_chain` enforces: every recipe past the first produces one unit
-/// from a fixed bill of inputs, so an id's raw content is just the sum of
-/// its inputs' contents times their quantities.
-fn raw_content(id: &str, raw: &str, recipes: &RecipeRegistry) -> u32 {
-    if id == raw {
-        return 1;
-    }
-    let Some(recipe) = recipes.ordered().iter().find(|r| {
-        r.outputs.iter().any(|(out, _)| out == id)
-            || r.fluid_outputs.iter().any(|(out, _)| out == id)
-    }) else {
-        // Produced by nothing: another raw ingredient, which embodies none
-        // of the one being counted.
-        return 0;
-    };
-    recipe
-        .inputs
-        .iter()
-        .chain(recipe.fluid_inputs.iter())
-        .map(|(input, qty)| qty * raw_content(input, raw, recipes))
-        .sum()
-}
-
 /// Every belt/machine snapshot across the whole chain, regardless of how
 /// many chunks it spans — gathered via `World::all_chunks` rather than
 /// assuming a fixed chunk count. It genuinely spans two chunks: the line
@@ -169,7 +139,7 @@ fn full_chain_snapshot(world: &World) -> (Vec<BeltSnapshot>, Vec<MachineSnapshot
 fn total_raw_equivalent(world: &World, raw: &str, recipes: &RecipeRegistry) -> Fx {
     let (belts, machines) = full_chain_snapshot(world);
     let mut total = Fx::ZERO;
-    let value = |id: &str| Fx::from_num(raw_content(id, raw, recipes));
+    let value = |id: &str| common::raw_content(id, raw, recipes);
 
     // Raw ingredient waiting in a hopper is mass in the system exactly the
     // way mass in a machine's input buffer is — it has been bought and
@@ -242,7 +212,7 @@ fn assert_conserved(
     context: &str,
 ) {
     let in_system = total_raw_equivalent(world, raw, recipes);
-    let per_box = Fx::from_num(raw_content(final_item, raw, recipes));
+    let per_box = common::raw_content(final_item, raw, recipes);
     let accounted = in_system + per_box * Fx::from_num(collected_final);
     assert_eq!(
         accounted,
