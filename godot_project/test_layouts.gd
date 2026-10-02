@@ -1807,6 +1807,172 @@ static func item_gallery_tile(slot: int) -> Vector2i:
 	return Vector2i(slot * 2, 0)
 
 
+## THE CROSSING LINE (the belt/pipe crossing epic, ticket T3) — a live belt
+## with two live pipe runs crossing it, every tile of it bought and placed
+## through the real commands, so the two crossings in it are ones the
+## SIMULATION assembled (`docs/BELT_PIPE_CROSSING_PLAN.md`). It replaced the
+## spike's hand-stood models, which photographed art the sim could not build.
+##
+## One belt east along y = 0, fed by a tomato hopper and ending in nothing,
+## so product runs under both crossings and then backs up beneath them — a
+## crossing is judged with things passing under it. Two north-south pipe runs
+## cross it, one assembled each way the game allows:
+##
+##   * x = CROSSING_PIPE_ONTO_BELT_X — the belt row is laid first, then the
+##     pipe run, so the tile is a pipe laid ACROSS a belt;
+##   * x = CROSSING_BELT_ONTO_PIPE_X — the pipe run is laid first and the belt
+##     row across it, so the tile is a belt laid across a pipe.
+##
+## The belt is fed tomatoes by an auto-filling hopper and runs into nothing,
+## so once it has been RUN it backs up and every tile — the two under the
+## pipes included — holds items to be seen passing under the arch. It has to
+## be run for that: the fixture only builds, so `--fixture crossing` settles
+## it through `_run_chain_forward` (`test_screenshot.gd`) and the tests tick
+## it themselves. Built and not ticked, this line is a bare belt and two grey
+## pipe runs.
+##
+## **Each run is fed by ONE tank, at its north end only.** Feeding both ends
+## proves nothing: both halves of a run colour whether or not the crossing
+## joined them, which is the one fact the colour is here to show. Fed from
+## the north alone, fluid reaches the south half only by passing THROUGH the
+## crossing, so the colour is the proof.
+##
+## That is a legibility choice and not a fill fix — how much each run gets is
+## [constant CROSSING_VINEGAR]'s business, and the two were confused once
+## already. The line costs 876 of a 3,000 starting balance; the screenshot
+## harness also stocks `stock_larder` for every fixture, which takes its
+## frame's HUD to 1,665 (1,335 spent).
+static func build_crossing_line(sim) -> void:
+	stock(sim, "vinegar", CROSSING_VINEGAR)
+	stock(sim, "tomato", 64)
+	for y in CROSSING_RUN_YS:
+		place(sim, "pipe", Vector2i(CROSSING_BELT_ONTO_PIPE_X, y), "north")
+	place(sim, "hopper", Vector2i(-1, 0), "east", "tomato")
+	for x in range(CROSSING_BELT_TILES):
+		place(sim, "belt", Vector2i(x, 0), "east")
+	sim.issue_command_json(JSON.stringify({
+		"type": "set_hopper_auto_fill", "tile": [-1, 0], "enabled": true,
+	}))
+	for y in CROSSING_RUN_YS:
+		place(sim, "pipe", Vector2i(CROSSING_PIPE_ONTO_BELT_X, y), "north")
+	for x in [CROSSING_PIPE_ONTO_BELT_X, CROSSING_BELT_ONTO_PIPE_X]:
+		var tank := Vector2i(x, CROSSING_RUN_YS[0] - 1)
+		place(sim, "fluid_tank", tank, "north")
+		sim.issue_command_json(JSON.stringify({
+			"type": "set_tank_fluid", "tile": [tank.x, tank.y], "fluid": "vinegar",
+		}))
+		sim.issue_command_json(JSON.stringify({
+			"type": "set_tank_auto_fill", "tile": [tank.x, tank.y], "enabled": true,
+		}))
+
+
+## The two crossing columns, shared with `test_screenshot.gd` and the tests
+## so the fixture and what checks it cannot drift apart.
+const CROSSING_PIPE_ONTO_BELT_X := 3
+const CROSSING_BELT_ONTO_PIPE_X := 9
+const CROSSING_BELT_TILES := 13
+const CROSSING_RUN_YS := [-3, -2, -1, 0, 1, 2, 3]
+## Vinegar bought for the line's two tanks. Measured with the tanks' own
+## auto-fill as the only source, 200 ticks, reading `fluid_snapshots_json`:
+##
+##   64 -> x = 3 0.914, x = 9 pressure 0.000   (what shipped)
+##   128 -> x = 9 0.114    160 -> x = 9 0.571    200 -> x = 9 0.999
+##
+## The FIRST tank drinks whatever it can reach, so a small number leaves the
+## second run dry no matter how the tanks are arranged — 64 across FOUR tanks
+## was dry at x = 9 as well. The tank count was never what starved it; this
+## number was. [method crossing_line_idle] checks the result.
+const CROSSING_VINEGAR := 200
+
+## The pressure below which a run photographs grey however wet the sim says
+## it is. `main.gd` draws pipe liquid by scaling a ONE-VOXEL body by
+## `pressure * PIPE_BORE_HEIGHT_VOXELS` (7) up from the bore floor at z = 12,
+## but the sight window is only cut from z = 13 (`pipe_window_x`, one above
+## `PIPE_BORE_Z0`). So at 1/7 the liquid's surface is exactly level with the
+## window's floor and none of it shows; the first whole voxel IN the window
+## is 2/7. `FLUID_MIN_VISIBLE_PRESSURE` (0.02) only suppresses a z-fighting
+## sliver and hides nothing above it.
+##
+## Measured by forcing every segment's pressure and rendering `--fixture
+## crossing` at 1600x900: 0.15 is grey, 0.2 barely there, 0.286 a thin amber
+## line in every window. The line itself settles at 1.0 in both runs.
+##
+## This is here because `volume > 0` was not enough. The x = 9 run sat at
+## 0.114 and passed a wet-in-every-segment check while photographing entirely
+## grey. A guard that goes green on the bad picture is no guard — and a bar
+## set at 1/7 would have passed a run at 0.15 that is just as grey.
+const CROSSING_MIN_DRAWN_PRESSURE := 2.0 / 7.0
+## An ordinary belt tile of the line with open floor either side of it along
+## the belt — where `--fixture crossing`'s ghost frames hold a pipe, across
+## the belt (a crossing) or along it (refused).
+const CROSSING_GHOST_TILE := Vector2i(6, 0)
+
+
+## Why the crossing line did not come out as two crossings, or "" if it did —
+## read back from the simulation's own `query_tile_json`, never from what
+## this file meant to build. A Place the sim refused is silent, so a rule
+## change that stopped either assembly would otherwise hand back a frame of a
+## belt running past two gaps.
+static func crossing_line_failure(sim) -> String:
+	for x in [CROSSING_PIPE_ONTO_BELT_X, CROSSING_BELT_ONTO_PIPE_X]:
+		var parsed = JSON.parse_string(sim.query_tile_json(x, 0))
+		var kind := String(parsed.get("kind", "")) if parsed is Dictionary else ""
+		if kind != "crossing":
+			return "(%d, 0) is '%s', not a crossing" % [x, kind]
+	return ""
+
+
+## Why the crossing line is not SHOWING what it was built to show, or "" if
+## it is — asked after the settle, not after the build, and separate from
+## [method crossing_line_failure] because they fail for opposite reasons: that
+## one says the sim refused to assemble a crossing, this one says the line
+## assembled and then stood there dead.
+##
+## Both are needed because both have happened, and the second of them took
+## two goes to catch. The line shipped for a day with nothing ticking it, so
+## every frame was a bare belt under grey pipe runs and every frame passed.
+## The first version of THIS check then asked only that each segment hold
+## some fluid, and passed a frame in which the x = 9 run was grey from end to
+## end — wet in the sim at 0.114 pressure, sub-voxel on screen. So it asks
+## for a level that DRAWS ([constant CROSSING_MIN_DRAWN_PRESSURE]), not a
+## level above zero.
+##
+## A bare belt and a grey pipe run look like art that has not landed, not
+## like a fixture nobody ran. A frame is evidence in a PR body, so the
+## harness fails rather than hand one over.
+static func crossing_line_idle(sim) -> String:
+	for x in [CROSSING_PIPE_ONTO_BELT_X, CROSSING_BELT_ONTO_PIPE_X]:
+		var parsed = JSON.parse_string(sim.query_tile_json(x, 0))
+		var tile: Dictionary = parsed if parsed is Dictionary else {}
+		if Array(tile.get("items_here", [])).is_empty():
+			return "no item is on the crossing at (%d, 0) — the belt was never run" % x
+	var runs := 0
+	for snapshot in JSON.parse_string(sim.fluid_snapshots_json()):
+		var segments: Array = snapshot.get("segments", [])
+		if segments.is_empty():
+			continue
+		runs += 1
+		var run_x := int(segments[0]["tile"][0])
+		if segments.size() != CROSSING_RUN_YS.size():
+			return "the pipe run at x = %d has %d segments, not the %d it was built with" % [
+				run_x, segments.size(), CROSSING_RUN_YS.size(),
+			]
+		var faint := 0
+		for segment in segments:
+			if float(segment.get("pressure", 0.0)) < CROSSING_MIN_DRAWN_PRESSURE:
+				faint += 1
+		if faint > 0:
+			return "the pipe run at x = %d is too faint to draw in %d of its %d segments (under %.3f pressure)" % [
+				run_x, faint, segments.size(), CROSSING_MIN_DRAWN_PRESSURE,
+			]
+	# Counted rather than assumed: every check above is inside a loop over the
+	# runs the sim reports, so a line that reported NO runs at all would walk
+	# none of them and return "" — a pass earned by having nothing to look at.
+	if runs != 2:
+		return "the line carries fluid in %d pipe runs, not the 2 it was built with" % runs
+	return ""
+
+
 ## THE BELT GALLERY (the pipes & conveyors overhaul, ticket 5) — every belt
 ## shape at every facing, and a belt meeting a machine, a hopper and a dock
 ## at every facing, in one world. `test_belt_shapes.gd` asserts against it
@@ -2083,7 +2249,9 @@ const FLUID_GALLERY_FLUIDS: PackedStringArray = [
 
 ## Asks the simulation whether the gallery is actually a gallery: all nine
 ## fluids present, each on a run the sim can NAME (`carries`, not `ambiguous`
-## or `unnameable`), each above the pressure `main.gd` will draw a body at.
+## or `unnameable`), each at a pressure whose colour actually shows —
+## [constant CROSSING_MIN_DRAWN_PRESSURE], not the far lower floor at which
+## `main.gd` merely creates the body.
 ## Returns "" when it is, or what is wrong with it.
 ##
 ## This exists because every way this fixture can fail is a quiet one. Move
@@ -2103,9 +2271,9 @@ static func check_fluid_gallery(sim) -> String:
 		var naming := String(run.get("naming", ""))
 		if naming != "carries":
 			return "a run is '%s' rather than carrying one fluid — the layout has merged or confused two networks" % naming
-		if float(run.get("pressure", 0.0)) <= FLUID_MIN_VISIBLE_PRESSURE:
-			return "the %s run is at pressure %s, at or below the %s main.gd needs to draw a body" % [
-				fluid, run.get("pressure", 0.0), FLUID_MIN_VISIBLE_PRESSURE,
+		if float(run.get("pressure", 0.0)) < CROSSING_MIN_DRAWN_PRESSURE:
+			return "the %s run is at pressure %s, under the %s at which its colour shows in a sight window" % [
+				fluid, run.get("pressure", 0.0), CROSSING_MIN_DRAWN_PRESSURE,
 			]
 		seen[fluid] = true
 	var missing := []
@@ -2138,8 +2306,9 @@ const FLUID_MIN_VISIBLE_PRESSURE := 0.02
 ## result against each buffer's real capacity — so this fills to
 ## `PIPE_SEGMENT_CAPACITY`, the smaller of the two, and a tank simply comes
 ## back a twelfth full rather than refused. Full, not a trickle, because
-## `main.gd` scales a fluid body's height by pressure: at the 0.02 floor of
-## FLUID_MIN_VISIBLE_PRESSURE there is one voxel of colour to judge.
+## `main.gd` scales a fluid body's height by pressure, and below
+## [constant CROSSING_MIN_DRAWN_PRESSURE] there is no colour in the window to
+## judge at all.
 static func fill_fluid_runs(sim, units := 10) -> void:
 	var text: String = sim.save_ron()
 	var regex := RegEx.new()

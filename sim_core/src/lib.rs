@@ -34,6 +34,11 @@ struct SimBridge {
     base: Base<RefCounted>,
     #[init(val = World::new(load_bundled_recipes()))]
     world: World,
+    /// The [`sim::world::StorageKey`] `storage_revision` last saw, and how
+    /// many times it has seen it move — presentation-side change detection
+    /// for a snapshot that is polled, not dirtied.
+    storage_seen: Option<sim::world::StorageKey>,
+    storage_revision: i64,
 }
 
 #[godot_api]
@@ -272,6 +277,32 @@ impl SimBridge {
         let cmd = sim::command_from_json(&command_json.to_string());
         let preview = self.world.spend_preview(cmd.as_ref());
         let json = serde_json::to_string(&preview).expect("SpendPreview must serialize");
+        GString::from(json.as_str())
+    }
+
+    /// Would `command_json` succeed if issued now, and what would its tile
+    /// become? Takes exactly what `issue_command_json` takes and changes
+    /// nothing — `sim::World::preview_command`, which asks the same rule
+    /// functions the command acts on, so a ghost cannot go green on a
+    /// placement the sim then refuses. JSON-serialized `sim::PreviewResult`:
+    ///
+    /// ```json
+    /// {"valid": true, "reason": "", "result_kind": "crossing"}
+    /// {"valid": false, "reason": "A pipe can only cross a belt at right angles.",
+    ///  "result_kind": ""}
+    /// ```
+    ///
+    /// `reason` is a sentence to show, empty when valid; `result_kind` is
+    /// the kind the tile would end up as, empty when nothing is placed.
+    /// `place` and `purchase` are previewed; any other command, and
+    /// malformed JSON, comes back `valid: false` with a reason saying so.
+    #[func]
+    fn preview_command_json(&self, command_json: GString) -> GString {
+        let result = match sim::command_from_json(&command_json.to_string()) {
+            Some(cmd) => self.world.preview_command(&cmd),
+            None => sim::PreviewResult::malformed(),
+        };
+        let json = serde_json::to_string(&result).expect("PreviewResult must serialize");
         GString::from(json.as_str())
     }
 
@@ -908,6 +939,22 @@ impl SimBridge {
         let snapshot = self.world.storage_snapshot();
         let json = serde_json::to_string(&snapshot).expect("StorageSnapshot must serialize");
         GString::from(json.as_str())
+    }
+
+    /// A number that moves whenever `storage_snapshot_json` would answer
+    /// differently from the last time this was asked, and only then
+    /// (`World::storage_key`). Godot's warehouse poll reads this every frame
+    /// and the snapshot only when it has moved: a big warehouse's snapshot is
+    /// hundreds of kilobytes, and its stock changes on a hopper refill, not
+    /// on every tick.
+    #[func]
+    fn storage_revision(&mut self) -> i64 {
+        let key = self.world.storage_key();
+        if self.storage_seen.as_ref() != Some(&key) {
+            self.storage_seen = Some(key);
+            self.storage_revision += 1;
+        }
+        self.storage_revision
     }
 
     /// The content ids that carry a name of their own, as one flat JSON

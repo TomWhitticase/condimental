@@ -915,3 +915,134 @@ fn a_save_whose_reservations_strand_stock_is_refused() {
         "{error}"
     );
 }
+
+/// A mixed floor — open racks and racks reserved for two raws, stock spilling
+/// out of its own racks into the shared run, one shared bay left — built with every gate open so
+/// only the warehouse can refuse a filter.
+fn mixed_floor() -> World {
+    let mut world = world();
+    sim_core::sim::reference::open_every_gate(&mut world);
+    world.issue_command(PlayerCommand::DebugGrantMoney {
+        amount: Money::from_num(1_000_000),
+    });
+    let (base_cap, slot_stack, bays) = knobs(&world);
+    for x in 0..7 {
+        build_rack(&mut world, (x, -8));
+    }
+    set_filter(&mut world, (0, -8), Some("tomato"));
+    set_filter(&mut world, (1, -8), Some("tomato"));
+    set_filter(&mut world, (2, -8), Some("sugar"));
+    // Reserved for a raw nobody holds: the one rack that may be picked up.
+    build_rack(&mut world, (11, -8));
+    set_filter(&mut world, (11, -8), Some("turmeric"));
+    order(&mut world, "tomato", base_cap + slot_stack * (bays * 2 + 3));
+    order(&mut world, "sugar", base_cap + slot_stack * (bays + 2));
+    // Four open racks are the shared run; tomato's spill and sugar's take
+    // five of its bays, and vinegar all but one of the rest — so an open
+    // rack cannot be picked up or given away, and turmeric's can.
+    order(
+        &mut world,
+        "vinegar",
+        base_cap + slot_stack * (bays * 4 - 6),
+    );
+    world
+}
+
+/// The warehouse snapshot works its refusals out once per distinct rack
+/// shape and filter and shares the answer, so every rack's `blocked_filters`
+/// and `removal_refused` are checked here against what the commands really
+/// do to that rack — on a copy of the world each time, so no answer leans on
+/// an earlier one. Racks sharing a filter are where a shared answer could be
+/// wrong for one of them.
+#[test]
+fn every_racks_refusals_match_what_its_commands_do() {
+    let world = mixed_floor();
+    let text = world.to_save_ron();
+    let fresh = || World::from_save_ron(&text, recipes()).expect("the floor must reload");
+    let raws: Vec<String> = world
+        .raw_items()
+        .iter()
+        .cloned()
+        .chain(world.raw_fluids().iter().cloned())
+        .collect();
+    let snapshot = world.storage_snapshot();
+    assert_eq!(snapshot.racks.len(), 8);
+    assert!(
+        snapshot.racks.iter().any(|rack| rack.removal_refused)
+            && snapshot.racks.iter().any(|rack| !rack.removal_refused)
+            && snapshot
+                .racks
+                .iter()
+                .any(|rack| !rack.blocked_filters.is_empty()),
+        "the floor must exercise both refusals: {snapshot:?}"
+    );
+
+    for rack in &snapshot.racks {
+        let mut copy = fresh();
+        let before = copy.placement_count();
+        copy.issue_command(PlayerCommand::Remove { tile: rack.tile });
+        assert_eq!(
+            rack.removal_refused,
+            copy.placement_count() == before,
+            "removal_refused for the rack at {:?}",
+            rack.tile
+        );
+
+        for raw in raws.iter().filter(|raw| rack.filter.as_ref() != Some(*raw)) {
+            let mut copy = fresh();
+            set_filter(&mut copy, rack.tile, Some(raw));
+            let refused = rack_at(&copy, rack.tile).filter.as_ref() != Some(raw);
+            assert_eq!(
+                rack.blocked_filters.contains(raw),
+                refused,
+                "blocked_filters for '{raw}' on the rack at {:?}",
+                rack.tile
+            );
+        }
+    }
+}
+
+/// `storage_key` is what Godot's warehouse poll skips on, so it must move on
+/// everything that changes the snapshot — stock, a rack placed or removed, a
+/// filter, a rotation — and an unchanged key must mean an unchanged snapshot.
+#[test]
+fn the_storage_key_moves_exactly_when_the_snapshot_does() {
+    let mut world = mixed_floor();
+    let (_, slot_stack, _) = knobs(&world);
+    let json = |world: &World| serde_json::to_string(&world.storage_snapshot()).unwrap();
+
+    let step = |world: &mut World, what: &str, change: &dyn Fn(&mut World)| {
+        let (key, snapshot) = (world.storage_key(), json(world));
+        change(world);
+        assert_eq!(
+            world.storage_key() == key,
+            json(world) == snapshot,
+            "after {what}, the key and the snapshot must agree on whether anything changed"
+        );
+        assert_ne!(json(world), snapshot, "{what} must change the snapshot");
+    };
+    step(&mut world, "a purchase", &|w| {
+        order(w, "vinegar", slot_stack)
+    });
+    step(&mut world, "a filter", &|w| {
+        set_filter(w, (6, -8), Some("vinegar"))
+    });
+    step(&mut world, "a rotation", &|w| {
+        w.issue_command(PlayerCommand::Rotate { tile: (6, -8) })
+    });
+    step(&mut world, "a placement", &|w| build_rack(w, (8, -8)));
+    step(&mut world, "a removal", &|w| {
+        w.issue_command(PlayerCommand::Remove { tile: (8, -8) })
+    });
+
+    let key = world.storage_key();
+    world.issue_command(PlayerCommand::Purchase {
+        kind: "belt".to_string(),
+        quantity: 1,
+    });
+    assert_eq!(
+        world.storage_key(),
+        key,
+        "a purchase that is not stock leaves the warehouse alone"
+    );
+}

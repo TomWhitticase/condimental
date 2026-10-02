@@ -368,7 +368,7 @@ pub fn raw_ingredient_ids(recipes: &RecipeRegistry) -> Vec<String> {
 /// A `BTreeMap` for [`super::shop::OwnedEquipment`]'s reason — deterministic
 /// iteration for a snapshot (ARCHITECTURE.md §3.9). An id absent from the
 /// map owns zero; a fresh world owns nothing at all.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct OwnedIngredients {
     counts: BTreeMap<String, u32>,
 }

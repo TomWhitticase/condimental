@@ -139,6 +139,18 @@ UI. No duplicated definitions.
 - Tile grid in **32×32 chunks** (Factorio's size).
 - Only chunks near a player or with something mid-process are "active"
   (future, §3.7).
+- **One occupant per tile, always.** `topology.grid` maps a tile to one
+  entity, so `Remove`, `Rotate`, hover and the ghost never ask "which
+  layer?". A belt/pipe crossing is not a second layer: it is one entity of
+  kind `crossing` carrying both a `BeltSegment` and a `PipeTile`, assembled in
+  place when a pipe is placed across a belt or a belt across a pipe
+  (`World::assemble_crossing`). The placement's `Direction` is the belt's;
+  the pipe axis is that turned clockwise (`crossing_pipe_direction`), so
+  `rotate_cw` stays the only rotation. On the wire `world_layout_json`
+  reports kind `crossing`, and `ChunkSnapshot` lists the tile once in
+  `belts` and once in `pipes` — there is no "is a crossing" flag, so a
+  reader that needs to know asks the layout. It saves as
+  `SavedBody::Crossing` (a new variant, still save version 7 — `save.rs`).
 
 ### 3.2 Core components (ECS)
 
@@ -284,12 +296,43 @@ impl SimBridge {
     // the next payday, `warn` included. It mutates nothing and does not move
     // `revision()`, so a panel may ask on any frame.
     pub fn spend_preview(&self, cmd: Option<&PlayerCommand>) -> SpendPreview;
-    // Planned, not built:
+    // Built 2026-09-25 (belt/pipe crossings, T3a); wire: preview_command_json.
     pub fn preview_command(&self, cmd: &PlayerCommand) -> PreviewResult; // validation pass, never mutate-then-rollback
+    // Planned, not built:
     pub fn undo(&mut self) -> bool;
     pub fn redo(&mut self) -> bool;
 }
 ```
+
+`preview_command` answers the build ghost's question — would this command
+succeed now, and what would its tile become — without the ghost reimplementing
+a sim rule in GDScript. On the wire it is `preview_command_json`, taking the
+same JSON `issue_command_json` takes and returning a `PreviewResult`:
+
+```json
+{"valid": true, "reason": "", "result_kind": "crossing"}
+```
+
+- `valid` — whether `issue_command` would change the world.
+- `reason` — empty exactly when `valid`; otherwise a human-readable sentence
+  for presentation to show ("A pipe can only cross a belt at right angles.").
+- `result_kind` — the placement kind the targeted tile would end up as
+  (`"pipe"`, `"crossing"`, a machine kind); empty on a refusal or for a
+  command that places nothing.
+
+It is a validation pass over `&self`, never apply-and-roll-back: it calls the
+same `plan_*` functions (`World::plan_place`, `World::plan_purchase`) the
+matching `issue_command` arms act on, so there is one implementation of each
+rule — no second copy for the two to disagree about. The guarantee is
+structural, not total: `World::apply_place` takes the plan rather than the
+request and must return the placed entity, so it has no way to refuse, but a
+guard written in an `issue_command` arm before the plan is applied would
+still compile and would drift. Put a new refusal in the `plan_*` function.
+`sim_core/tests/preview.rs` drives a grid of cases through both and asserts
+they agree — agreement is pinned over that grid, not over every input.
+`place` and `purchase` are covered.
+**Every other command is refused with a reason saying it is not previewed** —
+never guessed valid — until it gets its own shared `plan_*` function.
 
 Also on the wire today (`economy_snapshot_json` carries the whole contract
 `board` beside the active `contracts` since the contract-board epic, and
@@ -356,9 +399,12 @@ could have moved.
 Godot draws the ghost from. `spend_preview_json` asks *what would this spend
 do to the next payday*, for a command that is already perfectly valid, and its
 `warn` is the decision the payday confirmation obeys (`docs/UI_UX.md` §2b
-point 40). It is deliberately its own call rather than a field on a
-`PreviewResult` that does not exist on `main` yet: when `preview_command`
-lands, `SpendPreview` becomes its `payday` field and the two calls become one.
+point 40). It was built as its own call because `PreviewResult` did not exist on `main`
+yet, with the plan that once `preview_command` landed `SpendPreview` would
+become its `payday` field and the two calls one. `preview_command` reached
+`main` on 2026-10-01 (it had sat unmerged on the crossing epic's integration
+branch since 2026-09-25); the fold is not done yet, so today they are still
+two calls.
 Both are read-only by construction — never mutate-then-rollback.
 
 **Save format (amended 2026-09-09):** a save is a **full state snapshot**
@@ -547,8 +593,9 @@ Still open:
   (the staff pools MVP): it is not an ECS shape at all — `sim::staff::
   StaffPools`, a plain field on `World` beside `Economy`, four aggregate
   counters reset and claimed in stable order each tick (GAMEPLAY.md §9).
-- Spoilage and corrosion components (GAMEPLAY.md §9) — needed before tiers
-  4/5.
+- A corrosion component (GAMEPLAY.md §9) — needed before tier 5. There is
+  no spoilage component to build: the game has no spoilage (GAMEPLAY.md §11,
+  decided 2026-10-02).
 - iOS export viability — re-run the spike with full Xcode (§9a).
 - Android runtime launch — unverified (§9a). Close before milestone 10.
 - Cross-platform determinism hash test in CI (§6).
