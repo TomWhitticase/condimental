@@ -25,6 +25,45 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-02: **The title screen's wordmark is a lit voxel sign, and the
+  poster runs.** (Owner: "make the intro screen more impressive and visually
+  stunning, currently the screen is like minecraft with a plain screen and
+  big title, i like it but think we can make ours amazing".)
+
+  **What it replaces.** A 114pt outlined Label over a still poster of the
+  chain: product placed by hand, machines drawn as bodies without their
+  motion overlays (so nothing on the poster could move), and a dark plate
+  holding the four buttons across the middle of the line.
+
+  **The rule.** The wordmark is `title_sign`, generated in `assets.rs` like
+  every other asset. It is a dark board in a steel rim with a hazard foot,
+  mustard-lit letters with a ketchup drop shadow, and bulbs in three overlay
+  frames that chase. It is a model rather than text because it is the first
+  asset the player sees, and making it outside the pipeline would make it
+  the one thing in the game that is not voxel art. It hangs from the title
+  camera, so the factory parallaxes behind it while it stays framed, and
+  `menu.gd` frames it every frame into an empty `Title` Control in its
+  column. That keeps the 2D column and the 3D sign agreeing at any window
+  size, and lets the settings page stand it down by hiding the slot, as it
+  did the Label.
+
+  Emissive letters and bulbs break UI_UX §2b point 8 ("emissive is for
+  status lamps only"), and that is recorded as an exception (§2b point 42)
+  rather than bent quietly. An illuminated sign is a lamp. It is never a
+  machine and never on the floor, so nothing in play can be read as a status
+  signal because of it.
+
+  The backdrop runs at the game's own paces on wall time, and the screen
+  opens on a skippable intro: the lights strike, the sign drops, the neon
+  catches, then the menu fades up. The front-page buttons are their own
+  plates, so the line shows between them. The load and settings views keep
+  the full plate.
+
+  **What it does not change.** No scrim (the owner's earlier call stands):
+  the hall is still not washed over. The column stays centred, the splash
+  line stays, and the poster still loads none of `main.tscn` and runs no
+  simulation.
+
 - 2026-10-02: **There is no spoilage.** (Owner: "spoilage is something i
   actually dont really think we should implement in the game anymore, so lets
   remove spoilage from any planning docs".)

@@ -344,7 +344,9 @@
 # Pass --title to photograph the TITLE SCREEN — the menu as the player first
 # sees it: the wordmark, the splash line and the three buttons over the 3D
 # factory backdrop that stands behind them (`title_scene.gd`). --menu is the
-# same screen with its load list open.
+# same screen with its load list open. Both skip the screen's intro; add
+# --intro-at SECONDS to hold it at a moment of the intro instead (the lights
+# striking at ~0.3, the sign dropping at ~0.9, the menu fading up at ~1.7).
 #
 # Pass --menu to photograph the MAIN MENU instead of the game — it renders
 # menu.tscn, having first written a real save so its load list has a row in

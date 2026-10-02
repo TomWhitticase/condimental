@@ -82,7 +82,8 @@ Reasoning lives in `docs/UI_UX.md` §2a/§2b and `docs/DECISIONS.md` Part B —
 ## Material direction
 
 - **Food contact stainless, structure painted or poured, emissive for status
-  lamps only** (§2b point 8; `oak` is the one exception, §2b point 14).
+  lamps only** (§2b point 8; `oak` is the one exception, §2b point 14, and
+  the title screen's lit sign the other, §2b point 42).
 - **Metal keeps the brightest pixel in the frame** (UI_UX §4); the floor,
   judged as thousands of copies, is broad low-contrast blotches — never
   per-voxel speckle — and must never hold it (§2b point 36).

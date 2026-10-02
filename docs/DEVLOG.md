@@ -253,6 +253,31 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-02 — The title screen hangs a lit sign over a running factory
+
+The owner asked for a more impressive title screen than "a plain screen and
+a big title". The wordmark is now `title_sign`, a voxel marquee generated in
+`assets.rs`: mustard-lit letters with a ketchup drop shadow and bulbs chasing
+round a steel frame (three `title_sign_bulbs_f*` overlays, three new palette
+entries appended). It hangs from the title camera and is framed into the
+menu column's `Title` slot every frame. The poster now runs. Belts march
+through their frames, machines show the motion overlays they had never
+carried on this screen, product loops between machine bodies and steam rises
+off the vat. A light depth of field softens the far hall. The screen opens on
+a ~2.6 s intro (lights strike, sign drops, neon catches, buttons fade up) that
+any click or key skips. The front page's buttons are their own plates, hazard
+yellow under the pointer.
+
+`screenshot-scene.sh --title` shoots the settled screen, and a new
+`--intro-at SECONDS` holds a moment of the intro. `test_main_menu.gd` checks
+that the sign hangs from the camera with meshes, that `frame_sign` follows its
+rect, that product moves and that the intro can be skipped. Two voxgen tests
+pin the bulb chase and the sign's facing. Appending to the palette rewrites
+every `.vox` (each file carries the whole palette), which is why the diff
+touches every model. The voxel contents are unchanged and the existing icons
+came back byte-identical. UI_UX §5d and §2b point 42 (the emissive exception)
+record it, and so does DECISIONS.
+
 ### 2026-10-02 — Spoilage is out of the game
 
 The owner dropped spoilage. Nothing perishes, so the design no longer has a

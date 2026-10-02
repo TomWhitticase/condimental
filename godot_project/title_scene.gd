@@ -22,6 +22,20 @@
 ## The camera drifts, slowly, the way Minecraft's panorama does — a title
 ## screen that is perfectly still reads as a paused game rather than as a
 ## place. See `_process`.
+##
+## **And the factory RUNS.** The belts march, every machine works through
+## its motion frames, product slides along the line and steam comes off the
+## vat — all of it the game's own models driven at the game's own pace
+## (`BELT_TICKS_PER_TILE`, `MACHINE_TICKS_PER_CYCLE`), but on wall time: a
+## poster has no simulation to take a tick from. Over it hangs the game's
+## name as a lit marquee sign (`title_sign` in assets.rs), whose bulbs chase
+## round its frame.
+##
+## **The screen opens on an intro** (`INTRO_LENGTH`): the hall's lights
+## strike, the sign drops in on its rods and its letters flicker on, then
+## the menu fades up — `menu.gd` reads `intro_time` for that half. Any click
+## or key skips it (`finish_intro`), and the screenshot harness skips it on
+## its first frame so a review shot is the settled screen.
 extends Node3D
 
 const MainScript = preload("res://main.gd")
@@ -80,19 +94,6 @@ const CHAIN := [
 const VAT_TILE := Vector2i(6, 0)
 const VAT_SIZE := Vector2i(2, 2)
 
-## Product standing on the belts, so the line reads as a line that runs
-## rather than as a showroom: tomatoes going into the crusher, bottles coming
-## out of the bottler, boxes waiting for the dock. Put here by hand — see the
-## header; nothing about this screen is simulated.
-const PRODUCT := [
-	["item_tomato", -2, 0],
-	["item_tomato", -1, 0],
-	["item_tomato", 2, 0],
-	["item_bottle", 11, 0],
-	["item_bottle", 12, 0],
-	["item_box", 14, 0],
-]
-
 ## A second line standing behind the first, out of focus in the depth of the
 ## hall: no belts, just plant, so the eye reads "this factory is bigger than
 ## what is in front of me" without a second chain competing for attention.
@@ -111,9 +112,83 @@ const BACKGROUND_PLANT := [
 	["fluid_tank", 22, 6, 0],
 ]
 
+## Product riding the line, as `[asset, from tile x, to tile x]`: each run is
+## the belt between two machines, and an item is spawned out of one body and
+## swallowed by the next, so the line reads as running rather than as a
+## showroom. One item per tile of run, spaced a tile apart.
+const FLOWS := [
+	["item_tomato", -2.6, -0.4],
+	["item_paste_pail", 0.6, 2.4],
+	["item_bottle", 10.6, 12.4],
+	["item_box", 13.6, 14.4],
+]
+
+## The game's own paces, read rather than restated: a belt's pattern crosses
+## a tile in `BELT_TICKS_PER_TILE` ticks and so does an item on it, and every
+## machine runs its motion cycle in `MACHINE_TICKS_PER_CYCLE`.
+var BELT_TILES_PER_SECOND: float = MainScript.TICK_HZ / float(MainScript.BELT_TICKS_PER_TILE)
+var MOTION_FRAMES_PER_SECOND: float = (
+	MainScript.TICK_HZ * float(MainScript.MACHINE_FRAMES) / float(MainScript.MACHINE_TICKS_PER_CYCLE)
+)
+
+## The marquee sign. Mirrors `assets.rs`'s `TITLE_SIGN_BULB_FRAMES` and
+## `TITLE_SIGN_ROD` — change one, change both.
+const SIGN_ASSET := "title_sign"
+const SIGN_BULB_FRAMES := 3
+const SIGN_ROD_VOXELS := 60
+## How far in front of the camera the sign hangs. Well short of the chain
+## (about 27 units away), so no machine can ever poke through it.
+const SIGN_DISTANCE := 13.0
+## Bulb steps a second: a brisk theatre chase, not a strobe.
+const SIGN_CHASE_PER_SECOND := 7.0
+## The sign's idle swing on its rods — a slow sway, barely a degree.
+const SIGN_SWAY_DEGREES := 0.8
+const SIGN_SWAY_PERIOD := 5.5
+
+## Steam off the cooking vat: puffs in flight at once, the seconds one takes
+## to rise, and how far it climbs.
+const STEAM_PUFFS := 7
+const STEAM_LIFE := 3.2
+const STEAM_RISE := 3.6
+
+## The intro, in seconds from the screen coming up. Exposure is the hall's
+## lights: dark, a stutter as the tubes strike, then full. The sign drops in
+## while they settle, its letters catch, and the menu follows (`menu.gd`).
+const INTRO_LENGTH := 2.6
+const INTRO_LIGHTS_FROM := 0.05
+const INTRO_LIGHTS_TO := 0.9
+const INTRO_SIGN_DROP_FROM := 0.55
+const INTRO_SIGN_DROP_TO := 1.45
+const INTRO_NEON_AT := 1.25
+const INTRO_BULBS_AT := 1.6
+
 var _assets := VoxelAssets.new()
 var _camera: Camera3D
 var _world_env: WorldEnvironment
+## Seconds into the intro. Public so `menu.gd` can fade its column up on the
+## same clock, and so a skip is one assignment (`finish_intro`).
+var intro_time := 0.0
+## The exposure the hall is lit at once the intro is over — whatever
+## `factory_environment.gd` built, so the intro never retunes the hall.
+var _full_exposure := 1.0
+## Animated parts: `{"frames": Array[Node3D], "shown": int}` per belt tile
+## and per machine mechanism; item nodes per flow; the steam puffs.
+var _belt_sets: Array = []
+var _motion_sets: Array = []
+var _flow_items: Array = [] # Array[{"node", "from", "to", "slot", "count"}]
+var _steam: Array = []
+var _steam_origin := Vector3.ZERO
+## The sign: a rig in camera space (framed by `frame_sign`), the pivot it
+## swings from, its bulb frames and its own copy of the lit material.
+var _sign_rig: Node3D
+var _sign_pivot: Node3D
+var _sign_bulbs: Array = []
+var _sign_neon: Material
+var _sign_neon_energy := 0.0
+## The sign's board in world units at scale 1, and the height of the rods'
+## top above its foot — the point it hangs (and swings) from.
+var _sign_board_size := Vector2.ZERO
+var _sign_rod_top := 0.0
 ## Seconds since the screen came up, which is all the camera's drift is a
 ## function of. Wall time, not a tick count: there is no simulation on this
 ## screen to borrow a clock from, and nothing here is reproduced from a save.
@@ -125,6 +200,12 @@ var _elapsed := 0.0
 const DRIFT_PERIOD := 74.0
 const DRIFT_TRAVEL := 5.5 # world units, either side of centre
 const DRIFT_YAW := 3.0 # degrees, either side of centre
+
+## Depth of field: sharp to just past the line (about 27 units out), then
+## soft. Light — the far plant should read as plant, just not compete.
+const DOF_FAR_FROM := 34.0
+const DOF_FAR_TRANSITION := 30.0
+const DOF_AMOUNT := 0.06
 
 
 func _ready() -> void:
@@ -141,19 +222,160 @@ func _ready() -> void:
 	var settings := _settings_node()
 	if settings != null and not settings.changed.is_connected(_apply_hall_scale):
 		settings.changed.connect(_apply_hall_scale)
+	_full_exposure = _world_env.environment.tonemap_exposure
 	_build_floor()
 	_build_models()
 	_build_camera()
+	_build_sign()
+	_animate(0.0)
 
 
-## The camera's slow drift. `_process` on the backdrop only — the menu's own
-## Control tree is static, and a title screen that redraws for a moving
-## camera is the one place in this project where that is the point.
+## The camera's slow drift, and everything else on the poster that moves.
+## `_process` on the backdrop only — the menu's own Control tree is static,
+## and a title screen that redraws for a moving camera is the one place in
+## this project where that is the point.
 func _process(delta: float) -> void:
+	_animate(delta)
+
+
+func _animate(delta: float) -> void:
 	_elapsed += delta
+	intro_time = minf(intro_time + delta, INTRO_LENGTH)
 	var phase := sin(TAU * _elapsed / DRIFT_PERIOD)
 	_camera.position.x = _camera_home().x + phase * DRIFT_TRAVEL
 	_camera.rotation_degrees.y = _camera_yaw() + phase * DRIFT_YAW
+	_animate_line()
+	_animate_steam()
+	_animate_sign()
+	_animate_lights()
+
+
+## Skips the intro to its settled end — a click or key on the menu, and the
+## screenshot harness's first frame.
+func finish_intro() -> void:
+	intro_time = INTRO_LENGTH
+	_animate(0.0)
+
+
+## 0 → 1 across `[from, to]` of the intro, eased out.
+func _intro_ease(from: float, to: float) -> float:
+	var t := clampf((intro_time - from) / (to - from), 0.0, 1.0)
+	return 1.0 - pow(1.0 - t, 3.0)
+
+
+func _animate_line() -> void:
+	var belt_frame := int(floor(_elapsed * BELT_TILES_PER_SECOND * MainScript.BELT_FRAMES))
+	for entry in _belt_sets:
+		_show_frame(entry, posmod(belt_frame, entry["frames"].size()))
+	var motion_frame := int(floor(_elapsed * MOTION_FRAMES_PER_SECOND))
+	for entry in _motion_sets:
+		_show_frame(entry, posmod(motion_frame, entry["frames"].size()))
+	var travelled := _elapsed * BELT_TILES_PER_SECOND
+	for item in _flow_items:
+		var span: float = item["to"] - item["from"]
+		var along := fposmod(travelled + float(item["slot"]), float(item["count"]))
+		var node: Node3D = item["node"]
+		# An item off the end of its run is inside a machine: hidden until
+		# its slot comes round to the start again.
+		node.visible = along <= span
+		node.position.x = (item["from"] + minf(along, span)) * TILE
+
+
+func _show_frame(entry: Dictionary, frame: int) -> void:
+	if entry["shown"] == frame:
+		return
+	var frames: Array = entry["frames"]
+	frames[entry["shown"]].visible = false
+	frames[frame].visible = true
+	entry["shown"] = frame
+
+
+## Each puff's life is a phase in [0, 1), staggered by its index — never
+## `randf()` (godot_project/CLAUDE.md), so a review shot repeats. It swells
+## as it leaves the vat and shrinks to nothing at the top.
+func _animate_steam() -> void:
+	for i in range(_steam.size()):
+		var puff: Node3D = _steam[i]
+		var life := fposmod(_elapsed / STEAM_LIFE + float(i) / float(_steam.size()), 1.0)
+		var drift := Vector3(sin(float(i) * 2.39) * 0.9, 0.0, cos(float(i) * 1.71) * 0.7)
+		puff.position = _steam_origin + drift * (0.4 + life) + Vector3(0.0, life * STEAM_RISE, 0.0)
+		var size := sin(life * PI) * (0.55 + 0.35 * life)
+		puff.scale = Vector3.ONE * maxf(size, 0.001)
+		puff.rotation.y = life * 2.0 + float(i)
+
+
+func _animate_sign() -> void:
+	if _sign_pivot == null:
+		return
+	# The drop: from well above the top of the frame, landing with one
+	# damped bounce on its rods.
+	var drop := _intro_ease(INTRO_SIGN_DROP_FROM, INTRO_SIGN_DROP_TO)
+	var bounce := sin(drop * PI * 2.5) * (1.0 - drop) * 0.35
+	var lift := (1.0 - drop + bounce) * _sign_rod_top * 1.6
+	_sign_pivot.position.y = lift
+	_sign_pivot.rotation_degrees.z = (
+		sin(TAU * _elapsed / SIGN_SWAY_PERIOD) * SIGN_SWAY_DEGREES
+		+ (1.0 - drop) * 4.0
+	)
+	# The letters catch the way a struck tube does: a couple of stutters,
+	# then on.
+	if _sign_neon != null:
+		var lit := 1.0
+		var since := intro_time - INTRO_NEON_AT
+		if since < 0.0:
+			lit = 0.0
+		elif since < 0.3:
+			lit = 0.25 if fmod(since, 0.1) < 0.05 else 0.9
+		_sign_neon.set_shader_parameter("emission_energy", _sign_neon_energy * lit)
+	var chase := 0
+	if intro_time >= INTRO_BULBS_AT:
+		chase = int(floor(_elapsed * SIGN_CHASE_PER_SECOND))
+	for k in range(_sign_bulbs.size()):
+		_sign_bulbs[k].visible = k == posmod(chase, _sign_bulbs.size())
+
+
+## The hall's lights striking: exposure from dark to full, with one stutter
+## as the tubes catch. On the environment `factory_environment.gd` built, so
+## once the intro is done the hall is exactly the game's.
+func _animate_lights() -> void:
+	if _world_env == null or _world_env.environment == null:
+		return
+	var level := _intro_ease(INTRO_LIGHTS_FROM, INTRO_LIGHTS_TO)
+	if intro_time > 0.25 and intro_time < 0.38:
+		level *= 0.35
+	_world_env.environment.tonemap_exposure = _full_exposure * maxf(level, 0.02)
+
+
+## Hangs the sign so its BOARD fills `rect` (screen pixels) as nearly as its
+## proportions allow, centred in it — `menu.gd` hands over the space its
+## column keeps free for the wordmark, so the 2D and 3D halves of the title
+## cannot drift apart at any window size. The rig is a child of the camera,
+## so the sign stays framed while the factory drifts past behind it.
+func frame_sign(rect: Rect2, viewport_size: Vector2) -> void:
+	if _sign_rig == null or viewport_size.y <= 0.0 or _sign_board_size.x <= 0.0:
+		return
+	var world_per_px := 2.0 * SIGN_DISTANCE * tan(deg_to_rad(_camera.fov) * 0.5) / viewport_size.y
+	var fit := minf(
+		rect.size.x * world_per_px / _sign_board_size.x,
+		rect.size.y * world_per_px / _sign_board_size.y
+	)
+	var centre := rect.get_center() - viewport_size * 0.5
+	_sign_rig.scale = Vector3.ONE * fit
+	# The rig's origin is the rods' top (the sign hangs from it); the board's
+	# foot is `_sign_rod_top` below that, and goes half a board under the
+	# rect's centre.
+	_sign_rig.position = Vector3(
+		centre.x * world_per_px,
+		-centre.y * world_per_px + (_sign_rod_top - _sign_board_size.y * 0.5) * fit,
+		-SIGN_DISTANCE
+	)
+
+
+## Hides the sign while the menu's settings rows have its space, and brings
+## it back with the buttons — the 3D half of `menu.gd`'s wordmark.
+func set_sign_visible(shown: bool) -> void:
+	if _sign_rig != null:
+		_sign_rig.visible = shown
 
 
 ## Where the camera sits at the middle of its drift: south of the line and
@@ -197,6 +419,15 @@ func _build_camera() -> void:
 	_camera.far = 400.0
 	_camera.position = _camera_home()
 	_camera.rotation_degrees = Vector3(-3.0, _camera_yaw(), 0.0)
+	# A long lens's depth: the line and the sign sharp, the far plant and the
+	# hall's end wall going soft behind them. It is what makes the frame read
+	# as a photograph of a place rather than as a render of a level.
+	var lens := CameraAttributesPractical.new()
+	lens.dof_blur_far_enabled = true
+	lens.dof_blur_far_distance = DOF_FAR_FROM
+	lens.dof_blur_far_transition = DOF_FAR_TRANSITION
+	lens.dof_blur_amount = DOF_AMOUNT
+	_camera.attributes = lens
 	add_child(_camera)
 
 
@@ -247,11 +478,14 @@ func _build_models() -> void:
 	add_child(plant)
 
 	for entry in CHAIN:
+		if String(entry[0]).begins_with("belt_"):
+			_build_belt(plant, entry)
+			continue
 		plant.add_child(_placed(entry[0], entry[1], entry[2], entry[3], FLOOR_Y))
+		_build_motion(plant, entry)
 	for entry in BACKGROUND_PLANT:
 		plant.add_child(_placed(entry[0], entry[1], entry[2], entry[3], FLOOR_Y))
-	for entry in PRODUCT:
-		plant.add_child(_placed(entry[0], entry[1], LINE_Z, 0, BELT_SURFACE_Y))
+		_build_motion(plant, entry)
 
 	# The hopper and the tanks are drawn with their contents showing, the
 	# same two-part way the game draws them: a body plus a `_fill` slab. A
@@ -259,6 +493,118 @@ func _build_models() -> void:
 	var hopper_fill := _placed("hopper_fill", -3, LINE_Z, 0, FLOOR_Y)
 	hopper_fill.name = "hopper_fill"
 	plant.add_child(hopper_fill)
+
+	_build_flows(plant)
+	_build_steam(plant)
+
+
+## Every machine's moving parts, drawn the way the game draws them: the
+## kind's motion overlay in `MACHINE_FRAMES` arrangements, siblings of the
+## body, one shown at a time (`main.gd`'s `MACHINE_MOTION_MODELS`). Kinds
+## with no entry there (the dock) have nothing that moves.
+func _build_motion(plant: Node3D, entry: Array) -> void:
+	var asset := String(entry[0])
+	var kind := asset.trim_prefix("machine_")
+	if not asset.begins_with("machine_") or not MainScript.MACHINE_MOTION_MODELS.has(kind):
+		return
+	var family := String(MainScript.MACHINE_MOTION_MODELS[kind])
+	var frames: Array = []
+	for k in range(MainScript.MACHINE_FRAMES):
+		var node := _placed("%s_f%d" % [family, k], entry[1], entry[2], entry[3], FLOOR_Y)
+		# Placed as the body is — the vat's centring keys on the body's name.
+		if kind == "cooking_vat":
+			node.position = _vat_centre(FLOOR_Y)
+		node.visible = k == 0
+		plant.add_child(node)
+		frames.append(node)
+	_motion_sets.append({"frames": frames, "shown": 0})
+
+
+## A belt tile as its four frames, one shown — `_animate_line` marches them.
+func _build_belt(plant: Node3D, entry: Array) -> void:
+	var frames: Array = []
+	for k in range(MainScript.BELT_FRAMES):
+		var node := _placed("belt_f%d" % k, entry[1], entry[2], entry[3], FLOOR_Y)
+		node.visible = k == 0
+		plant.add_child(node)
+		frames.append(node)
+	_belt_sets.append({"frames": frames, "shown": 0})
+
+
+func _build_flows(plant: Node3D) -> void:
+	for flow in FLOWS:
+		var span: float = flow[2] - flow[1]
+		# One slot per tile of run plus one hidden inside the next machine,
+		# so the spacing stays a tile and the stream never bunches.
+		var count := int(ceil(span)) + 1
+		for slot in range(count):
+			var node := _assets.asset_node(String(flow[0]))
+			node.position = Vector3(float(flow[1]) * TILE, BELT_SURFACE_Y, float(LINE_Z) * TILE)
+			plant.add_child(node)
+			_flow_items.append({
+				"node": node, "from": float(flow[1]), "to": float(flow[2]),
+				"slot": slot, "count": count,
+			})
+
+
+func _build_steam(plant: Node3D) -> void:
+	var top := TILE
+	var vat_mesh := _assets.mesh_for("machine_cooking_vat")
+	if vat_mesh != null:
+		top = vat_mesh.get_aabb().end.y
+	_steam_origin = _vat_centre(FLOOR_Y + top)
+	for i in range(STEAM_PUFFS):
+		var puff := _assets.asset_node("steam_puff")
+		puff.name = "Steam%d" % i
+		for child in puff.get_children():
+			(child as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		plant.add_child(puff)
+		_steam.append(puff)
+
+
+## The marquee sign over the menu (`title_sign` in assets.rs), its bulb
+## frames, and a pivot at the rods' top so its sway is a hanging sign's.
+func _build_sign() -> void:
+	_sign_rig = Node3D.new()
+	_sign_rig.name = "TitleSign"
+	_camera.add_child(_sign_rig)
+	_sign_pivot = Node3D.new()
+	_sign_pivot.name = "SignPivot"
+	_sign_rig.add_child(_sign_pivot)
+
+	var body := _assets.asset_node(SIGN_ASSET)
+	_sign_pivot.add_child(body)
+	var mesh := _assets.mesh_for(SIGN_ASSET)
+	if mesh != null:
+		var extent := mesh.get_aabb().size
+		_sign_board_size = Vector2(
+			extent.x, extent.y - float(SIGN_ROD_VOXELS) * MainScript.VOXEL_UNIT
+		)
+	else:
+		# Not staged (`cargo xtask` has not run): a sign of nothing still has
+		# to be framed somewhere.
+		_sign_board_size = Vector2(25.0, 4.6)
+	# The letters get their own copy of the lit material, so the intro can
+	# strike them without flickering every lamp that shares the class.
+	var neon_node := body.get_node_or_null("emissive") as MeshInstance3D
+	var shared = _assets.class_materials.get("emissive", null)
+	if neon_node != null and shared is ShaderMaterial:
+		_sign_neon = (shared as ShaderMaterial).duplicate()
+		_sign_neon_energy = float(_sign_neon.get_shader_parameter("emission_energy"))
+		neon_node.set_surface_override_material(0, _sign_neon)
+	for k in range(SIGN_BULB_FRAMES):
+		var bulbs := _assets.asset_node("%s_bulbs_f%d" % [SIGN_ASSET, k])
+		bulbs.visible = k == 0
+		_sign_pivot.add_child(bulbs)
+		_sign_bulbs.append(bulbs)
+	# The pivot hangs from the rods' top; the sign itself sits below it.
+	var rod_top := _sign_board_size.y + float(SIGN_ROD_VOXELS) * MainScript.VOXEL_UNIT
+	for child in _sign_pivot.get_children():
+		child.position.y = -rod_top
+	_sign_pivot.position.y = 0.0
+	_sign_rod_top = rod_top
+	for node in _sign_pivot.find_children("*", "GeometryInstance3D", true, false):
+		(node as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 ## One model at a tile, turned `quarter_turns` steps east-to-south. The vat
@@ -268,15 +614,19 @@ func _placed(asset: String, tx: int, tz: int, quarter_turns: int, height: float)
 	var node := _assets.asset_node(asset)
 	var origin := Vector2i(tx, tz)
 	if origin == VAT_TILE and asset == "machine_cooking_vat":
-		node.position = Vector3(
-			(float(tx) + float(VAT_SIZE.x - 1) * 0.5) * TILE,
-			height,
-			(float(tz) + float(VAT_SIZE.y - 1) * 0.5) * TILE
-		)
+		node.position = _vat_centre(height)
 	else:
 		node.position = _tile_centre(tx, tz, height)
 	node.rotation.y = deg_to_rad(90.0 * float(quarter_turns))
 	return node
+
+
+func _vat_centre(height: float) -> Vector3:
+	return Vector3(
+		(float(VAT_TILE.x) + float(VAT_SIZE.x - 1) * 0.5) * TILE,
+		height,
+		(float(VAT_TILE.y) + float(VAT_SIZE.y - 1) * 0.5) * TILE
+	)
 
 
 func _tile_centre(tx: int, tz: int, height: float) -> Vector3:

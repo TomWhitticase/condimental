@@ -483,6 +483,33 @@ pub const ASSETS: &[Asset] = &[
         name: "crush_bit",
         build: crush_bit,
     },
+    // The title screen's hanging marquee sign (the title-screen pass): the
+    // game's name in voxels, and the bulbs chasing round its frame in
+    // `TITLE_SIGN_BULB_FRAMES` overlays. Never occupies a tile, never in a
+    // menu — `title_scene.gd` hangs it over the hall behind the main menu.
+    Asset {
+        name: "title_sign",
+        build: title_sign,
+    },
+    Asset {
+        name: "title_sign_bulbs_f0",
+        build: title_sign_bulbs_f0,
+    },
+    Asset {
+        name: "title_sign_bulbs_f1",
+        build: title_sign_bulbs_f1,
+    },
+    Asset {
+        name: "title_sign_bulbs_f2",
+        build: title_sign_bulbs_f2,
+    },
+    // A puff of steam off the cooking vat on the title screen. Like the
+    // crush bit it exists only to be thrown — `title_scene.gd` lifts, swells
+    // and shrinks a handful of them over the vat.
+    Asset {
+        name: "steam_puff",
+        build: steam_puff,
+    },
     // The staff-category icons (the staff-pools epic, ticket 2): four more
     // props that never occupy a tile, one per `data/staff.ron` category,
     // drawn only to be rendered by `voxicons` for the staff panel. See the
@@ -6005,6 +6032,284 @@ const DOCK_CANOPY_FACE_Y: i32 = 44;
 // What these CANNOT check is whether the opening reads to a player — that
 // needs `scripts/screenshot-scene.sh` and someone looking, which is how the
 // design in this file was arrived at in the first place.
+// ---------------------------------------------------------------------------
+// The title sign
+// ---------------------------------------------------------------------------
+
+/// The game's name as a bitmap, one string per glyph row, `#` lit. A chunky
+/// two-pixel stroke rather than a 5x7 hairline face: the sign is read from
+/// across a hall at a quarter of the screen's width, and a one-pixel stroke
+/// at that size is a stencil, not a word. Widths vary (M and N are seven —
+/// a six-wide N has no room for its diagonal and reads as an H), so each
+/// glyph carries its own.
+const TITLE_SIGN_WORD: &[&[&str; 8]] = &[
+    &[
+        ".####.", "##..##", "##....", "##....", "##....", "##....", "##..##", ".####.",
+    ], // C
+    &[
+        ".####.", "##..##", "##..##", "##..##", "##..##", "##..##", "##..##", ".####.",
+    ], // O
+    &[
+        "##...##", "###..##", "####.##", "##.####", "##..###", "##...##", "##...##", "##...##",
+    ], // N
+    &[
+        "#####.", "##..##", "##..##", "##..##", "##..##", "##..##", "##..##", "#####.",
+    ], // D
+    &[
+        "######", "..##..", "..##..", "..##..", "..##..", "..##..", "..##..", "######",
+    ], // I
+    &[
+        "##...##", "###.###", "#######", "##.#.##", "##...##", "##...##", "##...##", "##...##",
+    ], // M
+    &[
+        "######", "##....", "##....", "#####.", "##....", "##....", "##....", "######",
+    ], // E
+    &[
+        "##...##", "###..##", "####.##", "##.####", "##..###", "##...##", "##...##", "##...##",
+    ], // N
+    &[
+        "######", "..##..", "..##..", "..##..", "..##..", "..##..", "..##..", "..##..",
+    ], // T
+    &[
+        ".####.", "##..##", "##..##", "##..##", "######", "##..##", "##..##", "##..##",
+    ], // A
+    &[
+        "##....", "##....", "##....", "##....", "##....", "##....", "##....", "######",
+    ], // L
+];
+
+/// Voxels per glyph pixel. Three keeps the whole word inside the `.vox`
+/// format's 256-voxel ceiling with the frame around it.
+const TITLE_SIGN_PX: i32 = 3;
+/// Glyph pixels between letters.
+const TITLE_SIGN_GAP: i32 = 1;
+/// From the board's edge to the letters: the steel rim, the bulb ring and a
+/// dark margin either side of the bulbs, so the chase never touches a letter.
+const TITLE_SIGN_MARGIN: i32 = 9;
+/// The rim's width, and where the bulb ring runs inside it.
+const TITLE_SIGN_RIM: i32 = 3;
+const TITLE_SIGN_BULB_INSET: i32 = 5;
+/// Bulb pitch along the ring, and how many frames the chase takes: bulb `i`
+/// is lit in frame `i % TITLE_SIGN_BULB_FRAMES`, which marches the light
+/// round the frame one bulb per frame.
+const TITLE_SIGN_BULB_PITCH: i32 = 6;
+const TITLE_SIGN_BULB_FRAMES: usize = 3;
+/// Depth: the board, then the letters standing proud of it. Built with the
+/// face toward high Y and turned round at the end ([`title_sign_face_front`]):
+/// the importer puts LOW vox Y toward world +Z, the title camera's side, and
+/// a face built at high Y renders as the back of the sign — mirrored.
+const TITLE_SIGN_BOARD_DEPTH: i32 = 6;
+const TITLE_SIGN_LETTER_DEPTH: i32 = 4;
+/// How far the ketchup-red block behind each letter is pushed down and
+/// right — the drop shadow that makes the word read as solid rather than as
+/// a decal, the way an old enamel sign's lettering does.
+const TITLE_SIGN_SHADOW: i32 = 2;
+/// The two hanging rods' length above the board. The sign is framed so they
+/// run out of the top of the screen: it hangs from the roof, it does not
+/// float.
+const TITLE_SIGN_ROD: i32 = 60;
+
+fn title_sign_word_width() -> i32 {
+    let pixels: i32 = TITLE_SIGN_WORD.iter().map(|g| g[0].len() as i32).sum();
+    (pixels + TITLE_SIGN_GAP * (TITLE_SIGN_WORD.len() as i32 - 1)) * TITLE_SIGN_PX
+}
+
+/// The board's outer size in voxels: (width, height).
+fn title_sign_board() -> (i32, i32) {
+    (
+        title_sign_word_width() + TITLE_SIGN_MARGIN * 2,
+        8 * TITLE_SIGN_PX + TITLE_SIGN_MARGIN * 2,
+    )
+}
+
+/// Every model in the family shares this volume, so a bulb overlay lands on
+/// the body exactly — the importer centres each on its own footprint.
+fn title_sign_volume() -> VoxModel {
+    let (w, h) = title_sign_board();
+    VoxModel::new([
+        w as u32,
+        (TITLE_SIGN_BOARD_DEPTH + TITLE_SIGN_LETTER_DEPTH) as u32,
+        (h + TITLE_SIGN_ROD) as u32,
+    ])
+}
+
+/// The bulb positions round the ring, in chase order (clockwise from the
+/// bottom-left corner), as the (x, z) of each 2x2 bulb's low corner.
+fn title_sign_bulbs() -> Vec<(i32, i32)> {
+    let (w, h) = title_sign_board();
+    let (lo_x, hi_x) = (TITLE_SIGN_BULB_INSET, w - TITLE_SIGN_BULB_INSET - 2);
+    let (lo_z, hi_z) = (TITLE_SIGN_BULB_INSET, h - TITLE_SIGN_BULB_INSET - 2);
+    let mut out = Vec::new();
+    let mut z = lo_z;
+    while z < hi_z {
+        out.push((lo_x, z));
+        z += TITLE_SIGN_BULB_PITCH;
+    }
+    let mut x = lo_x;
+    while x < hi_x {
+        out.push((x, hi_z));
+        x += TITLE_SIGN_BULB_PITCH;
+    }
+    let mut z = hi_z;
+    while z > lo_z {
+        out.push((hi_x, z));
+        z -= TITLE_SIGN_BULB_PITCH;
+    }
+    let mut x = hi_x;
+    while x > lo_x {
+        out.push((x, lo_z));
+        x -= TITLE_SIGN_BULB_PITCH;
+    }
+    out
+}
+
+/// The title screen's hanging sign: CONDIMENTAL in mustard-lit letters with
+/// a ketchup drop shadow, on a dark board in a steel rim, with a hazard
+/// stripe along its foot and two rods running up to the roof.
+///
+/// The bulbs are NOT here — they are cut out into the
+/// `title_sign_bulbs_f*` overlays (§2b point 27's rule, borrowed from the
+/// machine motion frames): every bulb is in every frame, lit or dark, so
+/// the body never has a voxel the overlay also draws.
+pub fn title_sign(p: &Palette) -> VoxModel {
+    let mut m = title_sign_volume();
+    let (w, h) = title_sign_board();
+    let board_y = (0, TITLE_SIGN_BOARD_DEPTH - 1);
+    let front = TITLE_SIGN_BOARD_DEPTH;
+
+    // The rim, the dark face inside it, and the hazard stripe on its foot.
+    m.cuboid((0, w - 1), board_y, (0, h - 1), p.idx("steel"));
+    m.cuboid(
+        (TITLE_SIGN_RIM, w - 1 - TITLE_SIGN_RIM),
+        (0, TITLE_SIGN_BOARD_DEPTH),
+        (TITLE_SIGN_RIM, h - 1 - TITLE_SIGN_RIM),
+        p.idx("rubber_dark"),
+    );
+    m.carve_cuboid(
+        (TITLE_SIGN_RIM, w - 1 - TITLE_SIGN_RIM),
+        (front, front),
+        (TITLE_SIGN_RIM, h - 1 - TITLE_SIGN_RIM),
+    );
+    m.hazard_stripe_x(
+        (0, w - 1),
+        board_y,
+        (0, TITLE_SIGN_RIM - 1),
+        3,
+        p.idx("hazard_yellow"),
+        p.idx("rubber_dark"),
+    );
+
+    // The rods, with a bracket where each meets the rim.
+    for x in [w / 5, w - 1 - w / 5] {
+        m.cuboid(
+            (x - 1, x),
+            (2, 3),
+            (h, h + TITLE_SIGN_ROD - 1),
+            p.idx("steel_light"),
+        );
+        m.cuboid((x - 3, x + 2), (1, 4), (h - 1, h + 2), p.idx("steel"));
+    }
+
+    // The word: the red shadow block first, the lit face over it.
+    let base_z = TITLE_SIGN_MARGIN;
+    let mut gx = TITLE_SIGN_MARGIN;
+    for glyph in TITLE_SIGN_WORD {
+        for (row, line) in glyph.iter().enumerate() {
+            let z0 = base_z + (7 - row as i32) * TITLE_SIGN_PX;
+            for (col, ch) in line.chars().enumerate() {
+                if ch != '#' {
+                    continue;
+                }
+                let x0 = gx + col as i32 * TITLE_SIGN_PX;
+                m.cuboid(
+                    (
+                        x0 + TITLE_SIGN_SHADOW,
+                        x0 + TITLE_SIGN_SHADOW + TITLE_SIGN_PX - 1,
+                    ),
+                    (front, front + TITLE_SIGN_LETTER_DEPTH - 2),
+                    (
+                        z0 - TITLE_SIGN_SHADOW,
+                        z0 - TITLE_SIGN_SHADOW + TITLE_SIGN_PX - 1,
+                    ),
+                    p.idx("ketchup_red"),
+                );
+            }
+        }
+        for (row, line) in glyph.iter().enumerate() {
+            let z0 = base_z + (7 - row as i32) * TITLE_SIGN_PX;
+            for (col, ch) in line.chars().enumerate() {
+                if ch != '#' {
+                    continue;
+                }
+                let x0 = gx + col as i32 * TITLE_SIGN_PX;
+                m.cuboid(
+                    (x0, x0 + TITLE_SIGN_PX - 1),
+                    (front, front + TITLE_SIGN_LETTER_DEPTH - 1),
+                    (z0, z0 + TITLE_SIGN_PX - 1),
+                    p.idx("sign_neon"),
+                );
+            }
+        }
+        gx += (glyph[0].len() as i32 + TITLE_SIGN_GAP) * TITLE_SIGN_PX;
+    }
+    title_sign_face_front(&m)
+}
+
+/// Mirrors a sign-family model in vox Y, so the face built at high Y ends up
+/// at low Y — the side the importer turns toward the title camera. A mirror
+/// rather than a half turn, because a half turn would also reverse X and
+/// spell the word backwards.
+fn title_sign_face_front(m: &VoxModel) -> VoxModel {
+    let mut out = VoxModel::new(m.size);
+    let depth = m.size[1] as i32;
+    for (&(x, y, z), &colour) in &m.voxels {
+        out.set(x as i32, depth - 1 - y as i32, z as i32, colour);
+    }
+    out
+}
+
+/// One frame of the bulb chase: every bulb, the `frame`th of each run of
+/// `TITLE_SIGN_BULB_FRAMES` lit and the rest dark. A bulb is a 2x2 lens
+/// standing two voxels proud of the dark face.
+fn title_sign_bulbs_frame(p: &Palette, frame: usize) -> VoxModel {
+    let mut m = title_sign_volume();
+    let front = TITLE_SIGN_BOARD_DEPTH;
+    for (i, (x, z)) in title_sign_bulbs().into_iter().enumerate() {
+        let colour = if i % TITLE_SIGN_BULB_FRAMES == frame {
+            p.idx("marquee_bulb")
+        } else {
+            p.idx("marquee_bulb_off")
+        };
+        m.cuboid((x, x + 1), (front, front + 1), (z, z + 1), colour);
+    }
+    title_sign_face_front(&m)
+}
+
+pub fn title_sign_bulbs_f0(p: &Palette) -> VoxModel {
+    title_sign_bulbs_frame(p, 0)
+}
+
+pub fn title_sign_bulbs_f1(p: &Palette) -> VoxModel {
+    title_sign_bulbs_frame(p, 1)
+}
+
+pub fn title_sign_bulbs_f2(p: &Palette) -> VoxModel {
+    title_sign_bulbs_frame(p, 2)
+}
+
+/// A puff of steam: three overlapping balls, pale, the lump off-centre for
+/// the same reason [`crush_bit`]'s is — a perfect sphere of voxels reads as
+/// a bead, a lump reads as vapour. Centred on the volume midline because it
+/// is spun as it rises (§2b point 20).
+pub fn steam_puff(p: &Palette) -> VoxModel {
+    let mut m = VoxModel::new([12, 12, 12]);
+    let c = 5.5;
+    m.sphere_f((c, c, c), 4.2, p.idx("bulk_pale"));
+    m.sphere_f((c + 2.0, c - 1.0, c + 1.5), 3.0, p.idx("cap_white"));
+    m.sphere_f((c - 2.0, c + 1.5, c + 0.5), 2.8, p.idx("sugar_white"));
+    m
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -8716,6 +9021,74 @@ mod tests {
             last + 1,
             RACK_FRAME_Y[RACK_FRAME_Y.len() - 1].0,
             "the last bay ends where the end frame begins"
+        );
+    }
+
+    /// The title sign's bulb chase: every frame holds every bulb at the same
+    /// place (only which are lit changes), consecutive frames differ, the
+    /// lit ones march, and no bulb lands on a body voxel — the overlay rule
+    /// the machine motion frames follow (§2b point 27).
+    #[test]
+    fn the_title_sign_bulb_frames_chase_and_never_overlap_the_body() {
+        let p = palette();
+        let body = title_sign(&p);
+        let frames = [
+            title_sign_bulbs_f0(&p),
+            title_sign_bulbs_f1(&p),
+            title_sign_bulbs_f2(&p),
+        ];
+        assert_eq!(frames.len(), TITLE_SIGN_BULB_FRAMES);
+        let lit = p.idx("marquee_bulb");
+        for (k, frame) in frames.iter().enumerate() {
+            assert_eq!(
+                frame.size, body.size,
+                "frame {k} must share the body's volume"
+            );
+            let cells: Vec<_> = frame.voxels.keys().collect();
+            let first: Vec<_> = frames[0].voxels.keys().collect();
+            assert_eq!(cells, first, "frame {k} must hold every bulb, lit or dark");
+            assert!(
+                frame
+                    .voxels
+                    .keys()
+                    .all(|cell| !body.voxels.contains_key(cell)),
+                "frame {k} draws over a body voxel"
+            );
+            assert!(
+                frame.voxels.values().any(|&c| c == lit),
+                "frame {k} lights nothing"
+            );
+            let next = &frames[(k + 1) % frames.len()];
+            assert_ne!(
+                frame.voxels, next.voxels,
+                "frames {k} and its successor are identical"
+            );
+        }
+    }
+
+    /// The whole word fits the `.vox` ceiling with its frame round it, and
+    /// its lettered face is on the low-Y side the importer turns toward the
+    /// title camera (`title_sign_face_front`).
+    #[test]
+    fn the_title_sign_fits_and_faces_the_camera() {
+        let p = palette();
+        let sign = title_sign(&p);
+        assert!(
+            sign.size.iter().all(|&n| n <= 256),
+            "{:?} is past the .vox ceiling",
+            sign.size
+        );
+        let neon = p.idx("sign_neon");
+        let min_neon_y = sign
+            .voxels
+            .iter()
+            .filter(|&(_, &c)| c == neon)
+            .map(|(&(_, y, _), _)| y)
+            .min()
+            .expect("the sign has lit letters");
+        assert_eq!(
+            min_neon_y, 0,
+            "the letters must stand on the front (low Y) face"
         );
     }
 }

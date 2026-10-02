@@ -18,6 +18,17 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-02 **The title screen's wordmark is a lit voxel sign, and the
+  poster runs.** The game's name is `title_sign`, a voxel model from
+  `assets.rs` (emissive letters, three chasing-bulb overlays) hung from the
+  title camera and framed into `menu.gd`'s empty `Title` slot. It is not a
+  Label. It is the one exception to "emissive is for status lamps only"
+  (UI_UX §2b point 42). The backdrop runs its belts, motion overlays,
+  product and steam on wall time, and the screen opens on a skippable
+  ~2.6 s intro. The front-page buttons are their own plates with no plate
+  round the column. The owner asked for a "visually stunning" title screen.
+  Binds `docs/UI_UX.md` §5d. Full record in `docs/DECISIONS.md`.
+
 - 2026-10-02 **There is no spoilage.** No item, ingredient, intermediate or
   fluid perishes, so there is no freshness countdown, no spoilage component,
   no refrigeration equipment tier and no cold chain. Mayonnaise (GAMEPLAY §2
