@@ -10,7 +10,7 @@
 # The fixture exists because `bbq` and `bbq_mix` stood at zero pressure in
 # every other fixture, so the tints issue #68 gave them could not be
 # photographed at all. It is a claim about the SIMULATION as much as about a
-# frame — the six runs are named by topology, not by a label the fixture
+# frame — the nine runs are named by topology, not by a label the fixture
 # writes — and every way it can degrade is quiet: move one pipe and two
 # networks merge into a single unnameable run, add a machine and a run goes
 # ambiguous, get the fill wrong and a run is named but invisible. In each
