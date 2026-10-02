@@ -269,6 +269,41 @@ state (`1/2`, `⚠ 1/2`, `✔ READY`, `⚠ LAST CHANCE`, `✔ PAID`). Full docks
 and short wages appear only when true. Checklists, strikes and tallies are
 on the C board's dockets, which are unchanged. DECISIONS 2026-10-02.
 
+### 2026-10-02 — The contract board doubles, 17 offers to 36
+
+The owner: "add more contracts, aren't enough". The board is a fixed list
+(one signature per offer, every offer always listed, no refresh — nothing to
+tune in Rust), so the fix is content: `data/contracts.ron` gains 19 orders
+and `data/unlocks.ron` gates the BBQ and mustard ones. A new game now offers
+16 ketchup orders from one case to twenty, the BBQ gate releases 9 and the
+mustard gate 11, and the mustard tier (the last gate) includes three orders
+that name all three sauces. Each sauce has a single-sauce ladder of five or
+more sizes, every new payout is derived from its ladder's per-case rates
+and written beside it, and no single order exceeds twenty cases, so the
+dock's places stand. A new test,
+`the_contract_pool_covers_every_sauce_and_every_gate_stage`, fails on the
+old board (BBQ had two single-sauce sizes, mustard's gate four offers).
+The mixed orders are priced per side, each sauce at its own ladder's rate
+for that size. The Cookbook's pay range now reads off a sauce's own
+single-sauce orders (falling back to the blended mixed ones only when there
+are none). Counting the new three-sauce orders' blended rate had it showing
+ketchup "up to 51" a case and BBQ "from 40", and neither sauce is ever paid
+that. The extra BBQ demand moved the mustard gate from tick 131 000 to
+125 000 (`measure_gate_ticks.gd`), about three minutes sooner. The BBQ gate
+stays at 52 000.
+
+### 2026-10-02 — The title sign hangs from the roof at every window size
+
+The owner saw the title sign floating in fullscreen: its rods are a fixed
+length on the model, and a taller window centres the menu column (and the
+sign framed into it) lower, so they stopped short of the top — by over 400 px
+on a 3024x1964 MacBook, and by 23 px even at 1920x1080. A new
+`title_sign_rods` voxel piece, two rod lengths on the sign's own footprint,
+is now stacked above the body as many times as the frame needs, so the rods
+always leave the top edge; 1280x720 renders pixel-identical. `test_main_menu`
+projects the real rod meshes through the title camera at 16:9, 16:10,
+ultrawide and portrait with the slot high, centred and low.
+
 ### 2026-10-02 — mustard is yellow and white
 
 The owner ruled the mustard bottle should be yellow and white, not yellow

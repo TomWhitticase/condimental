@@ -131,12 +131,25 @@ var MOTION_FRAMES_PER_SECOND: float = (
 	MainScript.TICK_HZ * float(MainScript.MACHINE_FRAMES) / float(MainScript.MACHINE_TICKS_PER_CYCLE)
 )
 
-## The marquee sign. Mirrors `assets.rs`'s `TITLE_SIGN_BULB_FRAMES` and
-## `TITLE_SIGN_ROD`; the voxgen test `title_scene_gd_mirrors_the_sign_constants`
-## fails if either side moves without the other.
+## The marquee sign. Mirrors `assets.rs`'s `TITLE_SIGN_BULB_FRAMES`,
+## `TITLE_SIGN_ROD` and `TITLE_SIGN_ROD_SEGMENT`; the voxgen test
+## `title_scene_gd_mirrors_the_sign_constants` fails if either side moves
+## without the other.
 const SIGN_ASSET := "title_sign"
 const SIGN_BULB_FRAMES := 3
 const SIGN_ROD_VOXELS := 60
+## The rods carry on above the body in lengths of `title_sign_rods`, as many
+## as it takes to leave the top of the frame (`_reach_frame_top`). The body's
+## own rods only get there when the sign's slot is near the top, which it is
+## at 1280x720; a taller window centres the menu column lower, and before
+## these the sign hung from rods that stopped in mid-air (the owner's
+## fullscreen report, 2026-10-02).
+const SIGN_RODS_ASSET := "title_sign_rods"
+const SIGN_ROD_SEGMENT_VOXELS := 32
+## How far past the top edge the rods run, as a fraction of the frame's
+## half-height: enough that the sway and the intro's tilt never swing a
+## rod's end into view.
+const SIGN_ROD_OVERSHOOT := 0.1
 ## How far in front of the camera the sign hangs. Well short of the chain
 ## (about 27 units away), so no machine can ever poke through it.
 const SIGN_DISTANCE := 13.0
@@ -196,6 +209,10 @@ var _sign_neon_energy := 0.0
 ## top above its foot — the point it hangs (and swings) from.
 var _sign_board_size := Vector2.ZERO
 var _sign_rod_top := 0.0
+## The stacked rod lengths above the body's own rods, pooled: as many as
+## the frame needs are shown, the rest hidden until a taller window wants
+## them.
+var _sign_rod_lengths: Array = [] # Array[Node3D]
 ## Seconds since the screen came up, which is all the camera's drift is a
 ## function of. Wall time, not a tick count: there is no simulation on this
 ## screen to borrow a clock from, and nothing here is reproduced from a save.
@@ -378,6 +395,31 @@ func frame_sign(rect: Rect2, viewport_size: Vector2) -> void:
 		-centre.y * world_per_px + (_sign_rod_top - _sign_board_size.y * 0.5) * fit,
 		-SIGN_DISTANCE
 	)
+	_reach_frame_top(viewport_size.y * 0.5 * world_per_px, fit)
+
+
+## Stacks rod lengths on the body's rods until they leave the top of the
+## frame. `half_height` is the frame's top edge above the camera's axis at the
+## sign's distance, in camera units; the rig's origin is the rods' top, so
+## what is left to cover is the gap between them, in the rig's own (unscaled)
+## units. Reads the frame, not a window size: whatever the aspect or
+## resolution, a sign framed anywhere on screen hangs from above it.
+func _reach_frame_top(half_height: float, fit: float) -> void:
+	if fit <= 0.0:
+		return
+	var segment := float(SIGN_ROD_SEGMENT_VOXELS) * MainScript.VOXEL_UNIT
+	var gap := (half_height * (1.0 + SIGN_ROD_OVERSHOOT) - _sign_rig.position.y) / fit
+	var needed := 0 if gap <= 0.0 else int(ceil(gap / segment))
+	while _sign_rod_lengths.size() < needed:
+		var rods := _assets.asset_node(SIGN_RODS_ASSET)
+		rods.name = "SignRods%d" % _sign_rod_lengths.size()
+		rods.position.y = float(_sign_rod_lengths.size()) * segment
+		for node in rods.find_children("*", "GeometryInstance3D", true, false):
+			(node as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_sign_pivot.add_child(rods)
+		_sign_rod_lengths.append(rods)
+	for k in range(_sign_rod_lengths.size()):
+		(_sign_rod_lengths[k] as Node3D).visible = k < needed
 
 
 ## Hides the sign while the menu's settings rows have its space, and brings

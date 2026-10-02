@@ -958,7 +958,12 @@ text: the game's name is the first asset the player sees, so it is made the
 way every other asset is. It hangs from the camera, so it stays framed while
 the factory parallaxes behind it, and `menu.gd` frames it into an empty
 `Title` slot in its column every frame, so the 3D sign and the 2D column
-cannot drift apart at any window size. Under it the subtitle and a tilted
+cannot drift apart at any window size. Its rods **always run out of the top
+of the frame**: the body's own rods only reach it when the slot is near the
+top, so `title_scene.gd` stacks `title_sign_rods` lengths on them up to just
+past the top edge, measured from the frame each time it is framed — a
+fullscreen 16:10 window centres the column lower, and before these the sign
+hung from rods that stopped in mid-air. Under it the subtitle and a tilted
 yellow **splash line** (picked from a fixed list by the date, so it changes
 day to day and a review screenshot still repeats), then New Game / Load
 Game / Settings / Quit, **centred in the viewport**. On the front page the
