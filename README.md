@@ -385,7 +385,7 @@ a gated unlock and a mixed order all work without new Rust.
 | **Scale-up** (milestone 8) | Power as a network, a tiered update scheduler, chunk activity tracking; stress-tested into the thousands of entities |
 | **Logistics expansion** (milestone 9) | Transport between factory sites |
 | **Platform polish** (milestone 10) | Mobile touch controls and export, packaging, a full UI pass |
-| **More sauce** (content) | Mayo (refrigeration and a cold chain), hot sauce (acid-resistant equipment, fermentation), then aged and derived sauces — chilli mayo needs mayo *and* hot sauce, so the sauce list becomes a dependency tree rather than a list |
+| **More sauce** (content) | Mayo (a new emulsifier machine), hot sauce (acid-resistant equipment, fermentation), then aged and derived sauces — chilli mayo needs mayo *and* hot sauce, so the sauce list becomes a dependency tree rather than a list |
 | **Multiplayer** (stretch) | Designed for in the architecture, deliberately deferred |
 
 The current open backlog is [GitHub issues](https://github.com/TomWhitticase/condimental/issues);

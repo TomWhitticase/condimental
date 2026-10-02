@@ -14,7 +14,7 @@ happens over the course of a playthrough."
 | Aspect | Direction |
 |---|---|
 | Core loop | Build production lines → fulfill sauce contracts → earn money → reinvest in equipment/ingredients/staff → unlock new sauce categories |
-| Sauce progression | Simple, few-ingredient sauces (tomato sauce) → composite condiments (ketchup, BBQ) → equipment-gated categories (mayo needs refrigeration, hot sauce needs acid handling) → elaborate long-process sauces (aged/fermented) |
+| Sauce progression | Simple, few-ingredient sauces (tomato sauce) → composite condiments (ketchup, BBQ) → equipment-gated categories (mayo needs an emulsifier, hot sauce needs acid handling) → elaborate long-process sauces (aged/fermented) |
 | Derived sauces | Higher-tier sauces can require other *finished sauces* as an ingredient (chilli mayo needs mayo + hot sauce; honey mustard needs mustard), turning the sauce list into a branching dependency tree, not a flat list |
 | Variants | Many sauces come in flavour variants (garlic mayo, chilli mayo, honey mayo; smoky BBQ, spicy BBQ) built by taking a plain base sauce and running it through a small flavour-add step — cheap content, real contract variety |
 | Demand model | **Contracts**, not a spot market — standing orders for a *mix* of sauces, delivered on a recurring cadence, that must be kept up or lost |
@@ -47,14 +47,14 @@ Concrete example tiers, in the order the user's original pitch laid them out. Ex
 | 2 | Ketchup | + vinegar, sugar, spices | Reduction/thickening step, bottling & sealing | First multi-step recipe: cook down, blend, bottle |
 | 3 | BBQ sauce — **shipped 2026-09-18**, and it needed **no new machine** | + spice mix, molasses, liquid smoke, and *finished ketchup* | None: a second recipe on the mixer and the cooking vat the ketchup line already owns | A 600-tick cook — the longest process in the game by 2.5x — bought the "low and slow" identity with a number instead of a machine. It is gated instead by output sold — a hundred boxes of ketchup (§9's progression-gates bullet) — which is this table's first gate that is neither of the two kinds below |
 | 3 (a second one) | Mustard — **shipped 2026-09-26**, and it needed **no new machine** either | + mustard seed, turmeric. **Not** vinegar: the ketchup mixer drinks that from tick 0, so the gate cannot hold it back (`data/unlocks.ron`) | None: the same crusher, mixer, cooking vat, bottler and packer. The novelty is a *wet mill*: `mustard_mash` takes 4 seed **and 2 vinegar** and sends a fluid mash out, where the crusher's only other recipe (`tomato_paste`) is solid in, solid out. That is placement, not new capital: `ketchup_mix` already drinks raw `vinegar` on the mixer, and a second mixer recipe drinking any raw fluid leaves a pipe run the narrowing pass cannot name — the shipped ketchup line would stall on `AmbiguousPipe` — so the crusher, which drank nothing, is where a raw fluid could still enter (`data/recipes.ron`) | A second tier that buys no capital, so like BBQ the only thing making it arrive later is a **progression gate**: 100 boxes of BBQ sold. Its cook sits between the two it follows (360 ticks against ketchup's 240 and BBQ's 600). Measured from a new game, the gate opens at tick 155 000 — ~86 min at 30 ticks/sec, 103 000 ticks after the BBQ gate at 52 000 — on a line that never runs dry, so that is a floor (`godot_project/measure_gate_ticks.gd`) |
-| 4 | Mayonnaise / aioli | Eggs, oil, acid | **Refrigeration** (cold storage + cold-chain handling) + emulsifier machine | Perishable-ingredient handling is a new *axis*, not just a harder recipe — eggs/oil spoil without cold storage upstream of the machine, not just in a warehouse |
+| 4 | Mayonnaise / aioli | Eggs, oil, acid | **Emulsifier** machine | An emulsion is a process the mixer cannot do, so the capital purchase is the gate. **No spoilage and no cold chain** — the game does not model either (decided 2026-10-02, §11). Once mayo exists it is the base its own variants and derived sauces draw on (§3) |
 | 5 | Hot sauce | Chilies, vinegar (high concentration) | **Acid-handling equipment** (acid-resistant tanks/piping) + fermentation vessel for mash-based variants | High-acid ingredients corrode standard equipment; this tier is gated by a *material/durability* requirement, not just a recipe unlock |
 | 6 | Elaborate/aged sauces (fermented hot sauce, barrel-aged BBQ, whole-grain mustard, etc.) | Combines multiple tier 2–5 ingredient classes | Multiple equipment lines feeding one recipe, plus multi-stage `TimedProcess` chains (mash → ferment → strain → blend → age → bottle) lasting far longer than any earlier tier | The payoff tier: production chains that span the whole factory, not one station |
 
 Two structurally different kinds of gate recur through this table, and both should stay legible to the player as distinct reasons a sauce is locked:
 
 - **Recipe-complexity gates** (tiers 1→3): more ingredients, more process steps, longer single `TimedProcess` — no new equipment *category*, just a bigger version of what you already have.
-- **Equipment-category gates** (tiers 4, 5): an entire class of sauce is inaccessible until a specific piece of capital equipment exists, because the ingredient itself can't be handled safely/at all without it (perishables need cold chain, high-acid ingredients corrode non-resistant equipment).
+- **Equipment-category gates** (tiers 4, 5): an entire class of sauce is inaccessible until a specific piece of capital equipment exists, because the sauce cannot be made at all without it (an emulsion needs an emulsifier; high-acid ingredients corrode non-resistant equipment).
 
 Tier 6 combines both: by then the player has every equipment category, and the remaining challenge is orchestrating long multi-stage chains across them.
 
@@ -119,8 +119,8 @@ Equipment purchases *are* the tech tree — there's no separate abstract skill-p
 (tier 3) needs no equipment tier at all: it runs on the mixer and cooking vat
 the ketchup line already owns, and it arrives on a count of boxes sold rather than a
 purchase (§9, `data/unlocks.ron`). The table below still describes the intended
-shape for tiers 4-6, where the equipment genuinely is the gate — an ingredient
-that cannot be handled at all without it. Do not read "every sauce is bought"
+shape for tiers 4-6, where the equipment genuinely is the gate — a sauce that
+cannot be made at all without it. Do not read "every sauce is bought"
 out of it; read "every sauce that needs a new *capability* is bought".
 
 | Equipment tier | Unlocks | Gameplay effect |
@@ -128,7 +128,7 @@ out of it; read "every sauce that needs a new *capability* is bought".
 | Basic cooker/kettle | Tomato sauce | Starting equipment |
 | Reduction/thickening + bottling line | Ketchup | First composite recipe, first bottling step |
 | ~~Smoker/slow-reduction unit~~ — **not built, and not needed** | BBQ sauce (shipped) | A long single-stage `TimedProcess` on the existing cooking vat: 600 ticks against ketchup's 240. The identity was bought with the number, not the machine |
-| **Refrigeration** (cold storage + cold-chain conveyance) | Mayo/aioli and other cold sauces | Introduces spoilage as a mechanic for any ingredient/product tagged perishable — cold sauces need refrigerated storage *and* refrigerated transport between stations, not just a fridge at the end |
+| **Emulsifier** | Mayo/aioli, and the variants and derived sauces built on mayo | A new machine for a process the mixer cannot do. ~~Refrigeration (cold storage + cold-chain conveyance), introducing spoilage~~ — **dropped 2026-10-02**: the game has no spoilage, so nothing needs keeping cold (§11) |
 | **Acid-handling equipment** (resistant tanks/piping) + fermentation vessel | Hot sauce and other high-acid/fermented sauces | Introduces corrosion/durability as a mechanic for high-acid throughput on non-rated equipment — using a standard pipe for a hot-sauce line should visibly degrade it, pushing the player toward the upgrade rather than silently blocking the recipe |
 | Multi-line integration (no single new machine — this is a factory-layout milestone, not a purchase) | Elaborate/aged sauces | Requires successfully routing multiple prior equipment categories' outputs into one long chain |
 
@@ -233,7 +233,7 @@ A rough shape of an early playthrough, to sanity-check that the systems above ac
 1. Start with a basic cooker and one small tomato-sauce contract. Produce and deliver on cadence — even at this scale, running the cooker needs manufacturing staff and getting bottles onto the delivery truck needs logistics staff.
 2. Save contract earnings, buy the ketchup line (reduction/bottling) and hire enough packaging staff to run it. A new contract type appears wanting ketchup, or an existing contract's mix expands to include it.
 3. Juggling two-plus concurrent contracts with different sauce mixes becomes the actual gameplay tension — production has to be laid out for variety, not a single optimized line. Add a couple of flavour variants (§3) cheaply to widen what contracts can be taken without new machinery.
-4. Save toward refrigeration. Once bought, mayo-inclusive contracts become available/eligible; cold-chain routing becomes a new factory-layout concern (spoilage risk on any perishable leg of the line).
+4. Save toward an emulsifier. Once bought, mayo-inclusive contracts become available/eligible, and mayo becomes the base that later variants and derived sauces draw from (§3).
 5. Save toward acid-handling equipment; hot-sauce contracts open up; standard piping used for a hot-sauce line starts showing corrosion, driving up maintenance-staff demand and nudging the player toward the acid-resistant upgrade instead of just hiring more repair staff to keep patching it.
 6. Derived sauces open up (chilli mayo from mayo + hot sauce) once both parent categories exist, rewarding the equipment investment across multiple downstream recipes at once.
 7. By the elaborate/aged tier, the player is running long multi-stage chains (mash → ferment → age → bottle) alongside everything from earlier tiers simultaneously, with all four staff categories under real pressure, because contracts by this point demand a wide spread across nearly every category unlocked so far.
@@ -251,6 +251,15 @@ implementation history (epics, tickets, balancing passes) behind each one.
   `recipes.ron`/`machines.ron`. Derived sauces and variants (§3) need no new
   mechanism — a recipe listing another sauce item as an input is the
   standard Factorio-style intermediate-product pattern.
+- **A belt and a pipe may cross, at right angles, on one tile.** Place a pipe
+  onto a belt (or a belt onto a pipe) and the tile becomes a `crossing`: one
+  entity that is both a belt carrying items and a pipe carrying fluid, drawn
+  as the pipe lifted over the lane on a gantry. There is nothing to buy and
+  nothing on the hotbar — the ghost turns valid over a perpendicular belt and
+  says so. A parallel one is refused (that is a pipe laid along a belt, not
+  across it). Removing takes the whole tile and refunds both a belt and a
+  pipe; rotating turns both. No other pair stacks. (Full record:
+  `docs/DECISIONS.md`, 2026-10-01.)
 - **A machine kind may name several recipes, and what is plumbed into a
   placed machine decides which one it runs** — first fully-satisfied wins,
   `recipes.ron` file order is the tiebreak, and there is **no player-facing
@@ -321,10 +330,12 @@ implementation history (epics, tickets, balancing passes) behind each one.
 - Multi-stage aged/fermented recipes (tier 6) are exactly what the generic
   `TimedProcess` component (ARCHITECTURE.md §3.5) was designed for — a
   chain of stages feeding into each other, no new architecture needed.
-- **Perishability and corrosion are not yet implemented.** They'll need a
-  component (or a tag + countdown on `Inventory`/`Machine`) for spoilage or
-  wear when tier 4/5 lands; corrosion also feeds maintenance-staff demand
-  (§7). Still an open design question, not decided here.
+- **Corrosion is not yet implemented.** It will need a component (or a tag
+  + countdown on `Machine`) for wear when tier 5 lands, and it also feeds
+  maintenance-staff demand (§7). Still an open design question, not decided
+  here. **Spoilage is not a mechanic at all** (decided 2026-10-02, §11): no
+  item, ingredient or fluid perishes, so nothing needs a freshness countdown
+  and no tier needs a cold chain.
 - **Equipment purchasing is `data/shop.ron`** (schema 1, one price per
   buildable kind — a superset of machine kinds, since belts and pipes are
   priced too). Money is not duplicated there: a purchase debits the same
@@ -428,7 +439,7 @@ implementation history (epics, tickets, balancing passes) behind each one.
 ## 10. What this doc does not cover
 
 - **Exact numeric balance** — ingredient costs, contract payouts, equipment prices, wage rates, staff-per-machine counts. Belongs in a future balancing pass, not this doc.
-- **Specific real-world recipes/ratios** — this doc names sauces and roughly what's realistic (mayo needs cold handling, hot sauce needs acid handling) but not actual formulations.
+- **Specific real-world recipes/ratios** — this doc names sauces and roughly what's realistic (mayo needs an emulsifier, hot sauce needs acid handling) but not actual formulations.
 - **Engine/architecture, data formats, ECS components** — see [ARCHITECTURE.md](ARCHITECTURE.md).
 - **Visual style, camera, UI widgets** — see [UI_UX.md](UI_UX.md), though note §6's contract mixes/cadences are a natural fit for UI_UX.md §5's clipboard/checklist diegetic framing (a contract *is* a checklist), and staff headcounts per category (§7) are a natural fit for a simple gauge/meter widget per category.
 - **Multiplayer/co-op factory ownership** — not considered here; ARCHITECTURE.md §8 covers multiplayer only as a lockstep-networking/determinism concern, not an economy-sharing one.
@@ -467,5 +478,5 @@ implementation history (epics, tickets, balancing passes) behind each one.
   *transient* cost of building a new branch; see §6 and issues #92/#93.
 - When staff demand exceeds headcount in a category, which machines lose out — player-set priority, first-come-first-served, or proportional throttling across all of them? **MVP-provisional (2026-09-12, §9's staff-pools bullet):** first-come in the simulation's stable machine order, so the same machine is always the one short; player-set priority is the expected replacement and needs no wire change.
 - Is there a one-time recruiting/training cost on top of the recurring per-head wage, and can headcount be reduced (firing) freely or with a penalty/delay? **MVP-provisional (2026-09-12), amended by the quality pass (2026-09-13) and again on 2026-09-26:** no recruiting fee; a hire the balance cannot cover the next bill plus the new wage for is WARNED and confirmable rather than refused (it was refused from 2026-09-13 — see §7 and `docs/UI_UX.md` §2b point 40); firing is free and immediate, but the fired head is still paid for the period it worked any part of (notice pay); a head that cannot be paid on payday is idled, not lost, and leaves only if the next payday cannot pay it either. Still placeholders for the balancing pass, not decisions.
-- Are perishability (spoilage) and corrosion (durability) modeled as full ECS components with their own tick-based decay, or as simpler flags/costs? Needs a decision before tier 4/5 implementation starts.
+- ~~Are perishability (spoilage) and corrosion (durability) modeled as full ECS components with their own tick-based decay, or as simpler flags/costs?~~ **Half-decided 2026-10-02: there is no spoilage.** The project owner dropped perishability from the game outright — no item, ingredient or fluid spoils, and mayo (tier 4) is gated by its emulsifier, not by refrigeration or a cold chain. Still open: how corrosion (durability) is modelled, which needs deciding before tier 5 implementation starts.
 - Exact tier list beyond the six in §2 (this doc's tiers are illustrative of the *shape* of progression, not necessarily the final content list), and the actual catalog of derived sauces/variants — both are a game-design task, not an architecture or gameplay-systems one.

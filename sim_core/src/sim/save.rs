@@ -240,7 +240,9 @@ use super::staff::{StaffPools, StaffRestore, StaffRestoreError};
 use super::stats::{ItemStats, ProductionLedger, STAT_BUCKETS, STAT_WINDOW_COUNT, StatKind};
 use super::storage::{BayPool, WAREHOUSE_RACK_KIND, WarehouseRack};
 use super::types::{Direction, Fx, ItemId, Money, RecipeId, TileCoord};
-use super::world::{BELT_KIND, PIPE_KIND, PlayerCommand, World};
+use super::world::{
+    BELT_KIND, CROSSING_KIND, PIPE_KIND, PlayerCommand, World, crossing_pipe_direction,
+};
 
 /// The save format's version. Bumped whenever the shape below changes;
 /// a file naming any other version is rejected, never migrated — see the
@@ -444,7 +446,7 @@ pub struct SavedPlacement {
 }
 
 /// The live contents of one placement, one variant per body a `Place` can
-/// construct (`world.rs`'s `try_place`).
+/// construct (`world.rs`'s `apply_place`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SavedBody {
     Belt(SavedBelt),
@@ -467,6 +469,16 @@ pub enum SavedBody {
     /// It was an empty marker until version 6; the filter is what gave it a
     /// payload, and is why the version moved.
     WarehouseRack(SavedRack),
+    /// A belt and a pipe crossing on one tile (`world.rs`'s
+    /// `BodyKind::Crossing`): a belt tile's contents and a pipe tile's
+    /// volume, because the one entity is both.
+    ///
+    /// A new variant, not a changed record, so it stays version 7: no
+    /// file written before crossings existed can contain one, and every
+    /// other variant's shape is untouched, so a version 7 file still means
+    /// exactly one thing. The field-addition rule above is about a record
+    /// two builds would read differently; nothing here is read differently.
+    Crossing(SavedCrossing),
 }
 
 impl SavedBody {
@@ -482,6 +494,7 @@ impl SavedBody {
             SavedBody::FluidTank(_) => "fluid_tank",
             SavedBody::Dock(_) => "dock",
             SavedBody::WarehouseRack(_) => "warehouse_rack",
+            SavedBody::Crossing(_) => "crossing",
         }
     }
 }
@@ -541,6 +554,14 @@ pub struct SavedSplitter {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedPipe {
     pub volume_bits: FxBits,
+}
+
+/// A crossing's two halves. The placement's `direction` is the belt's; the
+/// pipe's is derived from it on load, as it is in play.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedCrossing {
+    pub belt: SavedBelt,
+    pub pipe: SavedPipe,
 }
 
 /// A machine's two buffers, its in-flight craft, and which recipe that
@@ -1136,6 +1157,16 @@ impl World {
                         filter: rack.filter.clone(),
                     })
                 }
+                CROSSING_KIND => SavedBody::Crossing(SavedCrossing {
+                    belt: saved_belt(self, entity),
+                    pipe: SavedPipe {
+                        volume_bits: FxBits::of(
+                            self.pipe_volume_at(tile)
+                                .expect("a crossing is always in the pipe index")
+                                .0,
+                        ),
+                    },
+                }),
                 _ => {
                     let machine = self
                         .ecs()
@@ -1353,6 +1384,9 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
             SavedBody::Splitter(splitter) => {
                 check_belt_items(&splitter.belt, &known_items, placement.tile)?
             }
+            SavedBody::Crossing(crossing) => {
+                check_belt_items(&crossing.belt, &known_items, placement.tile)?
+            }
             SavedBody::Machine(machine) => {
                 for (item, _) in machine.input.iter().chain(machine.output.iter()) {
                     check_item(item, &known_items, || {
@@ -1565,7 +1599,7 @@ fn restore_staff(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
     Ok(())
 }
 
-/// Which body a kind is built with (`world.rs`'s `try_place`) — the one
+/// Which body a kind is built with (`world.rs`'s `apply_place`) — the one
 /// place this module restates that mapping, so a mismatch is an error rather
 /// than a silently wrong body.
 fn expected_body(kind: &str) -> &'static str {
@@ -1577,6 +1611,7 @@ fn expected_body(kind: &str) -> &'static str {
         FLUID_TANK_KIND => "fluid_tank",
         DOCK_KIND => "dock",
         WAREHOUSE_RACK_KIND => "warehouse_rack",
+        CROSSING_KIND => "crossing",
         _ => "machine",
     }
 }
@@ -1607,6 +1642,16 @@ fn check_item(
 /// factory loads whatever its total bill (which once had to fit in `Fx`).
 fn rebuild_structure(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
     for (index, placement) in data.placements.iter().enumerate() {
+        if placement.kind == CROSSING_KIND {
+            rebuild_crossing(world, placement)?;
+            if world.placement_count() != index + 1 {
+                return Err(SaveError::PlacementRefused {
+                    kind: placement.kind.clone(),
+                    tile: placement.tile,
+                });
+            }
+            continue;
+        }
         let price = world
             .shop()
             .catalog
@@ -1637,6 +1682,49 @@ fn rebuild_structure(world: &mut World, data: &SaveData) -> Result<(), SaveError
     Ok(())
 }
 
+/// A crossing is never bought, so it is rebuilt the way a player builds
+/// one: buy and place a belt facing the saved direction, then buy a pipe
+/// and place it across it. Both halves go through the real commands, so a
+/// crossing a load puts back is one the live `Place` rule would allow.
+fn rebuild_crossing(world: &mut World, placement: &SavedPlacement) -> Result<(), SaveError> {
+    let halves = [
+        (BELT_KIND, placement.direction),
+        (PIPE_KIND, crossing_pipe_direction(placement.direction)),
+    ];
+    for (kind, direction) in halves {
+        let price = world
+            .shop()
+            .catalog
+            .get(kind)
+            .ok_or_else(|| SaveError::UnknownKind {
+                kind: placement.kind.clone(),
+                tile: placement.tile,
+            })?
+            .price_money();
+        world.restore_money(price);
+        world.issue_command(PlayerCommand::Purchase {
+            kind: kind.to_string(),
+            quantity: 1,
+        });
+        world.issue_command(PlayerCommand::Place {
+            kind: kind.to_string(),
+            tile: placement.tile,
+            direction,
+            item: None,
+        });
+    }
+    let assembled = world
+        .entity_at(placement.tile)
+        .is_some_and(|entity| world.kind_of(entity) == CROSSING_KIND);
+    if !assembled {
+        return Err(SaveError::PlacementRefused {
+            kind: placement.kind.clone(),
+            tile: placement.tile,
+        });
+    }
+    Ok(())
+}
+
 /// Half two: write the live contents onto the placements half one built.
 fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
     for placement in &data.placements {
@@ -1655,20 +1743,10 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                     )
                     .expect("the entity was just placed");
             }
-            SavedBody::Pipe(pipe) => {
-                let (_, capacity) = world
-                    .pipe_volume_at(placement.tile)
-                    .expect("a placed pipe is always in the pipe index");
-                let volume = pipe.volume_bits.value();
-                if volume > capacity || volume < Fx::ZERO {
-                    return Err(SaveError::OverCapacity {
-                        what: "pipe".to_string(),
-                        tile: placement.tile,
-                        held: volume.to_string(),
-                        capacity: capacity.to_string(),
-                    });
-                }
-                world.restore_pipe_volume(placement.tile, volume);
+            SavedBody::Pipe(pipe) => restore_pipe(world, placement.tile, pipe)?,
+            SavedBody::Crossing(crossing) => {
+                restore_belt(world, entity, &crossing.belt, data.tick_count);
+                restore_pipe(world, placement.tile, &crossing.pipe)?;
             }
             SavedBody::Machine(saved) => {
                 let (input_capacity, output_capacity) = {
@@ -1816,6 +1894,23 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
             }
         }
     }
+    Ok(())
+}
+
+fn restore_pipe(world: &mut World, tile: TileCoord, saved: &SavedPipe) -> Result<(), SaveError> {
+    let (_, capacity) = world
+        .pipe_volume_at(tile)
+        .expect("a placed pipe is always in the pipe index");
+    let volume = saved.volume_bits.value();
+    if volume > capacity || volume < Fx::ZERO {
+        return Err(SaveError::OverCapacity {
+            what: "pipe".to_string(),
+            tile,
+            held: volume.to_string(),
+            capacity: capacity.to_string(),
+        });
+    }
+    world.restore_pipe_volume(tile, volume);
     Ok(())
 }
 
