@@ -259,10 +259,15 @@ func _initialize() -> void:
 		"categories": [{"id": "manufacturing", "wage": 2, "headcount": 8, "owed": 8}],
 		"next_payday_tick": 1700 + 120, "next_bill": 16, "shortfall": 6,
 	}
-	var wage_state: Dictionary = main._contract_wages_state(short_staffed, 1700, 10.0)
-	var wage_lines: String = String(wage_state.get("text", "")).replace(" — ", " —\n")
-	if wage_lines.find("\n") < 0:
-		_fail("the wage warning should break at its dash for the plate, got '%s'" % wage_lines)
+	# Through the REAL draw path: `_update_contract_wages` is what puts the
+	# break in, and a test that broke the line itself would pass without it.
+	var saved_staff: Dictionary = main._staff_snapshot
+	main._staff_snapshot = short_staffed
+	main._update_contract_wages(10.0)
+	main._staff_snapshot = saved_staff
+	var wage_lines: String = String(main._contract_wages_label.text)
+	if not main._contract_wages_label.visible or wage_lines.find("\n") < 0:
+		_fail("the wage warning should show, broken at its dash for the plate, got '%s'" % wage_lines)
 		return
 	var lines_to_fit: Array = [
 		[main._contract_empty_label, main._contract_empty_label.text],

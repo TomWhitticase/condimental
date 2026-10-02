@@ -943,7 +943,7 @@ See [WORKFLOW.md](WORKFLOW.md).
   the case issue #17 had left ragged. `_update_staff_alert` no longer touches
   the hint. **Superseded 2026-10-02:** the contracts plate has no board-hint
   line (the legend and the empty plate name C); the list's floor is its first
-  row's first line.
+  WHOLE row (`_contract_list_hard`).
 
 - 2026-09-20 **The bank at the moment of building decides whether the BBQ
   branch costs you the board.** `data/unlocks.ron`'s `after_deliveries: 10`

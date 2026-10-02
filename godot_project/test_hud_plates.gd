@@ -1245,7 +1245,7 @@ func _check_config_case(window: Vector2i, tile: Vector2i, what: String, across: 
 func _finish_sweep() -> void:
 	main._staff_snapshot = {}
 	_resize(BIG)
-	_summary += "; the contracts list is cut between rows and always shows its first row's first line, and neither plate lands on the other, at both sizes with the strip up and down"
+	_summary += "; the contracts list is cut between rows and always shows its first whole row where the column has room, and neither plate lands on the other, at both sizes with the strip up and down"
 	_frame = 0
 
 

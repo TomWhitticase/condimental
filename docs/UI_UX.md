@@ -1251,7 +1251,8 @@ made the same trade against the SHORT-STAFFED strip; the difference now is
 that there is exactly ONE owner of the hint's visibility, so
 `_update_staff_alert` no longer touches it.
 **Superseded 2026-10-02:** the contracts plate has no board hint; the list's
-floor is its first row's first line, which `_update_contract_panel` keeps.
+floor is its first WHOLE row (`_contract_list_hard`), because a row's second
+line is the order's status.
 
 **The legend folds, and folding is not a modal.** Its plate gains a heading
 row — `CONTROLS` and a button naming its key — and folds to that stub, so

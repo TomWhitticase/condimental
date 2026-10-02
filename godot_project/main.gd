@@ -1995,8 +1995,8 @@ var _market_open := false
 # It is a dark-plate MENU (opened on C, centred above the hotbar like the
 # build menu and the market) whose rows are paper dockets: the plate is menu
 # chrome, an offer is an order, and UI_UX.md §5 reserves the paper for
-# exactly that. It is a menu rather than a section of the clipboard because
-# the clipboard is what is RUNNING and this is what is FOR SALE; putting a
+# exactly that. It is a menu rather than a section of the contracts plate
+# because the plate is what is RUNNING and this is what is FOR SALE; putting a
 # SIGN button on the board of running orders would make every docket look
 # like a thing to click.
 #
@@ -2014,8 +2014,8 @@ var _board_rows: Array = [] # Array[Dictionary], see _build_contract_board_row
 var _board_row_ids: Array = []
 var _board_open := false
 ## The left column: the active contracts' dockets, one per entry of
-## `economy_snapshot_json`'s `contracts`, in the same order the clipboard
-## shows them. Records are `_build_contract_card`'s.
+## `economy_snapshot_json`'s `contracts`, in the same order the contracts
+## plate shows them. Records are `_build_contract_card`'s.
 var _board_active_scroll: ScrollContainer
 var _board_active_box: VBoxContainer
 var _board_active_cards: Array = []
@@ -13102,8 +13102,8 @@ func _stock_ceiling_y() -> float:
 ## docket stack is a scroll bar the player can drag and the C board shows
 ## every contract in full besides, whereas this plate is `MOUSE_FILTER_IGNORE`
 ## from the panel down — a row cut off this list is a row nothing on screen
-## can bring back. So the stack yields first, keeping a whole line of its
-## first docket as it does (`_update_contract_panel`), and the absolute line
+## can bring back. So the contracts list yields first, keeping its first whole
+## row as it does (`_contract_list_hard`), and the absolute line
 ## still ends it: below that the plate would stand on the CREW plate, and a
 ## panel drawn on a panel outranks both.
 func _stock_list_ceiling_y() -> float:
@@ -20050,7 +20050,7 @@ func _update_staff_alert() -> void:
 
 ## One docket's live state. `progress` is sim_core's per-contract, clamped
 ## coverage of this contract's own mix (a checklist reads 2/2, never 7/2);
-## the unclamped pool it is drawn from is the dock line above.
+## what actually stands on each dock is on that dock's hover.
 func _update_contract_card(card: Dictionary, contract: Dictionary, current_tick: int) -> void:
 	var mix: Array = contract.get("mix", [])
 	var progress: Array = contract.get("progress", [])
@@ -20892,8 +20892,8 @@ func _update_money_punch(current_tick: int) -> void:
 
 
 ## The rising "+N", parked over the money line it belongs to. Positioned
-## every frame rather than once, because the clipboard re-anchors itself
-## every frame too (its minimum size grows with its own text).
+## every frame rather than once, because the contracts plate re-positions
+## itself every update too (its size follows its rows and warnings).
 func _update_payout_flyout(current_tick: int) -> void:
 	if _payout_flyout == null:
 		return
