@@ -2801,7 +2801,10 @@ impl World {
     ///
     /// Folded off `topology.racks` rather than kept, so it cannot drift from
     /// the floor: `recompute_topology` runs on every `Place`, `Remove` and
-    /// `Rotate`, and a filter is read straight off the rack.
+    /// `Rotate`, and a filter is read straight off the rack. The one window
+    /// where it lags is inside a load's bulk placement
+    /// ([`World::begin_bulk_place`]), where `topology.racks` stays empty until
+    /// [`World::end_bulk_place`]; nothing asks for the pool in between.
     pub fn bay_pool(&self) -> BayPool {
         let mut pool = BayPool::default();
         for &entity in &self.topology.racks {
@@ -3669,11 +3672,12 @@ impl World {
     /// and which kinds are asking.
     ///
     /// Called from [`Self::recompute_topology`], which is reached only from
-    /// `Place`, `Remove` and `Rotate`, so the staffing requirement moves
-    /// when the FACTORY changes and at no other time. **Also called by the
-    /// save loader after it restores the pools**: `StaffPools::restore`
-    /// builds fresh pools, which would otherwise drop the establishment the
-    /// replayed `Place` commands had just computed and load every world
+    /// `Place`, `Remove` and `Rotate` — and, in a load, once from
+    /// [`Self::end_bulk_place`] in their place — so the staffing requirement
+    /// moves when the FACTORY changes and at no other time. **Also called by
+    /// the save loader after it restores the pools**: `StaffPools::restore`
+    /// builds fresh pools, which would otherwise drop the establishment
+    /// `end_bulk_place`'s pass had just computed and load every world
     /// needing nobody. And by `try_set_mothballed`, which is a change to
     /// the factory that moves no tile.
     ///
