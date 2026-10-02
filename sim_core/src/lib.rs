@@ -781,7 +781,7 @@ impl SimBridge {
     ///    {"id": "manufacturing", "name": "Manufacturing", "headcount": 4,
     ///     "wage": 2, "owed": 4, "unpaid": 0, "left_last_payday": 0,
     ///     "hire_warns": false, "demand": 4, "assigned": 4, "short": 0},
-    ///    {"id": "maintenance",   "name": "Maintenance",   "headcount": 0,
+    ///    {"id": "engineering",   "name": "Engineering",   "headcount": 0,
     ///     "wage": 2, "owed": 0, "unpaid": 0, "left_last_payday": 0,
     ///     "hire_warns": false, "demand": 0, "assigned": 0, "short": 0},
     ///    {"id": "packaging",     "name": "Packaging",     "headcount": 2,
