@@ -533,8 +533,8 @@ pub const ASSETS: &[Asset] = &[
         build: staff_manufacturing,
     },
     Asset {
-        name: "staff_maintenance",
-        build: staff_maintenance,
+        name: "staff_engineering",
+        build: staff_engineering,
     },
     Asset {
         name: "staff_packaging",
@@ -2629,7 +2629,7 @@ const CRUSH_BIT_C: f32 = (CRUSH_BIT_VOXELS as f32 - 1.0) / 2.0;
 //
 // Four UI props, one per `data/staff.ron` category, so the staff panel
 // (ticket 3) can put a picture beside each name: a hard hat for
-// manufacturing, an open-ended spanner for maintenance, a taped carton with
+// manufacturing, an open-ended spanner for engineering, a taped carton with
 // its roll of tape for packaging, a pallet jack for logistics. Each is the
 // tool the category holds, not a person — GAMEPLAY.md §7 is explicit that
 // staff are a capacity, not NPCs, and a figure would promise a person who
@@ -2707,7 +2707,7 @@ const HAT_BASE_Z: i32 = 2;
 /// of crown to brim that says "hat", not the ribbing.
 const HAT_H: i32 = 9;
 
-/// **Maintenance: an open-ended spanner.** A double-ender lying flat, the
+/// **Engineering: an open-ended spanner.** A double-ender lying flat, the
 /// classic tool-icon silhouette: a straight shaft with a round head and an
 /// open jaw at each end. Flat, not standing, because from above the jaws
 /// are what say "spanner", and on edge it is a bar. The two jaws are offset
@@ -2718,7 +2718,7 @@ const HAT_H: i32 = 9;
 /// Stainless (`steel_light`, class `metal`) with a `steel` stamp band down
 /// the shaft's top — the one darker line a forged spanner's I-section
 /// gives it.
-pub fn staff_maintenance(p: &Palette) -> VoxModel {
+pub fn staff_engineering(p: &Palette) -> VoxModel {
     let mut m = VoxModel::tile();
     let light = p.idx("steel_light");
     let steel = p.idx("steel");
@@ -8561,7 +8561,7 @@ mod tests {
             names,
             [
                 "staff_manufacturing",
-                "staff_maintenance",
+                "staff_engineering",
                 "staff_packaging",
                 "staff_logistics"
             ],
@@ -8602,7 +8602,7 @@ mod tests {
             "a hard hat has no steel on it"
         );
 
-        let spanner = staff_maintenance(&p);
+        let spanner = staff_engineering(&p);
         assert!(
             spanner.filter_class(&p, MaterialClass::Matte).is_empty(),
             "the spanner is all metal"
@@ -8630,7 +8630,7 @@ mod tests {
     /// reads as a dumbbell.
     #[test]
     fn spanner_jaws_are_open() {
-        let m = staff_maintenance(&palette());
+        let m = staff_engineering(&palette());
         assert!(!m.filled(2, 14, 0), "the -X jaw is open at its mouth");
         assert!(
             m.filled(2, 11, 0) && m.filled(2, 18, 0),

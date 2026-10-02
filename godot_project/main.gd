@@ -2176,14 +2176,14 @@ const STAFF_ICON_SIZE := Vector2(40, 40) * UI_SCALE
 ## "0 / 0" would be noise and a HIRE button would be a pure money sink —
 ## both are hidden and this sentence stands instead.
 ##
-## `maintenance` is the standing case: `data/machines.ron` contains no
+## `engineering` is the standing case: `data/machines.ron` contains no
 ## machine that asks for it, because the corrosion and wear it exists to
 ## service is GAMEPLAY.md §4's tier-4/5 scope and is not built. It ships in
 ## `staff.ron` at headcount 0 so the panel and the save already know the
 ## shape (that file says so itself). Until then a player could hire and pay
-## maintenance staff forever for no effect, which the playtest review called
+## engineering staff forever for no effect, which the playtest review called
 ## out as a trap.
-const STAFF_IDLE_NOTES := {"maintenance": "nothing needs maintenance yet — nothing to hire for"}
+const STAFF_IDLE_NOTES := {"engineering": "nothing needs engineering yet — nothing to hire for"}
 ## Ticket 2's icon files are `staff_<category id>.png`, so the path is built
 ## from the wire's id with no lookup table.
 const STAFF_ICON_PREFIX := "staff_"
@@ -2194,7 +2194,7 @@ const STAFF_ICON_PREFIX := "staff_"
 ## than a made-up one.
 const STAFF_CATEGORY_BLURBS := {
 	"manufacturing": "runs the machines that turn ingredients into sauce",
-	"maintenance": "repairs equipment as it wears down",
+	"engineering": "repairs equipment as it wears down",
 	"packaging": "bottles and seals a finished batch",
 	"logistics": "loads pallets and trucks so a delivery can ship",
 }
@@ -12157,9 +12157,9 @@ func _crew_plate_state(snapshot: Dictionary, current_tick: int) -> Dictionary:
 			"assigned_text": _crew_assigned_text(required, sources),
 			"short": short > 0,
 			# A category nothing has ever asked for and nobody has been hired
-			# into takes no room at all. Today that is `maintenance`: no
+			# into takes no room at all. Today that is `engineering`: no
 			# machine in `machines.ron` requires it and the roster starts it
-			# at zero, so a permanent "Maintenance 0 / 0 — nothing needs them
+			# at zero, so a permanent "Engineering 0 / 0 — nothing needs them
 			# yet" row would cost a quarter of this plate to say nothing. It
 			# is still in the H panel, with its own note, so hiring one is
 			# still possible and still explained; and the moment a head IS

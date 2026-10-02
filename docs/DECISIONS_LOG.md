@@ -18,6 +18,21 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-02 **The maintenance crew is called engineering; a renamed staff
+  category keeps its old id in `renamed_from`.** The category is
+  `StaffCategory(id: "engineering", name: "Engineering", ...,
+  renamed_from: ["maintenance"])` in `data/staff.ron`; its meaning is
+  unchanged (repairs and keeps equipment running, GAMEPLAY.md §7). A save's
+  staff maps and `SavedMachine::refused_by` are read through
+  `StaffCatalog::resolve`, which maps a former id to its category, so every
+  save written before the rename loads with its counts on `engineering` and
+  the next save writes only the new id — no save-schema bump. Commands and
+  `machines.ron` use `StaffCatalog::get`, which knows live ids only. The
+  loader refuses a former id that is a live id or another former id
+  (`StaffLoadError::AmbiguousFormerId`), and a save naming one category
+  under both ids is `SaveError::BadStaff`. Never drop a `renamed_from`
+  entry: an old save would stop loading. Full record in
+  `docs/DECISIONS.md`.
 - 2026-10-02 **Mustard is yellow and white, not yellow and black.** The
   owner's ruling. The mustard bottle (`item_bottle_mustard`) is a
   `mustard_gold` body with a WHITE label band and cap — both

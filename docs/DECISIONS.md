@@ -25,6 +25,55 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-02: **The maintenance crew is called engineering; a renamed
+  staff category keeps its old id in `renamed_from`.** (Owner, verbatim:
+  "Rename maintenance to engineering everywhere (it still does nothing yet
+  but id rather it was called engineering)".) The category still has no
+  machine asking for it; only its id, its name, its idle note ("nothing
+  needs engineering yet — nothing to hire for"), its icon asset
+  (`staff_maintenance` -> `staff_engineering`, the same spanner, byte for
+  byte) and the docs changed. Its meaning is GAMEPLAY.md §7's: the crew
+  that repairs worn equipment and keeps it running, tied to corrosion.
+
+  **Why a rename is not a plain find-and-replace.** Saves key every staff
+  map — `headcount`, `unpaid`, `owed`, `left_last_payday` — and a refused
+  machine's `refused_by` by category id, and the loader refuses an id
+  `staff.ron` does not define (`SaveError::UnknownStaffCategory`). Every
+  save in existence names `maintenance` (with 0 heads unless the player
+  hired one), so renaming the id alone would have made the owner's saves
+  unloadable.
+
+  **Options.** (1) Bump the save schema and ship a migration script, as
+  v5 did (`boxes-sold gates`) — rejected: the save's *shape* did not
+  change, and the schema rule exists for shape changes; a content rename
+  forcing a format break would make every future rename one too. (2)
+  Hardcode `"maintenance" => "engineering"` in `save.rs` — rejected:
+  content ids in Rust break "content is data, never code", and the next
+  rename would be another Rust change. (3) **Chosen:** an optional
+  `renamed_from: Vec<String>` on `StaffCategory` (`#[serde(default)]`, so
+  no `staff.ron` schema bump either). `StaffCatalog::resolve` answers a
+  live id or a former one; save validation, `StaffPools::restore` and the
+  `refused_by` restore go through it, and the live pools carry only the
+  current id, so the save written after a load is in the new vocabulary.
+  `get` — what commands, `machines.ron` validation and the wire use —
+  still knows live ids only, so nothing outside the load path can name a
+  former id.
+
+  **Guards.** A former id that equals a live id, or that two categories
+  (or one, twice) claim, would let a save's id mean two categories and
+  `resolve` would pick by file order; the loader refuses it
+  (`StaffLoadError::AmbiguousFormerId`). A save map naming one category
+  under both its ids could keep only one count, so validation refuses it
+  as `BadStaff`. Tests: `staff.rs`'s
+  `a_former_id_resolves_to_the_renamed_category_and_only_on_load` and
+  `rejects_a_former_id_that_is_ambiguous`; `tests/staff.rs`'s
+  `a_save_naming_the_old_maintenance_crew_loads_into_engineering`,
+  `a_save_naming_a_category_under_both_its_ids_is_refused` and
+  `the_shipped_catalog_maps_maintenance_and_rejects_a_colliding_former_id`.
+  Historical records (DEVLOG, earlier DECISIONS entries,
+  `STAFF_POOLS_PLAN.md`) keep the word *maintenance* — they describe what
+  was true when written.
+
 - 2026-10-02: **Mustard is yellow and white, not yellow and black.**
   (Owner, verbatim: "Mustard should be yellow and white not yellow and
   black".)

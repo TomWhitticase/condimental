@@ -259,6 +259,18 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-02 — the maintenance crew is called engineering
+
+The owner asked for the fourth staff category to be called engineering
+rather than maintenance. It still does nothing — no machine asks for it
+until wear and corrosion exist — but the id, the name, the staff panel's
+idle note and the spanner icon's asset name all say engineering now. Old
+saves name the crew `maintenance`, so `data/staff.ron` gained a
+`renamed_from` list on a category: a save naming a former id loads into the
+renamed category with its heads, and the next save writes the new id. A
+rename is a content edit now, with no save-format bump and no Rust change.
+DECISIONS 2026-10-02.
+
 ### 2026-10-02 — mustard is yellow and white
 
 The owner ruled the mustard bottle should be yellow and white, not yellow
