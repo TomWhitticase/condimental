@@ -789,7 +789,10 @@ which is more than the modal gets at 1600px. Shrinking the cards to make that
 fit would cramp the one screen whose job is reading them. So the sections
 scroll, and the **search box sits in the heading row, outside the scroll**.
 It filters by display name, case-insensitively, hides a section left empty,
-and is cleared when the menu closes. It is not focused when the menu opens,
+and is cleared when the menu closes. **Filtering never resizes the menu**
+(2026-10-02, the owner's call): the panel is measured with the whole catalog
+showing and pinned there, so typing does not shrink and re-centre it on
+every keystroke. It is not focused when the menu opens,
 so E, ESC and the digits keep working; focused, it takes every key, and ESC
 releases it before a second ESC closes the menu (`test_shop_search.gd` pushes
 real key events to pin that). The menu's plate is **opaque** — its heading

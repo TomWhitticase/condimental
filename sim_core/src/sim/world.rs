@@ -2507,9 +2507,13 @@ const BELT_TILE_LENGTH: f64 = 1.0;
 /// objects with a few voxels of belt showing between each pair. Wider still
 /// read as a trickle. The belt's speed is unchanged — only the spacing moved
 /// — so a belt now carries `BELT_SPEED_TILES_PER_TICK / this` items per
-/// tick at most: one every 25 ticks, forty per thousand, still well over
-/// what the shipped line's slowest stage asks of it (`tests/core_loop.rs`
-/// pins that the line's rate is the vat's, not the belt's). Exact in `Fx`.
+/// tick at most: one every 25 ticks, forty per thousand. **Since a case
+/// became eight bottles (2026-10-02) that is the limit a player feels.** One
+/// ketchup line puts about 33 bottles per thousand ticks on the lane into its
+/// packer, so a lane serves about 1.2 vats, and a factory with more vats
+/// needs more bottlers, packers and belts, not a faster bottler.
+/// `tests/core_loop.rs` still pins that a single line's rate is the vat's,
+/// not the belt's. Exact in `Fx`.
 /// Stated in prose in `docs/DECISIONS_LOG.md` and `docs/DECISIONS.md`;
 /// change them together.
 const ITEM_MIN_SPACING_TILES: f64 = 0.5;
