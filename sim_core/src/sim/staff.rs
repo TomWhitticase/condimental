@@ -1118,8 +1118,8 @@ impl StaffPools {
 /// asked for and what was handed out — and both breathe with production
 /// flow. `required` and `short` do NOT: `required` is the establishment
 /// the PLACED machinery needs (`StaffPools::set_required`, recomputed only
-/// on a topology change) and `short` is `required - headcount`, the heads
-/// the player must HIRE. A panel answering "do I need staff?" reads
+/// when the player changes the factory) and `short` is
+/// `required - headcount`, the heads the player must HIRE. A panel answering "do I need staff?" reads
 /// `short`; one showing "what is working right now" reads `assigned`.
 /// Before 2026-09-16 `short` meant `demand - assigned`, which moved every
 /// tick and so could not be acted on. `money` is repeated here, as `shop_snapshot_json`

@@ -1037,8 +1037,9 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 - 2026-09-16 **Staffing is an establishment, and the crew has a plate.**
   **The staffing requirement is the sum of the crews of every PLACED
-  machine**, running or not — recomputed only in `World::recompute_topology`
-  (place/remove/rotate) and again after a load, never per tick. `short` on
+  machine**, running or not — recomputed only when the factory changes
+  (place/remove/rotate, mothballing, a splitter's mode, a tank's fluid) and
+  after a load, never per tick. `short` on
   the wire means `required - headcount`: "hire this many", and it holds
   still. The per-tick `demand`/`assigned` figures are kept and still shown,
   demoted to "what is working right now". This contradicts GAMEPLAY §7 as
