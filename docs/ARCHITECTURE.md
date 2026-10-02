@@ -593,8 +593,9 @@ Still open:
   (the staff pools MVP): it is not an ECS shape at all — `sim::staff::
   StaffPools`, a plain field on `World` beside `Economy`, four aggregate
   counters reset and claimed in stable order each tick (GAMEPLAY.md §9).
-- Spoilage and corrosion components (GAMEPLAY.md §9) — needed before tiers
-  4/5.
+- A corrosion component (GAMEPLAY.md §9) — needed before tier 5. There is
+  no spoilage component to build: the game has no spoilage (GAMEPLAY.md §11,
+  decided 2026-10-02).
 - iOS export viability — re-run the spike with full Xcode (§9a).
 - Android runtime launch — unverified (§9a). Close before milestone 10.
 - Cross-platform determinism hash test in CI (§6).

@@ -259,6 +259,42 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-02 — Spoilage is out of the game
+
+The owner dropped spoilage. Nothing perishes, so the design no longer has a
+refrigeration tier, a cold chain or a spoilage component waiting to be built.
+It came up while planning mayonnaise as the next sauce, after burger sauce
+was set aside because real burger sauce is mostly mayo. Mayo stays tier 4 and
+an equipment gate, but the equipment is now its emulsifier, not a fridge.
+GAMEPLAY.md, ARCHITECTURE.md §11 and the README roadmap say so, and §11's
+"how is spoilage modelled" question is closed. Corrosion for hot sauce is
+still open. Two real obstacles to mayo remain: one recipe drinking two raw
+fluids (oil and vinegar) is a pipe run the resolver cannot name (#184), and
+a cream-coloured fluid would fail the fluid-tint saturation floor that issue
+#100 added (`test_fluid_gallery.gd`). Mayo's own plan is next.
+
+### 2026-10-02 — A big warehouse no longer costs a frame
+
+A watched play session pointed at the warehouse poll, and measuring it on a
+generated floor confirmed it: `_refresh_racks` rebuilt and re-parsed the whole
+storage snapshot on every polled frame, and the snapshot asked every rack's
+refusals (`blocked_filters`, `removal_refused`) afresh, each raw cloning the bay
+pool and walking the ledger. At 500 racks, a quarter reserved, that was 5.8 ms
+of Rust per frame in release and about 40 ms of Rust plus parse in the debug
+build `cargo xtask` stages — the warehouse alone held the game under 25 fps.
+
+Two changes, neither visible. The refusals depend on a rack only through its
+bays and filter, so `storage_snapshot` works them out once per distinct pair
+(`World::rack_verdicts`): 5.8 ms → 1.0 ms in release, now linear in racks. And
+the poll skips the read entirely unless `sim.storage_revision()` has moved —
+a counter the bridge bumps when `World::storage_key` (the ledger plus every
+rack's identity, placement and filter) changes, which is a hopper refill or a
+player action, not a tick. An unchanged frame now costs the key compare, about
+1.4 ms at 500 racks in debug on a loaded machine against 57 ms for the full
+read in the same run. `tests/storage.rs` checks every rack's shared refusals
+against what `Remove`/`SetRackFilter` really do on a mixed floor, and that the
+key moves exactly when the snapshot does.
+
 ### 2026-10-02 — wrap-it-up removes its own worktree on a green banner
 
 A plain `wrap-it-up` that ends green now runs `orca worktree rm` on its own

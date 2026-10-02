@@ -34,6 +34,11 @@ struct SimBridge {
     base: Base<RefCounted>,
     #[init(val = World::new(load_bundled_recipes()))]
     world: World,
+    /// The [`sim::world::StorageKey`] `storage_revision` last saw, and how
+    /// many times it has seen it move — presentation-side change detection
+    /// for a snapshot that is polled, not dirtied.
+    storage_seen: Option<sim::world::StorageKey>,
+    storage_revision: i64,
 }
 
 #[godot_api]
@@ -934,6 +939,22 @@ impl SimBridge {
         let snapshot = self.world.storage_snapshot();
         let json = serde_json::to_string(&snapshot).expect("StorageSnapshot must serialize");
         GString::from(json.as_str())
+    }
+
+    /// A number that moves whenever `storage_snapshot_json` would answer
+    /// differently from the last time this was asked, and only then
+    /// (`World::storage_key`). Godot's warehouse poll reads this every frame
+    /// and the snapshot only when it has moved: a big warehouse's snapshot is
+    /// hundreds of kilobytes, and its stock changes on a hopper refill, not
+    /// on every tick.
+    #[func]
+    fn storage_revision(&mut self) -> i64 {
+        let key = self.world.storage_key();
+        if self.storage_seen.as_ref() != Some(&key) {
+            self.storage_seen = Some(key);
+            self.storage_revision += 1;
+        }
+        self.storage_revision
     }
 
     /// The content ids that carry a name of their own, as one flat JSON
