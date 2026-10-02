@@ -74,6 +74,58 @@ matches what code comments and data files cite.
   `STAFF_POOLS_PLAN.md`) keep the word *maintenance* — they describe what
   was true when written.
 
+- 2026-10-02: **An item on a splitter is drawn turning toward the exit it
+  will take.** (Owner: "Items moving over splitter dont move right (if
+  routed left still continue forward until actually leave splitter)".)
+
+  **What it replaces.** A splitter's items were drawn exactly like a
+  straight belt tile's: from the back face to the front face. The exit was
+  only chosen at the tile's end, so an item going out a side carried
+  straight on across the whole tile and then appeared on the branch belt
+  half a tile sideways.
+
+  **The rule.** The simulation predicts each item's exit, and Godot draws
+  that path. `Splitter::planned_exits(open, count)` runs the splitter's own
+  dealing rule (`offer_order` and `record_output`) forward on a copy. That
+  is the rotation with the fallback's skip, so it cannot disagree with the
+  hand-off while the open set holds. `open` is the connected sides whose
+  target would take the front item now, judged by the hand-offs' own
+  refusal tests (`World::would_take`; `Dock::has_room_for` is now shared
+  with `try_absorb`). If no side would take it, `open` is every connected
+  side. `SplitterSnapshot::exits` sends the result as world directions, so
+  GDScript never restates `Side::direction_from`. A side exit uses the
+  quarter arc a corner belt's items already follow (`_quarter_arc_point`),
+  from the back face's midpoint to the exit face's midpoint.
+
+  **Why a prediction, and not a commitment.** Choosing the exit when an
+  item enters, and holding it to that choice, would change the gameplay
+  rule. A splitter that insisted on its turn is the throughput bug its
+  fallback exists to prevent (`splitter.rs`). A per-item side would also
+  be new saved state. The prediction changes no simulation state, so
+  throughput, timing and saves are untouched. The cost is that a side which
+  fills or clears while an item is in the second half of the tile can snap
+  that item onto the other path. That happens only on a state change, not
+  every item.
+
+  **Why a running belt is never "full" to the plan.** A belt that has just
+  taken an item has a crowded start for about a dozen ticks. By the time
+  the next item reaches the splitter's end it has cleared, and the hand-off
+  does not fall back. Counting that crowding as a refusal swung every item
+  behind it onto another path and back, which the first test run caught.
+  Only a conveyor that is crowded *and* standing (`moved_ticks` behind the
+  tick) is backed up, and the hand-off passes that side every time.
+
+  **Pinned by** `tests/splitters.rs`
+  `every_item_leaves_a_splitter_by_the_exit_it_was_drawn_heading_for`
+  (every mode: each hand-off lands where the front item was planned, and no
+  item on the tile changes its plan while nothing backs up), and by the
+  three refusal tests the plan borrows: a backed-up belt, a full machine
+  and a mothballed dock (`a_backed_up_side_…`, `a_full_machine_…` and
+  `a_mothballed_dock_is_planned_past_like_the_fallback_passes_it`). It is also
+  pinned by `test_splitters.gd` (the path geometry at every facing and exit,
+  and the drawn items against the wire), and by `--fixture splitter_turns`,
+  which freezes on an item mid-turn.
+
 - 2026-10-02: **Mustard is yellow and white, not yellow and black.**
   (Owner, verbatim: "Mustard should be yellow and white not yellow and
   black".)

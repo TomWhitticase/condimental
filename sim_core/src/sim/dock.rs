@@ -292,6 +292,13 @@ impl Dock {
         self.used() >= self.places
     }
 
+    /// Whether one more `item` fits — the test [`Self::try_absorb`] refuses
+    /// on, and what a splitter's planned exits ask of a dock without
+    /// taking anything (`World::would_take`).
+    pub fn has_room_for(&self, item: &ItemId) -> bool {
+        !self.at_capacity() && self.stock.has_room_for(item, 1)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.stock.iter().next().is_none()
     }
@@ -343,7 +350,7 @@ impl Dock {
         // Checked before the item is taken, so a full dock leaves the box
         // standing at the belt's end and the line backs up behind it —
         // exactly what a machine with a full input buffer already does.
-        if self.at_capacity() || !self.stock.has_room_for(&item, 1) {
+        if !self.has_room_for(&item) {
             // The jam is a fact about THIS dock: recorded here, where the
             // refusal is in hand, rather than re-derived by a snapshot.
             self.blocked = true;
