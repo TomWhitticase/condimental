@@ -2366,20 +2366,19 @@ pub fn item_bottle_bbq(p: &Palette) -> VoxModel {
 /// them) rather than crowding one end of it, which is what keeps three of
 /// them tellable apart at the ~16px an item renders at on a belt.
 ///
-/// **Its cap and label band are dark, and that is not a livery choice.** A
-/// bright body under `cap_white` loses the top of its silhouette:
-/// `mustard_gold` is 5.0/255 from `glass_pale`, the neck every bottle
-/// shares, so body and neck are already one mass, and a white cap on top of
-/// them leaves the bottle's whole top — the three-voxel neck and the
-/// two-voxel cap, one five-pixel mark at item size — at 213.9 against a
-/// 192.7 body. That is 21.2 apart, under the 26 that reads, and the pale
-/// column runs from the label band to the crown. (Cap-against-neck 26.6 and
-/// cap-against-body 31.6 each clear the anchor on their own; it is the top
-/// taken together that fails, which is the figure
-/// `a_bottle_s_cap_contrasts_with_the_neck_and_the_body` asserts.)
-/// `label_mustard` does both jobs instead — see [`bottle`], which grew the
-/// `cap` parameter for this, and `palette.ron`, which records why one dark
-/// colour serves as band and cap where the other two bottles use two.
+/// **Its cap and label band are white — the project owner's ruling.** Mustard
+/// is yellow and white, not yellow and black (2026-10-02, DECISIONS.md); the
+/// band and cap were a near-black olive ink until then. That ink answered a
+/// real problem, and the white answers it too, from the bright side: a
+/// bright body under the ordinary `cap_white` loses the top of its
+/// silhouette, because `mustard_gold` is 5.0/255 from `glass_pale`, the neck
+/// every bottle shares, so the three-voxel neck and two-voxel cap — one
+/// five-pixel mark at item size — come to 213.9 against a 192.7 body, 21.2
+/// apart and under the 26 that reads. `label_mustard` is therefore a
+/// brighter white than `cap_white` (luma 241.0), which lifts that mark to
+/// about 224, 31.3 over the body, and puts the band 48.3 over it.
+/// `a_bottle_s_cap_contrasts_with_the_neck_and_the_body` measures the top;
+/// `the_mustard_bottle_is_yellow_and_white` holds the ruling.
 pub fn item_bottle_mustard(p: &Palette) -> VoxModel {
     bottle(p, "mustard_gold", "label_mustard", "label_mustard")
 }
@@ -2397,16 +2396,17 @@ pub fn item_bottle_mustard(p: &Palette) -> VoxModel {
 /// sake. Both earlier bottles are a dark body under a bright `cap_white`, so
 /// the cap tops the silhouette by contrast; `mustard_gold` is the brightest
 /// body in the game and sits 5.0/255 of luma from `glass_pale`, the neck
-/// every bottle shares, so on a mustard bottle the neck and a white cap
-/// together come to 213.9 against a 192.7 body — 21.2 apart, under the 26
-/// that reads — and body, neck and cap are one pale column. (Neither pair on
-/// its own says so: the white cap is 26.6 from the neck and 31.6 from the
+/// every bottle shares, so on a mustard bottle the neck and a `cap_white`
+/// cap together come to 213.9 against a 192.7 body — 21.2 apart, under the
+/// 26 that reads — and body, neck and cap are one pale column. (Neither pair
+/// on its own says so: that cap is 26.6 from the neck and 31.6 from the
 /// body. At the ~16px an item draws on a belt the neck is three voxels and
 /// the cap two, so the top is one mark and its combined value is what the
-/// eye gets.) A dark cap restores the same contrast the other way up — which
-/// is `box_of_sauce`'s reversed print direction applied to a bottle, and
-/// `a_bottle_s_cap_contrasts_with_the_neck_and_the_body` asserts it that
-/// way.
+/// eye gets.) Mustard's cap is a brighter white instead, `label_mustard`,
+/// which clears the combined figure from above; it was a dark ink until the
+/// owner ruled mustard yellow and white (2026-10-02).
+/// `a_bottle_s_cap_contrasts_with_the_neck_and_the_body` asserts the top
+/// either way up.
 fn bottle(p: &Palette, contents: &str, label: &str, cap: &str) -> VoxModel {
     let mut m = item_volume();
     m.cylinder_z((8, 8), 4.0, (0, 7), p.idx(contents));
@@ -9130,11 +9130,10 @@ mod tests {
         }
     }
 
-    /// **A bottle's TOP has to contrast with its body**, and which direction
-    /// that contrast runs depends on the sauce. Every bottle shares a
-    /// `glass_pale` neck, so `cap_white` tops a dark ketchup or BBQ bottle
-    /// and loses a `mustard_gold` one, which is why [`bottle`] takes a `cap`
-    /// at all.
+    /// **A bottle's TOP has to contrast with its body**, and the shared
+    /// `glass_pale` neck makes that harder for a bright body: `cap_white`
+    /// tops a dark ketchup or BBQ bottle and loses a `mustard_gold` one,
+    /// which is why [`bottle`] takes a `cap` at all.
     ///
     /// **The pairwise legs are not what catches that**, and the first cut of
     /// this test claimed they were (the review of PR #179 falsified it in
@@ -9144,8 +9143,10 @@ mod tests {
     /// ~16px an item draws on a belt the three-voxel neck and the two-voxel
     /// cap are one mark of about five pixels, and their voxel-weighted value
     /// is what the eye compares with the body: 213.9 against a 192.7 body,
-    /// 21.2 apart. `label_mustard` puts that mark at 111.1 — 81.6 from the
-    /// body — and the silhouette keeps its top.
+    /// 21.2 apart. Mustard's cap is `label_mustard`, a brighter white, which
+    /// puts that mark at about 224 — 31.3 over the body. (It was a dark ink
+    /// at 111.1 until the owner ruled mustard yellow and white on
+    /// 2026-10-02; this test holds whichever way up the contrast runs.)
     ///
     /// So all three legs are asserted as properties rather than as colours,
     /// and the combined one is the one that bites: a fourth sauce copying
@@ -9202,6 +9203,43 @@ mod tests {
                  ({:.1} apart), and at ~16px that pair is one mark of five pixels",
                 luma(body),
                 (mark - luma(body)).abs()
+            );
+        }
+    }
+
+    /// **Mustard is yellow and white, not yellow and black** — the project
+    /// owner's ruling of 2026-10-02 (DECISIONS.md), which replaced a
+    /// near-black olive band and cap. So the bottle's two accents, its label
+    /// band and its cap, are asserted as a WHITE: brighter than the gold
+    /// body by the 26/255 that reads, and near-neutral (no channel more than
+    /// a few points off the others), so a later "legibility" fix cannot
+    /// quietly darken them again or slide them to another tint.
+    #[test]
+    fn the_mustard_bottle_is_yellow_and_white() {
+        let p = palette();
+        let luma = |c: u8| {
+            let [r, g, b] = p.rgb_of(c).expect("a palette colour");
+            0.2126 * r as f64 + 0.7152 * g as f64 + 0.0722 * b as f64
+        };
+        let m = item_bottle_mustard(&p);
+        let at = |z| *m.voxels.get(&(12, 8, z)).expect("the bottle's outer wall");
+        let (body, band) = (at(0), at(3));
+        let cap = *m.voxels.get(&(8, 8, 14)).expect("the bottle's cap");
+        assert_eq!(body, p.idx("mustard_gold"), "the mustard bottle is yellow");
+        for (what, c) in [("label band", band), ("cap", cap)] {
+            let [r, g, b] = p.rgb_of(c).expect("a palette colour");
+            let spread = r.max(g).max(b) - r.min(g).min(b);
+            assert!(
+                luma(c) - luma(body) >= 26.0,
+                "the mustard bottle's {what} is {:.1} against a {:.1} body — white, not black, \
+                 and bright enough to read as such",
+                luma(c),
+                luma(body)
+            );
+            assert!(
+                spread <= 16,
+                "the mustard bottle's {what} is #{r:02X}{g:02X}{b:02X}, {spread} between \
+                 channels — a tint, not white"
             );
         }
     }

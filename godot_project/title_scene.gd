@@ -209,11 +209,10 @@ var _sign_neon_energy := 0.0
 ## top above its foot — the point it hangs (and swings) from.
 var _sign_board_size := Vector2.ZERO
 var _sign_rod_top := 0.0
-## The stacked rod lengths above the body's own rods, pooled: the first
-## `_sign_rod_count` are shown, the rest hidden until a taller window wants
+## The stacked rod lengths above the body's own rods, pooled: as many as
+## the frame needs are shown, the rest hidden until a taller window wants
 ## them.
 var _sign_rod_lengths: Array = [] # Array[Node3D]
-var _sign_rod_count := 0
 ## Seconds since the screen came up, which is all the camera's drift is a
 ## function of. Wall time, not a tick count: there is no simulation on this
 ## screen to borrow a clock from, and nothing here is reproduced from a save.
@@ -421,7 +420,6 @@ func _reach_frame_top(half_height: float, fit: float) -> void:
 		_sign_rod_lengths.append(rods)
 	for k in range(_sign_rod_lengths.size()):
 		(_sign_rod_lengths[k] as Node3D).visible = k < needed
-	_sign_rod_count = needed
 
 
 ## Hides the sign while the menu's settings rows have its space, and brings

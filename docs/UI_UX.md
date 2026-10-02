@@ -1587,6 +1587,10 @@ Four consequences worth knowing before changing it:
   value-neutral swap costs no re-measuring. The shipped beams measure 76.4
   where the red ones measured 74.7. A brighter green cut (#3A6B33, +11.6)
   was rejected on exactly that.
+- **Mustard is yellow and white** (the owner, 2026-10-02). The mustard
+  bottle's label band and cap are white (`label_mustard`), never a dark
+  ink; the bottle's top keeps its contrast by being a brighter white than
+  `cap_white`, not by going dark. DECISIONS 2026-10-02 has the numbers.
 - **A world-space warning is a rhythm, not a lamp** (the dock-capacity
   change, 2026-09-16). A full delivery dock has to say so on the floor, not
   only on the clipboard, and it cannot say it by turning red: machine

@@ -271,6 +271,15 @@ always leave the top edge; 1280x720 renders pixel-identical. `test_main_menu`
 projects the real rod meshes through the title camera at 16:9, 16:10,
 ultrawide and portrait with the slot high, centred and low.
 
+### 2026-10-02 — mustard is yellow and white
+
+The owner ruled the mustard bottle should be yellow and white, not yellow
+and black. Its label band and cap were a near-black olive ink, put there
+so the bottle's top would not wash into its bright body. They are now a
+white brighter than the other bottles' caps, which keeps that contrast
+from the light side (31.3 over the body, where 26 reads). A new voxgen
+test holds the ruling. DECISIONS 2026-10-02.
+
 ### 2026-10-02 — A big save loads in linear time
 
 The scale sweep's other finding: loading the owner's factory tiled 20×
