@@ -2369,7 +2369,7 @@ pub fn item_bottle_bbq(p: &Palette) -> VoxModel {
 /// five-pixel mark at item size — come to 213.9 against a 192.7 body, 21.2
 /// apart and under the 26 that reads. `label_mustard` is therefore a
 /// brighter white than `cap_white` (luma 241.0), which lifts that mark to
-/// about 224, 31.4 over the body, and puts the band 48.3 over it.
+/// about 224, 31.3 over the body, and puts the band 48.3 over it.
 /// `a_bottle_s_cap_contrasts_with_the_neck_and_the_body` measures the top;
 /// `the_mustard_bottle_is_yellow_and_white` holds the ruling.
 pub fn item_bottle_mustard(p: &Palette) -> VoxModel {
@@ -9105,7 +9105,7 @@ mod tests {
     /// cap are one mark of about five pixels, and their voxel-weighted value
     /// is what the eye compares with the body: 213.9 against a 192.7 body,
     /// 21.2 apart. Mustard's cap is `label_mustard`, a brighter white, which
-    /// puts that mark at about 224 — 31.4 over the body. (It was a dark ink
+    /// puts that mark at about 224 — 31.3 over the body. (It was a dark ink
     /// at 111.1 until the owner ruled mustard yellow and white on
     /// 2026-10-02; this test holds whichever way up the contrast runs.)
     ///

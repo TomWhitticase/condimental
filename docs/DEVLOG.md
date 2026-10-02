@@ -265,7 +265,7 @@ The owner ruled the mustard bottle should be yellow and white, not yellow
 and black. Its label band and cap were a near-black olive ink, put there
 so the bottle's top would not wash into its bright body. They are now a
 white brighter than the other bottles' caps, which keeps that contrast
-from the light side (31.4 over the body, where 26 reads). A new voxgen
+from the light side (31.3 over the body, where 26 reads). A new voxgen
 test holds the ruling. DECISIONS 2026-10-02.
 
 ### 2026-10-02 — A big save loads in linear time

@@ -438,7 +438,7 @@
         // neck plus two-voxel cap, one mark at ~16px) at 213.9 against a
         // 192.7 body — 21.2 apart, under the 26 that reads. So this is a
         // BRIGHTER white than `cap_white`, luma 241.0: 48.3 over the body,
-        // 43.3 over the neck, and the neck-and-cap mark at about 224 — 31.4
+        // 43.3 over the neck, and the neck-and-cap mark at about 224 — 31.3
         // over the body — which is what
         // `a_bottle_s_cap_contrasts_with_the_neck_and_the_body` measures.
         // One entry for band and cap because ketchup's two are 4.0 apart

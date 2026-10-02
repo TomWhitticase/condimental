@@ -46,7 +46,7 @@ matches what code comments and data files cite.
   index — the rgb changed in place, nothing reordered) but is now #F4F1E8,
   luma 241.0: a white brighter than `cap_white` (224.3). That puts the
   band 48.3 over the body, the cap 43.3 over the neck, and the
-  neck-and-cap mark at about 224 — 31.4 over the body, clear of 26. The
+  neck-and-cap mark at about 224 — 31.3 over the body, clear of 26. The
   existing contrast test kept its combined leg unchanged and passes; with
   plain `cap_white` it fails at 21.2, which is the evidence the brighter
   white is needed rather than any white.
