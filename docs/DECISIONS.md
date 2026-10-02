@@ -69,11 +69,58 @@ matches what code comments and data files cite.
   **Pinned by** `tests/splitters.rs`
   `every_item_leaves_a_splitter_by_the_exit_it_was_drawn_heading_for`
   (every mode: each hand-off lands where the front item was planned, and no
-  item on the tile changes its plan while nothing backs up) and
-  `a_backed_up_side_is_planned_past_like_the_fallback_passes_it`. It is also
+  item on the tile changes its plan while nothing backs up), and by the
+  three refusal tests the plan borrows: a backed-up belt, a full machine
+  and a mothballed dock (`a_backed_up_side_…`, `a_full_machine_…` and
+  `a_mothballed_dock_is_planned_past_like_the_fallback_passes_it`). It is also
   pinned by `test_splitters.gd` (the path geometry at every facing and exit,
   and the drawn items against the wire), and by `--fixture splitter_turns`,
   which freezes on an item mid-turn.
+
+- 2026-10-02: **Mustard is yellow and white, not yellow and black.**
+  (Owner, verbatim: "Mustard should be yellow and white not yellow and
+  black".)
+
+  **What it overturns.** The mustard epic (PR #179) gave the mustard bottle
+  a `mustard_gold` body under a band and cap of one dark olive ink,
+  `label_mustard` #3B3A14. That was a legibility call, not a livery one:
+  every bottle shares a `glass_pale` neck, which is only 5.0/255 of luma
+  from `mustard_gold`, so with the ordinary `cap_white` cap the bottle's
+  whole top — three voxels of neck and two of cap, one five-pixel mark at
+  the ~16px an item draws on a belt — averages 213.9 against a 192.7 body,
+  21.2 apart, under the 26 that DECISIONS 2026-09-20 found reads. A dark
+  ink put that mark at 111.1 and kept the top of the silhouette. At icon
+  size the result read as a yellow bottle with black stripes, and the owner
+  ruled against it.
+
+  **What replaced it.** The same constraint met from the bright side.
+  `label_mustard` stays one entry for band and cap (and keeps its palette
+  index — the rgb changed in place, nothing reordered) but is now #F4F1E8,
+  luma 241.0: a white brighter than `cap_white` (224.3). That puts the
+  band 48.3 over the body, the cap 43.3 over the neck, and the
+  neck-and-cap mark at about 224 — 31.3 over the body, clear of 26. The
+  existing contrast test kept its combined leg unchanged and passes; with
+  plain `cap_white` it fails at 21.2, which is the evidence the brighter
+  white is needed rather than any white.
+
+  **Options considered.** (a) Plain `cap_white`/`label_cream`: fails the
+  top-mark test as above. (b) A deeper body: `mustard_gold` is also the
+  case's print and the vat's tint, and it was balanced to sit 28.8 above
+  `hazard_yellow` and 27.5 under `label_cream`; deepening it enough (to
+  ~188) would break the hazard clearance, so it was left alone. (c) A
+  darker neck: reintroduces a dark mark, the thing the owner ruled out.
+  (d) A brighter white for the accents: meets both the ruling and the
+  test, touches one palette value. Chosen.
+
+  **What else was checked.** The mustard case is cardboard with gold
+  print, the seed tote steel, the vat and pipe a yellow FLUID_TINT; none
+  is yellow-and-black, so none changed. The Cookbook plates draw these
+  same icons.
+
+  **Guard.** `the_mustard_bottle_is_yellow_and_white` (voxgen) asserts the
+  band and cap are at least 26 brighter than the body and near-neutral (no
+  more than 16 between channels), so a later legibility fix cannot darken
+  them back or slide them to a tint without failing.
 
 - 2026-10-02: **The game's typeface is Chakra Petch SemiBold.** (Owner,
   after the title sign: "all the other text in the game (all other menus)
