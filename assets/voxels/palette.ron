@@ -427,21 +427,25 @@
         (name: "mustard_gold",    rgb: "#DCC63C", class: "matte"),
         // The mustard bottle's label band AND its cap, where ketchup's are
         // `label_cream`/`cap_white` and BBQ's are `label_kraft`/`cap_white`.
-        // A DARK accent on a bright bottle — the other two bottles' contrast
-        // direction reversed, the trick `label_bbq` plays on a case. It is
-        // not decoration: `glass_pale`, the neck every bottle shares, is
-        // 5.0 from `mustard_gold`, so body and neck are already one mass and
-        // a pale cap on top of them leaves the bottle's whole top 21.2 from
-        // its body — under the 26 that reads — and the top of the silhouette
-        // goes. Each PAIR clears the anchor on its own (`cap_white` is 26.6
-        // from the neck, 31.6 from a gold body); what fails is the
-        // three-voxel neck and the two-voxel cap taken together, which is
-        // the one mark the eye gets at the ~16px an item draws at, and which
+        // **White, because the project owner ruled on 2026-10-02 that
+        // mustard is yellow and white, not yellow and black** — this entry
+        // was #3B3A14, a near-black olive ink, until then (DECISIONS.md,
+        // 2026-10-02). The dark ink was there for a measured reason that
+        // still holds, and this colour is chosen to keep meeting it from the
+        // bright side: `glass_pale`, the neck every bottle shares, is 5.0
+        // from `mustard_gold`, so body and neck are one mass, and `cap_white`
+        // #E4E0D8 on top of them leaves the bottle's whole top (three-voxel
+        // neck plus two-voxel cap, one mark at ~16px) at 213.9 against a
+        // 192.7 body — 21.2 apart, under the 26 that reads. So this is a
+        // BRIGHTER white than `cap_white`, luma 241.0: 48.3 over the body,
+        // 43.3 over the neck, and the neck-and-cap mark at about 224 — 31.4
+        // over the body — which is what
         // `a_bottle_s_cap_contrasts_with_the_neck_and_the_body` measures.
-        // One entry doing both jobs because a band and a cap in one dark
-        // ink is what a jar of Dijon looks like, and because ketchup's band
-        // and cap are 4.0 apart already — that pair is one accent too.
-        (name: "label_mustard",   rgb: "#3B3A14", class: "matte"),
+        // One entry for band and cap because ketchup's two are 4.0 apart
+        // already — a bottle's accent is one colour — and `mustard_gold`
+        // itself is untouched, since it is also the case's print and the
+        // vat's tint and was balanced against `hazard_yellow` for that.
+        (name: "label_mustard",   rgb: "#F4F1E8", class: "matte"),
 
         // --- the mustard branch's two RAW ingredients ---
         // `seed_tan` is bulk mustard seed heaped in its tote: a dull
