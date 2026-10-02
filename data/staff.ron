@@ -20,9 +20,17 @@
 // gates a different stage a sauce passes through, so a shortfall reads
 // clearly — manufacturing idles the machines, packaging backs product up
 // in front of the bottler, logistics leaves boxes standing on the dock.
-// `maintenance` exists with nothing to maintain yet (nothing corrodes
+// `engineering` exists with nothing to keep running yet (nothing corrodes
 // until GAMEPLAY.md's tier 5), so it starts at zero and no machine asks
 // for it; it is here so the panel and the save already know the shape.
+//
+// RENAMING A CATEGORY. Saves key the crew by category id, so a rename
+// keeps the old id in `renamed_from`: a save naming it loads into the
+// renamed category with its counts, and the next save writes the new id.
+// `engineering` was `maintenance` until 2026-10-02. A former id may not be
+// any category's live id or another category's former id — a save naming
+// it must mean exactly one category. Never drop an entry: an old save
+// would stop loading.
 //
 // ORDER MATTERS TWICE. This is the order the staff panel lists categories
 // in, and it is the PAYDAY order: on payday heads are paid one at a time
@@ -71,7 +79,7 @@
     pay_period_ticks: 1000,
     categories: [
         StaffCategory(id: "manufacturing", name: "Manufacturing", wage: 2, starting_headcount: 4),
-        StaffCategory(id: "maintenance",   name: "Maintenance",   wage: 2, starting_headcount: 0),
+        StaffCategory(id: "engineering",   name: "Engineering",   wage: 2, starting_headcount: 0, renamed_from: ["maintenance"]),
         StaffCategory(id: "packaging",     name: "Packaging",     wage: 2, starting_headcount: 2),
         StaffCategory(id: "logistics",     name: "Logistics",     wage: 2, starting_headcount: 1),
     ],

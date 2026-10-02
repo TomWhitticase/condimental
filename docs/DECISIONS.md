@@ -100,6 +100,108 @@ matches what code comments and data files cite.
   idle machine that was never fed still has `recipe: Some(first)` written
   into it and keeps that until it is fed; only new placements start
   undecided.
+
+- 2026-10-02: **The maintenance crew is called engineering; a renamed
+  staff category keeps its old id in `renamed_from`.** (Owner, verbatim:
+  "Rename maintenance to engineering everywhere (it still does nothing yet
+  but id rather it was called engineering)".) The category still has no
+  machine asking for it; only its id, its name, its idle note ("nothing
+  needs engineering yet — nothing to hire for"), its icon asset
+  (`staff_maintenance` -> `staff_engineering`, the same spanner, byte for
+  byte) and the docs changed. Its meaning is GAMEPLAY.md §7's: the crew
+  that repairs worn equipment and keeps it running, tied to corrosion.
+
+  **Why a rename is not a plain find-and-replace.** Saves key every staff
+  map — `headcount`, `unpaid`, `owed`, `left_last_payday` — and a refused
+  machine's `refused_by` by category id, and the loader refuses an id
+  `staff.ron` does not define (`SaveError::UnknownStaffCategory`). Every
+  save in existence names `maintenance` (with 0 heads unless the player
+  hired one), so renaming the id alone would have made the owner's saves
+  unloadable.
+
+  **Options.** (1) Bump the save schema and ship a migration script, as
+  v5 did (`boxes-sold gates`) — rejected: the save's *shape* did not
+  change, and the schema rule exists for shape changes; a content rename
+  forcing a format break would make every future rename one too. (2)
+  Hardcode `"maintenance" => "engineering"` in `save.rs` — rejected:
+  content ids in Rust break "content is data, never code", and the next
+  rename would be another Rust change. (3) **Chosen:** an optional
+  `renamed_from: Vec<String>` on `StaffCategory` (`#[serde(default)]`, so
+  no `staff.ron` schema bump either). `StaffCatalog::resolve` answers a
+  live id or a former one; save validation, `StaffPools::restore` and the
+  `refused_by` restore go through it, and the live pools carry only the
+  current id, so the save written after a load is in the new vocabulary.
+  `get` — what commands, `machines.ron` validation and the wire use —
+  still knows live ids only, so nothing outside the load path can name a
+  former id.
+
+  **Guards.** A former id that equals a live id, or that two categories
+  (or one, twice) claim, would let a save's id mean two categories and
+  `resolve` would pick by file order; the loader refuses it
+  (`StaffLoadError::AmbiguousFormerId`). A save map naming one category
+  under both its ids could keep only one count, so validation refuses it
+  as `BadStaff`. Tests: `staff.rs`'s
+  `a_former_id_resolves_to_the_renamed_category_and_only_on_load` and
+  `rejects_a_former_id_that_is_ambiguous`; `tests/staff.rs`'s
+  `a_save_naming_the_old_maintenance_crew_loads_into_engineering`,
+  `a_save_naming_a_category_under_both_its_ids_is_refused` and
+  `the_shipped_catalog_maps_maintenance_and_rejects_a_colliding_former_id`.
+  Historical records (DEVLOG, earlier DECISIONS entries,
+  `STAFF_POOLS_PLAN.md`) keep the word *maintenance* — they describe what
+  was true when written.
+
+- 2026-10-02: **An item on a splitter is drawn turning toward the exit it
+  will take.** (Owner: "Items moving over splitter dont move right (if
+  routed left still continue forward until actually leave splitter)".)
+
+  **What it replaces.** A splitter's items were drawn exactly like a
+  straight belt tile's: from the back face to the front face. The exit was
+  only chosen at the tile's end, so an item going out a side carried
+  straight on across the whole tile and then appeared on the branch belt
+  half a tile sideways.
+
+  **The rule.** The simulation predicts each item's exit, and Godot draws
+  that path. `Splitter::planned_exits(open, count)` runs the splitter's own
+  dealing rule (`offer_order` and `record_output`) forward on a copy. That
+  is the rotation with the fallback's skip, so it cannot disagree with the
+  hand-off while the open set holds. `open` is the connected sides whose
+  target would take the front item now, judged by the hand-offs' own
+  refusal tests (`World::would_take`; `Dock::has_room_for` is now shared
+  with `try_absorb`). If no side would take it, `open` is every connected
+  side. `SplitterSnapshot::exits` sends the result as world directions, so
+  GDScript never restates `Side::direction_from`. A side exit uses the
+  quarter arc a corner belt's items already follow (`_quarter_arc_point`),
+  from the back face's midpoint to the exit face's midpoint.
+
+  **Why a prediction, and not a commitment.** Choosing the exit when an
+  item enters, and holding it to that choice, would change the gameplay
+  rule. A splitter that insisted on its turn is the throughput bug its
+  fallback exists to prevent (`splitter.rs`). A per-item side would also
+  be new saved state. The prediction changes no simulation state, so
+  throughput, timing and saves are untouched. The cost is that a side which
+  fills or clears while an item is in the second half of the tile can snap
+  that item onto the other path. That happens only on a state change, not
+  every item.
+
+  **Why a running belt is never "full" to the plan.** A belt that has just
+  taken an item has a crowded start for about a dozen ticks. By the time
+  the next item reaches the splitter's end it has cleared, and the hand-off
+  does not fall back. Counting that crowding as a refusal swung every item
+  behind it onto another path and back, which the first test run caught.
+  Only a conveyor that is crowded *and* standing (`moved_ticks` behind the
+  tick) is backed up, and the hand-off passes that side every time.
+
+  **Pinned by** `tests/splitters.rs`
+  `every_item_leaves_a_splitter_by_the_exit_it_was_drawn_heading_for`
+  (every mode: each hand-off lands where the front item was planned, and no
+  item on the tile changes its plan while nothing backs up), and by the
+  three refusal tests the plan borrows: a backed-up belt, a full machine
+  and a mothballed dock (`a_backed_up_side_…`, `a_full_machine_…` and
+  `a_mothballed_dock_is_planned_past_like_the_fallback_passes_it`). It is also
+  pinned by `test_splitters.gd` (the path geometry at every facing and exit,
+  and the drawn items against the wire), and by `--fixture splitter_turns`,
+  which freezes on an item mid-turn.
+
 - 2026-10-02: **Mustard is yellow and white, not yellow and black.**
   (Owner, verbatim: "Mustard should be yellow and white not yellow and
   black".)

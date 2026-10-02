@@ -20,7 +20,7 @@
 
 mod common;
 
-use sim_core::sim::save::{MoneyBits, SavedStaff};
+use sim_core::sim::save::{MoneyBits, SavedBody, SavedStaff};
 use sim_core::sim::types::Money;
 use sim_core::sim::{
     ContractRegistry, Direction, LOAD_WINDOW_TICKS, MachineRegistry, PlayerCommand, RecipeRegistry,
@@ -349,7 +349,7 @@ fn a_fed_reference_chain_runs_on_the_starting_crew_with_no_staff_stall_anywhere(
         by_id("manufacturing")
     );
     assert!(by_id("packaging").assigned <= 2);
-    assert_eq!(by_id("maintenance").demand, 0);
+    assert_eq!(by_id("engineering").demand, 0);
     // The dock asks only on a tick it holds something; over the window it
     // shipped, so logistics was asked for at least once.
     assert!(world.dock_snapshots()[0].shipped_total > 0);
@@ -1072,7 +1072,7 @@ fn a_factory_that_cannot_pay_is_warned_then_idled_and_loses_its_crew_only_at_the
         );
     }
     assert_eq!(unpaid(&world, "manufacturing"), 2);
-    assert_eq!(unpaid(&world, "maintenance"), 0);
+    assert_eq!(unpaid(&world, "engineering"), 0);
     assert_eq!(
         unpaid(&world, "packaging"),
         2,
@@ -1138,7 +1138,7 @@ fn a_factory_that_cannot_pay_is_warned_then_idled_and_loses_its_crew_only_at_the
         left,
         vec![
             ("manufacturing", 2),
-            ("maintenance", 0),
+            ("engineering", 0),
             ("packaging", 2),
             ("logistics", 1)
         ]
@@ -1305,11 +1305,11 @@ fn hire_and_fire_round_trip_through_json_and_dirty_no_chunk() {
     );
 
     // Silent no-ops: fire at zero, and either with an unknown category.
-    assert_eq!(headcount(&world, "maintenance"), 0);
+    assert_eq!(headcount(&world, "engineering"), 0);
     world.issue_command(
-        command_from_json(r#"{"type": "fire", "category": "maintenance"}"#).unwrap(),
+        command_from_json(r#"{"type": "fire", "category": "engineering"}"#).unwrap(),
     );
-    assert_eq!(headcount(&world, "maintenance"), 0);
+    assert_eq!(headcount(&world, "engineering"), 0);
     world.issue_command(command_from_json(r#"{"type": "hire", "category": "plumbers"}"#).unwrap());
     world.issue_command(command_from_json(r#"{"type": "fire", "category": "plumbers"}"#).unwrap());
     let snapshot = world.staff_snapshot();
@@ -1858,4 +1858,99 @@ fn a_save_naming_an_unknown_staff_category_is_refused() {
         .to_string();
     assert!(message.contains("plumbers"), "{message}");
     assert!(message.contains("staff.ron"), "{message}");
+}
+
+/// Every save written before 2026-10-02 names the engineering crew by its
+/// old id, `maintenance`. `data/staff.ron`'s `renamed_from` maps it: the
+/// counts land on `engineering` — in every map, and on a machine the crew
+/// refused — and the next save writes only the new id. No schema bump.
+#[test]
+fn a_save_naming_the_old_maintenance_crew_loads_into_engineering() {
+    let world = running_line(10);
+    let mut save = world.to_save();
+    let staff: &mut SavedStaff = save.staff.as_mut().unwrap();
+    for map in [
+        &mut staff.headcount,
+        &mut staff.unpaid,
+        &mut staff.owed,
+        &mut staff.left_last_payday,
+    ] {
+        map.remove("engineering");
+    }
+    staff.headcount.insert("maintenance".to_string(), 3);
+    staff.unpaid.insert("maintenance".to_string(), 1);
+    staff.owed.insert("maintenance".to_string(), 3);
+    staff.left_last_payday.insert("maintenance".to_string(), 2);
+    let machine = save
+        .placements
+        .iter_mut()
+        .find_map(|p| match &mut p.body {
+            SavedBody::Machine(m) => Some(m),
+            _ => None,
+        })
+        .expect("the reference line has a machine");
+    machine.refused_by = Some("maintenance".to_string());
+    let text = save.to_ron();
+    assert!(
+        text.contains("\"maintenance\""),
+        "the fixture is an old save"
+    );
+
+    let loaded = World::from_save_ron(&text, recipes()).expect("an old save must load");
+    let pool = loaded.staff().pool("engineering").unwrap();
+    assert_eq!(
+        (
+            pool.headcount,
+            pool.unpaid,
+            pool.owed,
+            pool.left_last_payday
+        ),
+        (3, 1, 3, 2)
+    );
+    assert!(loaded.staff().pool("maintenance").is_none());
+    let resaved = loaded.to_save_ron();
+    assert!(!resaved.contains("maintenance"), "{resaved}");
+    assert!(resaved.contains("refused_by: Some(\"engineering\")"));
+    assert!(World::from_save_ron(&resaved, recipes()).is_ok());
+}
+
+/// A map naming one category under both its ids could keep only one of
+/// the two counts, so it is a corrupt save, not a silent pick.
+#[test]
+fn a_save_naming_a_category_under_both_its_ids_is_refused() {
+    let world = running_line(10);
+    let mut save = world.to_save();
+    let staff: &mut SavedStaff = save.staff.as_mut().unwrap();
+    staff.headcount.insert("engineering".to_string(), 1);
+    staff.headcount.insert("maintenance".to_string(), 2);
+    let message = World::from_save_ron(&save.to_ron(), recipes())
+        .err()
+        .expect("two counts for one category is a corrupt save")
+        .to_string();
+    assert!(message.contains("engineering"), "{message}");
+    assert!(message.contains("maintenance"), "{message}");
+}
+
+/// The shipped catalog keeps the old id, and the loader refuses a former
+/// id that would make a save's id mean two categories.
+#[test]
+fn the_shipped_catalog_maps_maintenance_and_rejects_a_colliding_former_id() {
+    let shipped = StaffCatalog::bundled();
+    assert_eq!(shipped.resolve("maintenance").unwrap().id, "engineering");
+    assert!(shipped.get("maintenance").is_none());
+    let text = include_str!("../../data/staff.ron");
+    for collision in [
+        r#"["maintenance", "packaging"]"#,
+        r#"["maintenance", "maintenance"]"#,
+    ] {
+        let bad = text.replacen(r#"["maintenance"]"#, collision, 1);
+        assert_ne!(bad, text, "the fixture edit must apply");
+        assert!(
+            matches!(
+                StaffCatalog::from_ron_str(&bad),
+                Err(StaffLoadError::AmbiguousFormerId { .. })
+            ),
+            "{collision} must be refused"
+        );
+    }
 }

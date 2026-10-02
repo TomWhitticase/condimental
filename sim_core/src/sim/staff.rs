@@ -123,6 +123,15 @@ pub struct StaffCategory {
     /// volunteer category is a legitimate content choice.
     pub wage: u32,
     pub starting_headcount: u32,
+    /// Ids this category was known by before a rename (2026-10-02:
+    /// `engineering` was `maintenance`). Saves are keyed by category id, so
+    /// a save written before the rename still names the old one; loading
+    /// reads a former id as this category ([`StaffCatalog::resolve`]) and
+    /// the next save writes the current id. Content, not a save-schema
+    /// bump: renaming a category is a data edit that leaves the old id
+    /// here. `#[serde(default)]` — a category never renamed lists nothing.
+    #[serde(default)]
+    pub renamed_from: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -141,6 +150,12 @@ pub enum StaffLoadError {
     },
     NoCategories,
     DuplicateCategory {
+        id: String,
+    },
+    /// A `renamed_from` id that is some category's live id, or that two
+    /// former-id lists share (or one lists twice): a save naming it could
+    /// not say which category it means.
+    AmbiguousFormerId {
         id: String,
     },
     EmptyName {
@@ -184,6 +199,12 @@ impl std::fmt::Display for StaffLoadError {
                 f,
                 "staff.ron defines category '{id}' more than once — categories are looked \
                  up by id, so a duplicate silently shadows the other"
+            ),
+            StaffLoadError::AmbiguousFormerId { id } => write!(
+                f,
+                "staff.ron lists '{id}' as a former id (renamed_from) where it is already \
+                 a category's id or another former id — a save naming '{id}' must map \
+                 to exactly one category"
             ),
             StaffLoadError::EmptyName { id } => write!(
                 f,
@@ -257,6 +278,17 @@ impl StaffCatalog {
                 });
             }
         }
+        // Every id a save may name — live and former — must mean exactly
+        // one category, or `resolve` would pick one by file order.
+        let mut former: Vec<&str> = Vec::new();
+        for category in &file.categories {
+            for old in &category.renamed_from {
+                if file.categories.iter().any(|c| &c.id == old) || former.contains(&old.as_str()) {
+                    return Err(StaffLoadError::AmbiguousFormerId { id: old.clone() });
+                }
+                former.push(old);
+            }
+        }
         Ok(Self {
             pay_period_ticks: file.pay_period_ticks,
             categories: file.categories,
@@ -286,6 +318,18 @@ impl StaffCatalog {
 
     fn index_of(&self, id: &str) -> Option<usize> {
         self.categories.iter().position(|c| c.id == id)
+    }
+
+    /// The category a SAVE's id means: its live id, or one it was
+    /// [renamed from](StaffCategory::renamed_from). Only the load path
+    /// reads former ids; commands and `machines.ron` use [`get`](Self::get),
+    /// which knows the live ids alone.
+    pub fn resolve(&self, id: &str) -> Option<&StaffCategory> {
+        self.get(id).or_else(|| {
+            self.categories
+                .iter()
+                .find(|c| c.renamed_from.iter().any(|old| old == id))
+        })
     }
 
     pub fn category_ids(&self) -> Vec<String> {
@@ -1022,10 +1066,14 @@ impl StaffPools {
         saved: StaffRestore<'_>,
     ) -> Result<Self, StaffRestoreError> {
         let mut pools = Self::new(catalog);
+        // A former id (`renamed_from`) restores into the category it was
+        // renamed to; the live pools only ever carry the current id, so the
+        // next save writes that.
         let index_of = |pools: &Self, id: &String| {
             pools
                 .catalog
-                .index_of(id)
+                .resolve(id)
+                .and_then(|category| pools.catalog.index_of(&category.id))
                 .ok_or_else(|| StaffRestoreError::UnknownCategory(id.clone()))
         };
         for (id, count) in saved.headcount {
@@ -1297,6 +1345,69 @@ mod tests {
         match StaffCatalog::from_ron_str(&text) {
             Err(StaffLoadError::DuplicateCategory { id }) => assert_eq!(id, "cooks"),
             other => panic!("expected DuplicateCategory, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_former_id_resolves_to_the_renamed_category_and_only_on_load() {
+        let text = EXAMPLE.replacen(
+            r#"id: "drivers", name: "Drivers", wage: 5, starting_headcount: 1"#,
+            r#"id: "drivers", name: "Drivers", wage: 5, starting_headcount: 1, renamed_from: ["vanmen"]"#,
+            1,
+        );
+        let catalog = StaffCatalog::from_ron_str(&text).unwrap();
+        assert_eq!(catalog.resolve("vanmen").unwrap().id, "drivers");
+        assert_eq!(catalog.resolve("drivers").unwrap().id, "drivers");
+        assert!(
+            catalog.get("vanmen").is_none(),
+            "commands know live ids only"
+        );
+        assert!(catalog.resolve("plumbers").is_none());
+        assert!(catalog.get("cooks").unwrap().renamed_from.is_empty());
+
+        let vanmen = [("vanmen".to_string(), 4)];
+        let restored = StaffPools::restore(catalog, saved(&vanmen, &[], &[])).unwrap();
+        assert_eq!(restored.headcount("drivers"), 4);
+        assert_eq!(
+            restored
+                .headcounts()
+                .into_iter()
+                .find(|(id, _)| id == "vanmen"),
+            None
+        );
+    }
+
+    #[test]
+    fn rejects_a_former_id_that_is_ambiguous() {
+        let rename = |from: &str| {
+            format!(
+                r#"id: "drivers", name: "Drivers", wage: 5, starting_headcount: 1, renamed_from: [{from}]"#
+            )
+        };
+        let drivers = r#"id: "drivers", name: "Drivers", wage: 5, starting_headcount: 1"#;
+        // A live id, the category's own id, and the same id listed twice.
+        for (from, expected) in [
+            (r#""cooks""#, "cooks"),
+            (r#""drivers""#, "drivers"),
+            (r#""vanmen", "vanmen""#, "vanmen"),
+        ] {
+            let text = EXAMPLE.replacen(drivers, &rename(from), 1);
+            match StaffCatalog::from_ron_str(&text) {
+                Err(StaffLoadError::AmbiguousFormerId { id }) => assert_eq!(id, expected),
+                other => panic!("{from}: expected AmbiguousFormerId, got {other:?}"),
+            }
+        }
+        // Two categories claiming one former id.
+        let text = EXAMPLE
+            .replacen(drivers, &rename(r#""vanmen""#), 1)
+            .replacen(
+                r#"id: "cooks", name: "Cooks", wage: 3, starting_headcount: 2"#,
+                r#"id: "cooks", name: "Cooks", wage: 3, starting_headcount: 2, renamed_from: ["vanmen"]"#,
+                1,
+            );
+        match StaffCatalog::from_ron_str(&text) {
+            Err(StaffLoadError::AmbiguousFormerId { id }) => assert_eq!(id, "vanmen"),
+            other => panic!("expected AmbiguousFormerId, got {other:?}"),
         }
     }
 

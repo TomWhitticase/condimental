@@ -22,6 +22,10 @@
 #     no output connected hides the arrow altogether,
 #   * items crossing a splitter render as item nodes at the running height,
 #     from the same `items` field a belt tile uses,
+#   * an item leaving by a side TURNS on the splitter — a quarter arc from
+#     the back face to that side's face, like a corner belt — on the exit
+#     the simulation plans for it (`exits`), instead of carrying straight on
+#     and turning only once it has left (the owner's report, 2026-10-02),
 #   * product that went DOWN THE BRANCH is drawn — which is a regression test
 #     as much as a splitter one: the branch leaves the splitter's own chunk,
 #     and the per-pass hide this scene used to do meant one dirty chunk's
@@ -190,6 +194,20 @@ func _run_checks() -> void:
 			_fail("no item was ever drawn crossing a splitter, though the line is running")
 			return
 
+	# --- an item leaving by a side TURNS on the splitter (2026-10-02) -------
+	# The owner's report: an item routed left carried straight on across the
+	# splitter and only turned once it had left it. Every item on the tile is
+	# drawn on the path to the exit the simulation plans for it (`exits`), and
+	# one leaving by the side is already off the straight line while it is
+	# still crossing the tile.
+	if not _check_exit_paths():
+		return
+	if not _tick_until(2000, func(): return _item_turning_on(FORKED, "south")):
+		_fail("no item was ever drawn turning toward the splitter's left exit while still on it")
+		return
+	if not _drawn_items_follow_exits(FORKED):
+		return
+
 	# --- what went down the branch is DRAWN, not just simulated -----------
 	# The branch runs to y = -1 and -2, which is a different 32x32 chunk from
 	# the splitter that fed it, so this is the case that caught the per-pass
@@ -308,6 +326,83 @@ func _run_checks() -> void:
 	print("  items drawn crossing the tile, hover naming the mode's outputs, and the")
 	print("  configuration panel switching the mode, the body and the arrow's side")
 	quit(0)
+
+
+## The drawn path for each way out of a splitter, for every facing: an item
+## enters at the midpoint of the face behind the splitter, leaves at the
+## midpoint of the face it exits by, and — for a side exit — is already off
+## the straight line, on the exit's side, halfway across.
+func _check_exit_paths() -> bool:
+	var tile := Vector2i(5, 5)
+	var centre: Vector3 = Vector3(float(tile.x) * main.TILE, main.BELT_SURFACE_Y, float(tile.y) * main.TILE)
+	for facing in ["east", "south", "west", "north"]:
+		var forward: Vector3 = main._direction_world(facing)
+		var back: Vector3 = centre - forward * (main.TILE * 0.5)
+		for exit in [facing, main._direction_cw(facing), main._direction_ccw(facing)]:
+			var out: Vector3 = main._direction_world(exit)
+			var start: Vector3 = main._carried_item_transform(tile, facing, 0.0, exit).origin
+			var finish: Vector3 = main._carried_item_transform(tile, facing, 1.0, exit).origin
+			var middle: Vector3 = main._carried_item_transform(tile, facing, 0.5, exit).origin
+			if not start.is_equal_approx(back):
+				_fail("facing %s, exiting %s: an item enters at %s, not the back face %s" % [facing, exit, str(start), str(back)])
+				return false
+			var face: Vector3 = centre + out * (main.TILE * 0.5)
+			if not finish.is_equal_approx(face):
+				_fail("facing %s, exiting %s: an item leaves at %s, not the %s face %s" % [facing, exit, str(finish), exit, str(face)])
+				return false
+			var sideways: float = (middle - centre).dot(out) if exit != facing else 0.0
+			if exit != facing and sideways < main.TILE * 0.1:
+				_fail("facing %s, exiting %s: halfway across an item is only %f toward its exit — still carried straight on" % [facing, exit, sideways])
+				return false
+			if exit == facing and not middle.is_equal_approx(centre):
+				_fail("facing %s: an item going straight through is not on the centre line halfway (%s)" % [facing, str(middle)])
+				return false
+	return true
+
+
+## Whether an item on the splitter at `tile` is planned out by `exit` and is
+## past the tile's middle — the moment the old drawing still had it heading
+## straight on.
+func _item_turning_on(tile: Vector2i, exit: String) -> bool:
+	var state: Dictionary = main._splitter_states.get(main._tile_key(tile), {})
+	var items: Array = state.get("items", [])
+	var exits: Array = state.get("exits", [])
+	for i in range(mini(items.size(), exits.size())):
+		var distance := float(items[i][1])
+		if String(exits[i]) == exit and distance > 0.55 and distance < 0.95:
+			return true
+	return false
+
+
+## Every item drawn on the splitter at `tile` stands where the simulation's
+## distance and planned exit put it — and one leaving by a side is off the
+## straight centre line toward that side.
+func _drawn_items_follow_exits(tile: Vector2i) -> bool:
+	var state: Dictionary = main._splitter_states.get(main._tile_key(tile), {})
+	var items: Array = state.get("items", [])
+	var exits: Array = state.get("exits", [])
+	if exits.size() != items.size():
+		_fail("the splitter snapshot carries %d items but %d exits" % [items.size(), exits.size()])
+		return false
+	var facing := String(state.get("direction", "east"))
+	var centre: Vector3 = Vector3(float(tile.x) * main.TILE, main.BELT_SURFACE_Y, float(tile.y) * main.TILE)
+	for i in range(items.size()):
+		var drawn: Dictionary = main._carried_item("splitter_%d_%d_%d" % [tile.x, tile.y, i])
+		if drawn.is_empty():
+			_fail("item %d on the splitter is not drawn" % i)
+			return false
+		var distance := float(items[i][1])
+		var exit := String(exits[i])
+		var expected: Vector3 = main._carried_item_transform(tile, facing, distance, exit).origin
+		if not (drawn["position"] as Vector3).is_equal_approx(expected):
+			_fail("item %d (%.2f across, leaving %s) is drawn at %s, expected %s" % [i, distance, exit, str(drawn["position"]), str(expected)])
+			return false
+		if exit != facing and distance > 0.5:
+			var sideways: float = ((drawn["position"] as Vector3) - centre).dot(main._direction_world(exit))
+			if sideways <= 0.0:
+				_fail("item %d is %.2f across and leaving %s, but is drawn %f toward that side — carried straight on" % [i, distance, exit, sideways])
+				return false
+	return true
 
 
 ## Whether any drawn item is on a splitter slot, at belt-surface height —
