@@ -56,7 +56,8 @@
 # dock, i.e. one of each sort of building), `fluids` (a tank, a pipe run and
 # the machine that taps it), `vat` (the 2x2 cooking vat, alone), `splitter` (a
 # line that forks), `splitter_modes` (one splitter in each of the four
-# modes) or `chain` (THE WHOLE SHIPPED LINE, bought and placed out
+# modes), `splitter_turns` (a flowing three-way splitter, so items are caught
+# rounding it toward its side exits) or `chain` (THE WHOLE SHIPPED LINE, bought and placed out
 # of a new game's own balance — test_layouts.gd's `build_reference_line`).
 #
 # `--contracts` builds that full line and then runs it until the contract
@@ -343,7 +344,7 @@ const FIXTURE_NAMES: PackedStringArray = [
 	"pipes", "gallery", "items", "fluid_gallery", "bottleneck", "bbq",
 	"stalled_run", "understaffed", "shortfall", "payday_warning", "full_dock",
 	"unclerked_dock", "warehouse", "split_docks", "mustard", "splitter_modes",
-	"crossing",
+	"crossing", "splitter_turns",
 ]
 
 ## The fixtures whose whole claim is a factory that is WORKING, and which are
@@ -1129,6 +1130,8 @@ func _build_fixture() -> void:
 			Layouts.build_splitter_line(_main.sim)
 		"splitter_modes":
 			Layouts.build_splitter_modes(_main.sim)
+		"splitter_turns":
+			Layouts.build_splitter_turns(_main.sim)
 		"chain":
 			Layouts.build_reference_line(_main.sim)
 		"stress":
@@ -2285,6 +2288,37 @@ func _run_to_crushing() -> void:
 	_main.set_process(false)
 
 
+## `--fixture splitter_turns`: ticks until an item on the splitter is planned
+## out of a SIDE (`exits`, `SplitterSnapshot::exits`) and is past the tile's
+## middle — the stretch the old drawing carried straight on across — then
+## freezes, for `--payout`'s reason: an item crosses the tile in 50 ticks and
+## the warm-up frames that follow would carry it off the splitter.
+const SPLITTER_TURN_TICK_LIMIT := 2000
+
+
+func _run_to_splitter_turn() -> void:
+	var key: String = _main._tile_key(Layouts.SPLITTER_TURNS_ORIGIN)
+	var caught := false
+	for i in range(SPLITTER_TURN_TICK_LIMIT):
+		_main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))
+		_main.sim.tick()
+		_main._apply_dirty_chunks()
+		var state: Dictionary = _main._splitter_states.get(key, {})
+		var items: Array = state.get("items", [])
+		var exits: Array = state.get("exits", [])
+		var facing := String(state.get("direction", "east"))
+		for j in range(mini(items.size(), exits.size())):
+			var distance := float(items[j][1])
+			if String(exits[j]) != facing and distance > 0.6 and distance < 0.8:
+				caught = true
+		if caught:
+			break
+	if not caught:
+		printerr("SCREENSHOT_NOTE: --fixture splitter_turns ran %d ticks without an item turning on the splitter"
+			% SPLITTER_TURN_TICK_LIMIT)
+	_main.set_process(false)
+
+
 ## Stops the clock on a tick where a dock is at its ceiling AND
 ## the dock's lamps are on the wanted half of their pulse, then freezes.
 ##
@@ -2742,6 +2776,8 @@ func _process(delta: float) -> bool:
 		_run_to_payout()
 	if _frames == 2 and _crushing:
 		_run_to_crushing()
+	if _frames == 2 and _fixture == "splitter_turns":
+		_run_to_splitter_turn()
 	if _frames == 2 and _full_dock:
 		_run_to_full_dock()
 	if _frames == 2 and _split_docks:

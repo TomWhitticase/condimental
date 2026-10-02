@@ -2176,14 +2176,14 @@ const STAFF_ICON_SIZE := Vector2(40, 40) * UI_SCALE
 ## "0 / 0" would be noise and a HIRE button would be a pure money sink —
 ## both are hidden and this sentence stands instead.
 ##
-## `maintenance` is the standing case: `data/machines.ron` contains no
+## `engineering` is the standing case: `data/machines.ron` contains no
 ## machine that asks for it, because the corrosion and wear it exists to
 ## service is GAMEPLAY.md §4's tier-4/5 scope and is not built. It ships in
 ## `staff.ron` at headcount 0 so the panel and the save already know the
 ## shape (that file says so itself). Until then a player could hire and pay
-## maintenance staff forever for no effect, which the playtest review called
+## engineering staff forever for no effect, which the playtest review called
 ## out as a trap.
-const STAFF_IDLE_NOTES := {"maintenance": "nothing needs maintenance yet — nothing to hire for"}
+const STAFF_IDLE_NOTES := {"engineering": "nothing needs engineering yet — nothing to hire for"}
 ## Ticket 2's icon files are `staff_<category id>.png`, so the path is built
 ## from the wire's id with no lookup table.
 const STAFF_ICON_PREFIX := "staff_"
@@ -2194,7 +2194,7 @@ const STAFF_ICON_PREFIX := "staff_"
 ## than a made-up one.
 const STAFF_CATEGORY_BLURBS := {
 	"manufacturing": "runs the machines that turn ingredients into sauce",
-	"maintenance": "repairs equipment as it wears down",
+	"engineering": "repairs equipment as it wears down",
 	"packaging": "bottles and seals a finished batch",
 	"logistics": "loads pallets and trucks so a delivery can ship",
 }
@@ -12210,9 +12210,9 @@ func _crew_plate_state(snapshot: Dictionary, current_tick: int) -> Dictionary:
 			"assigned_text": _crew_assigned_text(required, sources),
 			"short": short > 0,
 			# A category nothing has ever asked for and nobody has been hired
-			# into takes no room at all. Today that is `maintenance`: no
+			# into takes no room at all. Today that is `engineering`: no
 			# machine in `machines.ron` requires it and the roster starts it
-			# at zero, so a permanent "Maintenance 0 / 0 — nothing needs them
+			# at zero, so a permanent "Engineering 0 / 0 — nothing needs them
 			# yet" row would cost a quarter of this plate to say nothing. It
 			# is still in the H panel, with its own note, so hiring one is
 			# still possible and still explained; and the moment a head IS
@@ -18247,11 +18247,16 @@ func _render_carried_items(carrier: Dictionary, prefix: String) -> void:
 	var tile := _pair_to_tile(carrier.get("tile"))
 	var direction := String(carrier.get("direction", "east"))
 	var items: Array = carrier.get("items", [])
+	# A splitter says which way each of its items is leaving (`exits`, the
+	# simulation's plan); a belt has no such field and every item leaves by
+	# `direction`.
+	var exits: Array = carrier.get("exits", [])
 	for i in range(items.size()):
 		var pair: Array = items[i]
 		var key := "%s_%d_%d_%d" % [prefix, tile.x, tile.y, i]
 		var asset: String = ITEM_MODELS.get(String(pair[0]), ITEM_MODEL_FALLBACK)
-		_show_carried_item(key, asset, _carried_item_transform(tile, direction, float(pair[1])))
+		var exit := String(exits[i]) if i < exits.size() else ""
+		_show_carried_item(key, asset, _carried_item_transform(tile, direction, float(pair[1]), exit))
 	# Slots this tile used to fill and no longer does. Slot keys are handed
 	# out from 0 upward and a hidden one is forgotten, so the first gap is
 	# the end.
@@ -18284,22 +18289,43 @@ func _render_carried_items(carrier: Dictionary, prefix: String) -> void:
 ## the simulation knows or cares that the tile bends. Which flank the input
 ## face is on comes from the tile's recorded shape (`_belt_shapes`): a
 ## left corner is fed from the anticlockwise side of its facing, a right
-## corner from the clockwise side. A splitter, or a belt whose shape is not
-## a corner, is a straight run. The basis is identity — items are never
-## spun with the belt.
-func _carried_item_transform(tile: Vector2i, direction: String, distance: float) -> Transform3D:
+## corner from the clockwise side. A belt whose shape is not a corner, or a
+## splitter's item going straight through, is a straight run. The basis is
+## identity — items are never spun with the belt.
+##
+## A SPLITTER's item leaving by a side (`exit`, from its snapshot's `exits`
+## — the simulation's plan, `SplitterSnapshot::exits`) rounds the same arc a
+## corner's does, from the face behind the splitter to the side face it is
+## leaving by, so it turns inside the tile rather than carrying straight on
+## and appearing on the branch belt half a tile sideways (the owner's report,
+## 2026-10-02). An `exit` that is empty or equal to `direction` is straight
+## through.
+func _carried_item_transform(tile: Vector2i, direction: String, distance: float, exit := "") -> Transform3D:
 	var centre := Vector3(float(tile.x) * TILE, BELT_SURFACE_Y, float(tile.y) * TILE)
 	var out := _direction_world(direction)
+	if exit != "" and exit != direction:
+		return Transform3D(Basis(), _quarter_arc_point(
+			centre, _direction_world(_direction_opposite(direction)), _direction_world(exit), distance
+		))
 	var shape := String(_belt_shapes.get(_tile_key(tile), BELT_SHAPE_STRAIGHT))
 	if shape == BELT_SHAPE_CORNER_LEFT or shape == BELT_SHAPE_CORNER_RIGHT:
 		var in_from := _direction_world(
 			_direction_ccw(direction) if shape == BELT_SHAPE_CORNER_LEFT else _direction_cw(direction)
 		)
-		var radius := TILE * 0.5
-		var pivot := centre + (out + in_from) * radius
-		var angle := clampf(distance, 0.0, 1.0) * PI * 0.5
-		return Transform3D(Basis(), pivot - out * (radius * cos(angle)) - in_from * (radius * sin(angle)))
+		return Transform3D(Basis(), _quarter_arc_point(centre, in_from, out, distance))
 	return Transform3D(Basis(), centre + out * ((distance - 0.5) * TILE))
+
+
+## The point `distance` (0..1) of the way round a quarter circle across the
+## tile centred on `centre`, from the midpoint of the face toward `in_from`
+## to the midpoint of the face toward `out` — about the tile corner those two
+## faces share, radius half a tile. A corner belt's lane and a splitter's
+## side exit are both this curve.
+func _quarter_arc_point(centre: Vector3, in_from: Vector3, out: Vector3, distance: float) -> Vector3:
+	var radius := TILE * 0.5
+	var pivot := centre + (out + in_from) * radius
+	var angle := clampf(distance, 0.0, 1.0) * PI * 0.5
+	return pivot - out * (radius * cos(angle)) - in_from * (radius * sin(angle))
 
 
 ## A simulation direction as a unit vector on the world's ground plane:

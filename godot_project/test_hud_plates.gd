@@ -72,7 +72,7 @@ const SHORT_STAFFED_SNAPSHOT := {
 ## (CLAUDE.md: gameplay logic lives in Rust). A plate that printed "HIRE 1"
 ## from this fixture would be doing its own sums.
 ##
-## `maintenance` is the dead category: nothing in `machines.ron` asks for it
+## `engineering` is the dead category: nothing in `machines.ron` asks for it
 ## and nobody is hired into it, so its row must take no room at all.
 const CREW_SNAPSHOT := {
 	"money": 40.0,
@@ -81,7 +81,7 @@ const CREW_SNAPSHOT := {
 	"categories": [
 		{"id": "manufacturing", "name": "Manufacturing", "headcount": 3, "required": 4, "short": 2},
 		{"id": "packaging", "name": "Packaging", "headcount": 2, "required": 2, "short": 0},
-		{"id": "maintenance", "name": "Maintenance", "headcount": 0, "required": 0, "short": 0},
+		{"id": "engineering", "name": "Engineering", "headcount": 0, "required": 0, "short": 0},
 	],
 }
 
@@ -580,7 +580,7 @@ func _run_checks() -> void:
 		_fail("a category with an establishment is hidden from the CREW plate")
 		return
 	if bool(crew_rows[2]["visible"]):
-		_fail("the dead `maintenance` category takes room on the CREW plate")
+		_fail("the dead `engineering` category takes room on the CREW plate")
 		return
 	# Seconds, never ticks (UI_UX.md): 600 ticks away is not "600".
 	var payday := String(crew_state["payday_text"])
@@ -596,9 +596,9 @@ func _run_checks() -> void:
 		_fail("40 in hand against a bill of 52 raised no affordability warning")
 		return
 	# And the live plate hides its own dead row, not just the state dictionary.
-	var maintenance = main._crew_row_nodes.get("maintenance", null)
-	if maintenance is Dictionary and maintenance["wrap"].visible:
-		_fail("the live CREW plate still draws the empty `maintenance` row")
+	var engineering = main._crew_row_nodes.get("engineering", null)
+	if engineering is Dictionary and engineering["wrap"].visible:
+		_fail("the live CREW plate still draws the empty `engineering` row")
 		return
 
 	# --- The legend folds, from the button and from F1 ---------------------
@@ -890,7 +890,7 @@ func _run_checks() -> void:
 	for offer in JSON.parse_string(main.sim.economy_snapshot_json()).get("board", []):
 		if not bool(offer.get("active", false)):
 			main.sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": String(offer["id"])}))
-	_summary = "%d stock rows on a right-hand plate clear of the clipboard and hotbar at 1600x900 and 1280x720, each with its own colour and a 'none' zero state; the legend folds %s -> %s from its button and from F1 in both view modes, is not a modal, and every cursor panel reads its current rect; a world panel is parked in the lower-left corner in first person rather than following the crosshair, clear of the crosshair, the hotbar's strip and the whole right-hand column at both sizes; the CREW plate holds the bottom of that column clear of all three at both sizes, prints the wire's own shortfall, hides the dead maintenance row and warns before payday; a stock row at the warehouse's ceiling reads FULL, the whole list is on the plate at 1600x900, and a list the column cuts says how many rows it is hiding" % [
+	_summary = "%d stock rows on a right-hand plate clear of the clipboard and hotbar at 1600x900 and 1280x720, each with its own colour and a 'none' zero state; the legend folds %s -> %s from its button and from F1 in both view modes, is not a modal, and every cursor panel reads its current rect; a world panel is parked in the lower-left corner in first person rather than following the crosshair, clear of the crosshair, the hotbar's strip and the whole right-hand column at both sizes; the CREW plate holds the bottom of that column clear of all three at both sizes, prints the wire's own shortfall, hides the dead engineering row and warns before payday; a stock row at the warehouse's ceiling reads FULL, the whole list is on the plate at 1600x900, and a list the column cuts says how many rows it is hiding" % [
 		ids.size(), str(open_rect.size), str(stub_rect.size)
 	]
 

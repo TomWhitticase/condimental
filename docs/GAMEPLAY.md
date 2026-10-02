@@ -19,7 +19,7 @@ happens over the course of a playthrough."
 | Variants | Many sauces come in flavour variants (garlic mayo, chilli mayo, honey mayo; smoky BBQ, spicy BBQ) built by taking a plain base sauce and running it through a small flavour-add step — cheap content, real contract variety |
 | Demand model | **Contracts**, not a spot market — standing orders for a *mix* of sauces, delivered on a recurring cadence, that must be kept up or lost |
 | Money | Earned from contract deliveries; spent on ingredients (recurring), equipment (capital), and staff wages (recurring) |
-| Staff | Not simulated NPCs — an abstract resource pool per category (manufacturing, maintenance, packaging, logistics). Running equipment consumes staff capacity the way it would consume power; understaffing stalls production, not a person failing to show up |
+| Staff | Not simulated NPCs — an abstract resource pool per category (manufacturing, engineering, packaging, logistics). Running equipment consumes staff capacity the way it would consume power; understaffing stalls production, not a person failing to show up |
 | Design pressure | Contracts always demand a *variety* of sauces, so the winning strategy is a diversified factory, not maxing out whichever single sauce has the best margin |
 | Recipe complexity | Scales with tier: early recipes are 2–3 ingredients and one process step; late recipes are many ingredients, multiple equipment stages, and long cure/ferment times |
 
@@ -216,7 +216,7 @@ Staff are **not** simulated as entities walking around the factory interacting w
 | Category | Required by | What it represents |
 |---|---|---|
 | **Manufacturing** | Cookers, reducers, emulsifiers, fermenters — anything actively turning ingredients into sauce | Running the production machinery itself |
-| **Maintenance** | Repairing degraded/broken equipment | Directly tied to the corrosion/wear mechanic from acid-handling equipment (§4) and any other durability-based gate added later — more high-wear equipment means more maintenance demand, not just more manufacturing demand |
+| **Engineering** | Repairing degraded/broken equipment and keeping it running | Directly tied to the corrosion/wear mechanic from acid-handling equipment (§4) and any other durability-based gate added later — more high-wear equipment means more engineering demand, not just more manufacturing demand. Called *maintenance* until 2026-10-02; renamed by the owner, with no change in meaning |
 | **Packaging** | Bottling/sealing stations | Turning finished sauce in a tank/buffer into a sellable bottled unit |
 | **Logistics** | Pallet-wrapping and truck-loading | The step that actually fulfills a contract delivery (§6) — no logistics capacity, no deliveries going out even if product is sitting bottled and ready |
 
@@ -234,7 +234,7 @@ A rough shape of an early playthrough, to sanity-check that the systems above ac
 2. Save contract earnings, buy the ketchup line (reduction/bottling) and hire enough packaging staff to run it. A new contract type appears wanting ketchup, or an existing contract's mix expands to include it.
 3. Juggling two-plus concurrent contracts with different sauce mixes becomes the actual gameplay tension — production has to be laid out for variety, not a single optimized line. Add a couple of flavour variants (§3) cheaply to widen what contracts can be taken without new machinery.
 4. Save toward an emulsifier. Once bought, mayo-inclusive contracts become available/eligible, and mayo becomes the base that later variants and derived sauces draw from (§3).
-5. Save toward acid-handling equipment; hot-sauce contracts open up; standard piping used for a hot-sauce line starts showing corrosion, driving up maintenance-staff demand and nudging the player toward the acid-resistant upgrade instead of just hiring more repair staff to keep patching it.
+5. Save toward acid-handling equipment; hot-sauce contracts open up; standard piping used for a hot-sauce line starts showing corrosion, driving up engineering-staff demand and nudging the player toward the acid-resistant upgrade instead of just hiring more repair staff to keep patching it.
 6. Derived sauces open up (chilli mayo from mayo + hot sauce) once both parent categories exist, rewarding the equipment investment across multiple downstream recipes at once.
 7. By the elaborate/aged tier, the player is running long multi-stage chains (mash → ferment → age → bottle) alongside everything from earlier tiers simultaneously, with all four staff categories under real pressure, because contracts by this point demand a wide spread across nearly every category unlocked so far.
 
@@ -340,7 +340,7 @@ implementation history (epics, tickets, balancing passes) behind each one.
   chain of stages feeding into each other, no new architecture needed.
 - **Corrosion is not yet implemented.** It will need a component (or a tag
   + countdown on `Machine`) for wear when tier 5 lands, and it also feeds
-  maintenance-staff demand (§7). Still an open design question, not decided
+  engineering-staff demand (§7). Still an open design question, not decided
   here. **Spoilage is not a mechanic at all** (decided 2026-10-02, §11): no
   item, ingredient or fluid perishes, so nothing needs a freshness countdown
   and no tier needs a cold chain.
@@ -385,7 +385,7 @@ implementation history (epics, tickets, balancing passes) behind each one.
   only (the in-world stack lights were tried and removed after a
   playtest verdict on looks; a floor-wide readout is an open question).
 - **Staff pools are four aggregate categories** (manufacturing,
-  maintenance, packaging, logistics — `data/staff.ron`), a plain field on
+  engineering, packaging, logistics — `data/staff.ron`), a plain field on
   `World` beside `Economy`, not an ECS component. Every machine kind
   declares the crew it needs while running; each tick the pools reset to
   headcount and machines claim their whole crew in stable order — a
@@ -433,6 +433,13 @@ implementation history (epics, tickets, balancing passes) behind each one.
   Deliberately not a replay of the last tick, which flickers as the line
   ebbs. It is what lets the UI name the one machine that is short instead of
   only saying the factory is.
+- **A staff category can be renamed without breaking a save**
+  (2026-10-02; full record in [DECISIONS.md](DECISIONS.md)). Saves key the
+  crew by category id, so the renamed category lists its old id in
+  `renamed_from` in `data/staff.ron`; a save naming the old id loads into
+  it, counts and all, and the next save writes the new one. No save-schema
+  bump — a rename is a content edit. The first use is `engineering`, which
+  was `maintenance`.
 - **Money and contract state are plain fields on `sim_core::sim::
   economy::Economy`**, owned by `World`, not ECS entities — no per-entity
   multiplicity to justify that. `money` is a single fixed-point (`types::Money`,

@@ -37,12 +37,14 @@
 # with the list of names and a non-zero status; it used to build the demo
 # line and look plausible.
 #
-# Pass --fixture <machines|fluids|vat|splitter|splitter_modes|chain|stress|pipes|gallery|demo> for a different one:
+# Pass --fixture <machines|fluids|vat|splitter|splitter_modes|splitter_turns|chain|stress|pipes|gallery|demo> for a different one:
 # `machines` (a hopper, a machine and a dock), `fluids` (a tank, a pipe run
 # and the machine tapping it), `vat` (the 2x2 cooking vat alone), `splitter`
 # (a line that FORKS — one splitter with both outputs built and a second with
 # only its straight one, so the next-output arrow's two behaviours are in one
-# frame) or `chain` (THE WHOLE SHIPPED LINE — about 1,200 of a new game's
+# frame), `splitter_turns` (a three-way splitter with long runs, still flowing
+# at the shutter, so items are caught turning toward its side exits — add
+# --populate --closeup 0,0,6) or `chain` (THE WHOLE SHIPPED LINE — about 1,200 of a new game's
 # 3,000 balance, bought and placed like anything else, with its piped middle
 # and its two hoppers).
 #
