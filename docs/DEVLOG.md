@@ -259,6 +259,17 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-02 — the configuration panel fits a 1280x720 window
+
+Issue #206. At 1280x720 a hopper or rack panel with gates still shut ran its
+gate lines and close hint off the bottom of the window. The panel now takes six
+CONTENTS slots a row instead of four, and on a window still too short it sheds
+lines in a fixed order until it fits: close hint, level bar, auto-fill note,
+picker heading, and last the gate lines folded to one count. Every line it
+sheds is still a hover away as a tooltip, including each padlock's own gate. A
+big window shows the panel whole. UI_UX §5g has the rule;
+`test_config_panel.gd` now checks the fit at three window sizes.
+
 ### 2026-10-02 — A case of sauce is eight bottles
 
 A case used to hold one bottle, which read wrong on the belt: a stream of
@@ -279,7 +290,8 @@ a time); why is not yet instrumented.
 
 A scale sweep (the owner's 178-placement factory tiled 1×/5×/20×, frames
 timed headless against a release `sim_core`) found `_update_fluid_network`
-the largest script cost on a big floor: 0.9 ms a frame at 1×, 20 ms at 20×.
+the largest script cost on a big floor: roughly 0.9 ms a frame at 1× and
+20 ms at 20× on a heavily loaded machine.
 `_fluid_material_for` duplicated a fresh `StandardMaterial3D` for every
 network on every polled frame, only for it to be thrown away unless a body
 was being created. It now caches one material per fluid id, shared by every
