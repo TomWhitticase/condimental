@@ -339,9 +339,9 @@ have needed naming in data"
 
 	# THE PLUMBING IS THE PICKER. Checked here rather than at placement time
 	# because a machine's recipe is live state, re-picked every idle tick from
-	# what its inputs currently satisfy: a machine that has never run yet
-	# still reports its kind's first recipe, so asking before the line has
-	# turned over would only be reading the file order back.
+	# what its inputs currently satisfy: a machine nothing has reached yet
+	# is undecided (no recipe at all), so asking before the line has turned
+	# over would say nothing.
 	if _placement_recipe(Vector2i(9, 0)) != "ketchup_mix":
 		_fail("the ketchup mixer must run ketchup_mix, not '%s'" % _placement_recipe(Vector2i(9, 0)))
 		return
@@ -357,18 +357,25 @@ have needed naming in data"
 	# (main.gd's PRODUCT_TINTS), and this asserts that join end to end.
 	#
 	# **Against what each machine was SEEN making, not what it is making
-	# now.** A machine holds a recipe only while its inputs point at one; a
-	# line that has run its stock down holds its kind's first recipe again,
-	# which is `bottled_ketchup` for both bottlers — so checking at the end
-	# of the run would assert the file order back, exactly as the mixers'
-	# note above says. `_sampled_recipes` watches all six while the factory
-	# is working instead.
+	# now.** `_sampled_recipes` watches all six while the factory is
+	# working. (A machine that has run its stock down keeps the recipe it
+	# last ran since 2026-09-21's rule 3, and one never fed is undecided
+	# since 2026-10-02 — neither reads the file order back any more.)
 	for pair in PRODUCT_MACHINE_PAIRS:
 		var tints := {}
 		for entry in pair:
 			var tile: Vector2i = entry[0]
 			var want := String(entry[1])
 			var ran: Dictionary = _product_recipes.get(main._tile_key(tile), {})
+			# The ketchup line's PACKER is never fed here: the branch's BBQ
+			# mixer drinks the ketchup, so no ketchup bottle is ever filled
+			# and the packer stays UNDECIDED all run (2026-10-02). It used to
+			# pass by holding `boxed_ketchup` by default, which was the file
+			# order read back. A machine seen making nothing at all is
+			# allowed; one seen making the wrong thing is not.
+			if ran.is_empty() and tile == Vector2i(21, 0):
+				tints[want] = main.PRODUCT_TINTS[want]
+				continue
 			if not ran.has(want):
 				_fail(
 					"the machine at %s never ran '%s' in %d ticks — it was seen making %s, so the sauce it DRAWS cannot be checked"
@@ -413,7 +420,15 @@ have needed naming in data"
 					% entry[0]
 				)
 				return
-			if String(main._machine_product_recipes.get(key, "")) == "":
+			var ever_ran: Dictionary = _product_recipes.get(key, {})
+			var tinted := String(main._machine_product_recipes.get(key, "")) != ""
+			if ever_ran.is_empty():
+				# Undecided: drawn as handling any sauce, so NO tint.
+				if tinted:
+					_fail("the machine at %s never decided but its product is tinted %s" % [
+						entry[0], main._machine_product_recipes[key]])
+					return
+			elif not tinted:
 				_fail("the machine at %s never had its product tinted at all" % entry[0])
 				return
 

@@ -68,6 +68,82 @@ matches what code comments and data files cite.
   height is its drawn height, and none is wider than the column — both
   pinned by font measurement in `test_contract_panel.gd`.
 
+- 2026-10-02: **A machine nothing has fed is undecided, not ketchup.**
+  (Owner: "by default all machines stuff say ketchup skinned up ketchup,
+  only switch when supplied ingredients other sauces, default should be
+  showing any sauces".)
+
+  **What it overturns.** The 2026-09-21 multi-recipe rule had a never-fed
+  machine hold the *closest* recipe, earliest in `recipes.ron` winning a
+  tie. With nothing in it every candidate ties at zero, so every fresh
+  crusher, mixer, vat, bottler and packer held its kind's first recipe —
+  ketchup's at every stage, because ketchup is the first sauce in the file.
+  The hover titled it "Ketchup Mix", the configuration panel said "Mixer —
+  Ketchup Mix", the stall said "waiting for Tomato Paste" or "no supply pipe
+  for Ketchup", and the product mesh was painted ketchup red, until another
+  sauce's ingredients arrived. A player building a mustard line saw a row of
+  ketchup machines.
+
+  **The rule now.** `Machine::recipe` is an `Option`. A kind with more than
+  one recipe is placed with `None`; a kind with exactly one holds it from
+  placement (there is nothing to decide, and its stall can still name the
+  raw it waits for). `Machine::choose` gains rule 4: when every candidate is
+  at zero inputs met, a decided machine keeps its pick (rule 3, unchanged)
+  and an undecided one goes by what it has been *handed* — `Machine::fed`
+  counts any amount of a recipe's solid in the buffer and any fluid of that
+  id in a touching run — taking the recipe with the most, file order on a
+  tie, or staying undecided if nothing it holds belongs to any recipe. So a
+  crusher handed one tomato of the four a batch needs already says "waiting
+  for Tomato", and one handed one mustard seed is a mustard crusher.
+
+  **Why "fed", not "satisfied".** Deciding only on a full input would leave
+  a machine that is visibly receiving tomatoes reading "any sauce" until its
+  fourth arrives, which is the same lie in the other direction. Any amount
+  is the honest test of "has this machine been supplied a sauce's
+  ingredients".
+
+  **The wire.** `recipe` on `MachineSnapshot`, `TileSnapshot::Machine` and
+  `PlacementSnapshot`, and `machine_recipe` on `FluidTapSnapshot`, are
+  `null` while undecided. Because a null `recipe` on the layout had meant
+  "not a machine", `PlacementSnapshot` gains `machine: true`, present on
+  machines only (`split_mode`'s rule); Godot's three "is this a machine"
+  checks read it. A new `StallKind::Undecided` (`item` empty) replaces the
+  first-recipe stall, with two exceptions, both also with an empty `item`:
+  a faulted run on the draw side still reports
+  `ambiguous_pipe`/`unnameable_pipe` (issue #54's rule), and a machine with
+  **no draw pipe at all** on a kind every one of whose recipes drinks a fluid
+  (today the mixer, the vat and the bottler) reports `no_supply_pipe` — it
+  could never be fed, so "waiting for ingredients" would be true forever
+  and point at nothing (the review of PR #232). A plumbed one on a sound,
+  empty run is merely waiting and reads `undecided`. Godot reads an empty `no_supply_pipe` as plain
+  "no supply pipe".
+
+  **Rejected: naming the wait off a named-but-empty run.** The review
+  suggested an undecided bottler on a run already named `ketchup` say
+  "waiting for Ketchup in the pipe", as it did before. On a correctly
+  plumbed line that has not filled yet — the fresh line the owner was
+  looking at — that puts "Ketchup Mix" back on every vat, which is the
+  readout the owner asked to be rid of. The run's name is about the pipe;
+  only what reaches the machine decides it.
+
+  **The presentation.** `MACHINE_UNDECIDED_TEXT` ("any sauce") in
+  `main.gd`, through one helper `_machine_making_text` for the hover and the
+  panel; the stall reads "waiting for ingredients"; `_set_machine_product`
+  clears the override for a null recipe so the mesh shows the voxel's own
+  neutral `fluid_pale`, the colour an untinted pipe run already shows. No
+  sauce id is named in code.
+
+  **The save.** No format change. `SavedMachine::recipe` was already
+  `Option` and `#[serde(default)]`; an undecided machine now writes `None`
+  and loads undecided. The one hazard was an OLD save with no recipe field
+  and a craft in flight: undecided-on-load would hold a process with no
+  recipe that could never finish, so `save.rs` restores such a machine on
+  its kind's first recipe — which is what every machine held when that save
+  was written (`a_legacy_save_mid_craft_finishes_the_craft`). An old save's
+  idle machine that was never fed still has `recipe: Some(first)` written
+  into it and keeps that until it is fed; only new placements start
+  undecided.
+
 - 2026-10-02: **The maintenance crew is called engineering; a renamed
   staff category keeps its old id in `renamed_from`.** (Owner, verbatim:
   "Rename maintenance to engineering everywhere (it still does nothing yet

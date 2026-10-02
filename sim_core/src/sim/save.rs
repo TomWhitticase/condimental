@@ -608,9 +608,11 @@ pub struct SavedMachine {
     /// Which of its kind's recipes this machine is running
     /// (`sim::machine::Machine::recipe`). `#[serde(default)]` and added to
     /// `schema_version` 1 rather than bumping it, like
-    /// `SavedHopper::auto_fill` and `load` above: a save without it loads on
-    /// the kind's first recipe in file order and re-picks on its next idle
-    /// tick, which is exactly what a freshly placed machine does.
+    /// `SavedHopper::auto_fill` and `load` above: a save without it loads the
+    /// way a freshly placed machine starts — **undecided** for a kind with
+    /// several recipes, its only recipe for a kind with one — and re-picks
+    /// on its next idle tick. `None` is also what an undecided machine
+    /// writes (2026-10-02), so the two read identically; no format change.
     ///
     /// A save written mid-craft is the case that needs it. `process` says a
     /// craft is 30 ticks from done; this says *which* craft, and without it
@@ -1203,7 +1205,7 @@ impl World {
                         },
                         refused_by: machine.refused_by.clone(),
                         refusal_hold: machine.refusal_hold,
-                        recipe: Some(machine.recipe.clone()),
+                        recipe: machine.recipe.clone(),
                         mothballed: machine.mothballed,
                     })
                 }
@@ -1811,6 +1813,16 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                     placement.tile,
                 )?;
                 let load = restore_load(&saved.load, placement.tile)?;
+                // A craft in flight has to know what it is making. A save
+                // written before `recipe` existed carries none, and back then
+                // every machine held its kind's first recipe — so that is the
+                // craft it was running. Without this, a machine that is
+                // undecided on placement would hold a process it can never
+                // finish.
+                let legacy_craft = match (&saved.recipe, saved.process) {
+                    (None, Some(_)) => world.recipes_for_kind(&placement.kind).into_iter().next(),
+                    _ => None,
+                };
                 // Validated above, so `resolve` finds it; a former id
                 // (`renamed_from`) is stored as the category's current id.
                 let refused_by = saved.refused_by.as_ref().map(|id| {
@@ -1840,10 +1852,11 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                 // put a mothballed machine's crew back out of the payroll.
                 machine.mothballed = saved.mothballed;
                 // `validate` already checked this names one of the kind's
-                // recipes; a save without the field keeps the recipe the
-                // `Place` above started the machine on.
-                if let Some(recipe) = &saved.recipe {
-                    machine.recipe = recipe.clone();
+                // recipes; a save without one keeps what the `Place` above
+                // started the machine on — undecided for a kind with a
+                // choice to make, its only recipe for one without.
+                if let Some(recipe) = saved.recipe.clone().or(legacy_craft) {
+                    machine.recipe = Some(recipe);
                 }
             }
             SavedBody::Hopper(saved) => {

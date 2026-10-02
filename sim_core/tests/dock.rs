@@ -101,7 +101,7 @@ fn the_dock_stands_at_the_end_of_its_own_belt_past_the_last_machine() {
     // The shipped chain's last machine is the packer at x = 30, 1x1.
     let last_machine = layout
         .iter()
-        .filter(|p| p.recipe.is_some())
+        .filter(|p| p.machine)
         .max_by_key(|p| p.tile.0)
         .expect("the reference chain places machines");
     assert_eq!(last_machine.kind, "packer");

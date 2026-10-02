@@ -266,7 +266,9 @@ implementation history (epics, tickets, balancing passes) behind each one.
   recipe picker**. A mixer on a vinegar pipe beside a sugar hopper blends
   ketchup mix; one on a ketchup pipe beside spice and molasses hoppers blends
   BBQ mix. The layout is the choice. (Full record: `docs/DECISIONS.md`,
-  2026-09-21.)
+  2026-09-21.) **Until something is fed in, a machine is undecided** and
+  shows itself as handling any sauce — file order never makes an empty
+  machine a ketchup machine (`docs/DECISIONS.md`, 2026-10-02).
 - **Progression gates are content too** — `data/unlocks.ron` (schema 1). A
   gate names a product, a number of boxes of it that must be SOLD (delivered
   into a satisfied contract window), and two lists: ingredients held back from

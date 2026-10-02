@@ -735,7 +735,12 @@ fn accounted(world: &World, raw: &str, recipes: &RecipeRegistry, final_item: &st
             }
             if machine.process.is_some() {
                 let recipe = recipes
-                    .get(&machine.recipe)
+                    .get(
+                        machine
+                            .recipe
+                            .as_ref()
+                            .expect("a machine mid-craft holds a recipe"),
+                    )
                     .expect("a machine references a real recipe");
                 for (item, qty) in recipe.outputs.iter().chain(recipe.fluid_outputs.iter()) {
                     total += value(item) * Fx::from_num(*qty);

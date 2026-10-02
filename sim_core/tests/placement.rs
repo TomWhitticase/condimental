@@ -494,7 +494,7 @@ fn belt_items(world: &World, tile: (i32, i32)) -> usize {
     }
 }
 
-fn machine_state(world: &World, tile: (i32, i32)) -> (String, Option<(u64, u64)>) {
+fn machine_state(world: &World, tile: (i32, i32)) -> (Option<String>, Option<(u64, u64)>) {
     match world.query_tile(tile) {
         Some(TileSnapshot::Machine {
             recipe, process, ..

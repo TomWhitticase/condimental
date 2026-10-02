@@ -488,6 +488,11 @@ const PRODUCT_TINTS := {
 ## replaced could not do (UI_UX.md §2b point 12: every content-id lookup
 ## gets a documented fallback).
 const PRODUCT_TINT_FALLBACK := Color(1, 1, 1)
+## What an UNDECIDED machine is said to be making — one placed but not yet
+## handed anything that names its sauce (`MachineSnapshot.recipe` is null).
+## Its product mesh is left untinted for the same reason: until it is fed it
+## is not any one sauce's machine (owner's request, 2026-10-02).
+const MACHINE_UNDECIDED_TEXT := "any sauce"
 
 ## --- The belt family (the pipes & conveyors overhaul, ticket 5) -----------
 ##
@@ -3959,7 +3964,9 @@ func _pair_to_tile(pair) -> Vector2i:
 func _seed_machine_states() -> void:
 	_machine_states.clear()
 	for placement in _placements:
-		if placement.get("recipe") == null:
+		# `machine`, not `recipe != null`: an UNDECIDED machine (nothing fed
+		# yet names its sauce) carries a null recipe exactly like a belt.
+		if not bool(placement.get("machine", false)):
 			continue
 		var origin := _placement_origin(placement)
 		var parsed = JSON.parse_string(sim.query_tile_json(origin.x, origin.y))
@@ -4775,20 +4782,26 @@ func _fluid_material_for(fluid_id: String) -> StandardMaterial3D:
 ## the current tint is recorded per machine and a repeat is dropped, so this
 ## builds a material only on the tick a machine changes what it makes.
 ##
-## A machine with no `liquid` mesh (every kind that shows no product) and a
-## null recipe are both no-ops rather than warnings — they are the ordinary
-## cases, not mistakes.
+## A machine with no `liquid` mesh (every kind that shows no product) is a
+## no-op rather than a warning — the ordinary case, not a mistake.
+##
+## A NULL recipe is an UNDECIDED machine — placed, but nothing fed to it yet
+## names a sauce (`Machine::choose`'s rule 4). It is drawn as handling ANY
+## sauce: no override at all, so the product mesh keeps the voxel's own
+## neutral `fluid_pale` — the same pale an untinted pipe run shows. It used
+## to be drawn as ketchup, because the sim placed every such machine on its
+## kind's first recipe (owner's request, 2026-10-02).
 func _set_machine_product(key: String, recipe) -> void:
-	if recipe == null:
-		return
-	var recipe_id := String(recipe)
-	if String(_machine_product_recipes.get(key, "")) == recipe_id:
+	var recipe_id := "" if recipe == null else String(recipe)
+	if _machine_product_recipes.has(key) and String(_machine_product_recipes[key]) == recipe_id:
 		return
 	var mesh: MeshInstance3D = _machine_products.get(key, null)
 	if mesh == null:
 		return
 	_machine_product_recipes[key] = recipe_id
-	mesh.set_surface_override_material(0, _product_material_for(recipe_id))
+	mesh.set_surface_override_material(
+		0, null if recipe_id == "" else _product_material_for(recipe_id)
+	)
 
 
 ## A machine's product material: the same `liquid` class numbers the fluid in
@@ -5225,6 +5238,16 @@ func _poll_machine_load() -> void:
 			)
 
 
+## What a machine is making, for a title: the recipe's display name, or —
+## for an UNDECIDED machine, whose `recipe` is null on the wire — the words
+## that say it will take any sauce. One helper so the hover and the
+## configuration panel can never disagree about the neutral state.
+func _machine_making_text(recipe) -> String:
+	if recipe == null or String(recipe) == "":
+		return MACHINE_UNDECIDED_TEXT
+	return _item_display_name(String(recipe))
+
+
 ## The stall reason in words. Item ids go through `_item_display_name` like
 ## every other id the player reads; an unknown kind says nothing rather than
 ## guessing, and a `null` stall is no reason at all.
@@ -5243,6 +5266,10 @@ func _stall_reason_text(stall) -> String:
 		"fluid_input":
 			return "waiting for %s in the pipe" % item
 		"no_supply_pipe":
+			# An UNDECIDED machine with no pipe at all names no fluid: no
+			# recipe is chosen yet, so there is no one fluid it is missing.
+			if String(stall.get("item", "")) == "":
+				return "no supply pipe"
 			return "no supply pipe for %s" % item
 		# The two kinds a run that cannot be named produces (issue #54).
 		# They REPLACE what this machine used to say — "no supply pipe" about
@@ -5266,6 +5293,10 @@ func _stall_reason_text(stall) -> String:
 		# empty on this kind and is deliberately not printed.
 		"mothballed":
 			return "switched off"
+		# Nothing fed yet has picked one of the kind's recipes, so there
+		# is no one ingredient to name: `item` is empty and not printed.
+		"undecided":
+			return "waiting for ingredients"
 	return ""
 
 
@@ -11927,7 +11958,7 @@ func _seed_crews() -> void:
 	_crews.clear()
 	for placement in _placements:
 		var kind := String(placement.get("kind", ""))
-		if placement.get("recipe") == null and kind != DOCK_KIND:
+		if not bool(placement.get("machine", false)) and kind != DOCK_KIND:
 			continue
 		var origin := _placement_origin(placement)
 		var parsed = JSON.parse_string(sim.query_tile_json(origin.x, origin.y))
@@ -14376,10 +14407,9 @@ func _tank_run_volume(snapshot: Dictionary) -> float:
 func _update_config_machine(key: String) -> void:
 	var machine: Dictionary = _machine_states.get(key, {})
 	var kind := String(machine.get("kind", _config_kind))
-	var recipe := String(machine.get("recipe", ""))
 	_config_title.text = "%s — %s" % [
 		_kind_display_name(kind),
-		_item_display_name(recipe) if recipe != "" else "no recipe",
+		_machine_making_text(machine.get("recipe")),
 	]
 	_config_title_icon.texture = _icon_for_asset(_shop_asset_for(kind))
 	var mothballed := bool(machine.get("mothballed", false))
@@ -18930,11 +18960,15 @@ func _machine_hover_text(origin_key: String, kind: String, direction: String, wi
 	# way every other panel in this game names an item. What stays here is
 	# what only words can say: which recipe, which way it faces, and how far
 	# through it is.
-	var text := "%s  ·  facing %s\n%s" % [
-		_item_display_name(String(machine.get("recipe", kind))),
-		direction,
-		progress_text,
-	]
+	# An UNDECIDED machine has no recipe to title it with, so it is titled
+	# by its kind and says it takes any sauce — never the first recipe in
+	# the file, which is what made every fresh machine read as ketchup's.
+	var recipe = machine.get("recipe")
+	var title := (
+		_item_display_name(String(recipe)) if recipe != null
+		else "%s  ·  %s" % [_kind_display_name(kind), _machine_making_text(null)]
+	)
+	var text := "%s  ·  facing %s\n%s" % [title, direction, progress_text]
 	# The load line (the machine-load epic): the machine's status as a glyph
 	# and a word, the share of the window it spent working, and the reason
 	# it is waiting if it is. This IS the indicator — there is no light on

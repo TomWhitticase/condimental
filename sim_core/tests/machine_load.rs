@@ -191,7 +191,7 @@ fn load_snapshots_cover_every_machine_and_no_building_in_layout_order() {
     let expected: Vec<(i32, i32)> = world
         .world_layout()
         .iter()
-        .filter(|p| p.recipe.is_some())
+        .filter(|p| p.machine)
         .map(|p| p.tile)
         .collect();
     assert_eq!(expected.len(), 5, "the shipped chain runs five recipes");
@@ -312,10 +312,13 @@ fn the_wire_shape_is_the_one_the_plan_promises() {
     );
 }
 
-/// A machine that has never been fed: starved, and it names the first
-/// solid input its recipe wants.
+/// A machine that has never been fed: starved, and UNDECIDED — it names no
+/// sauce and no ingredient, because nothing has told it which of its kind's
+/// recipes it is running. It used to name the first recipe's first input
+/// ("waiting for Tomato"), which is ketchup's at every stage, so every fresh
+/// machine read as a ketchup machine (owner's request, 2026-10-02).
 #[test]
-fn a_machine_placed_and_never_fed_reads_starved_for_its_first_input() {
+fn a_machine_placed_and_never_fed_reads_starved_and_undecided() {
     let mut world = World::with_content_and_money(
         recipes(),
         MachineRegistry::bundled(),
@@ -354,55 +357,71 @@ fn a_machine_placed_and_never_fed_reads_starved_for_its_first_input() {
     let stall = entry
         .stall
         .as_ref()
-        .expect("an unfed machine says what it waits for");
-    assert_eq!(stall.kind, StallKind::Input);
-    assert_eq!(stall.item, "tomato");
+        .expect("an unfed machine says it is waiting");
+    assert_eq!(stall.kind, StallKind::Undecided);
+    assert_eq!(stall.item, "", "no one ingredient is the missing one");
+    assert_eq!(
+        serde_json::to_value(stall).unwrap(),
+        serde_json::json!({"kind": "undecided", "item": ""}),
+        "and that is what the wire says"
+    );
 }
 
-/// The fluid-side reasons: a recipe that wants a fluid and has no pipe at
-/// all, and one that deposits with no outlet.
+/// The fluid-side reason: a recipe that wants a fluid and has no pipe at
+/// all. Since 2026-10-02 a never-fed bottler is `undecided` rather than
+/// short of a ketchup pipe, so the case is built the way a player meets it:
+/// a line that ran ketchup, then lost the pipe tile the bottler drew from.
+/// It keeps the recipe it was running (`Machine::choose`'s rule 3) and
+/// names the pipe that recipe is missing.
 #[test]
 fn an_unplumbed_machine_names_the_missing_pipe() {
-    let mut world = World::with_content_and_money(
-        recipes(),
-        MachineRegistry::bundled(),
-        ContractRegistry::bundled(),
-        Money::from_num(5_000),
-    );
-    for kind in ["bottler", "cooking_vat"] {
-        world.issue_command(PlayerCommand::Purchase {
-            kind: kind.to_string(),
-            quantity: 1,
-        });
+    // Only the bottler: taking up the vat's supply tile also leaves the
+    // vat's OUTLET run nameable as any of three sauces (no vat recipe is
+    // feasible without its input run), so the vat's honest reason there is
+    // the ambiguous outlet — `pipe_naming.rs`'s business, not this test's.
+    let (kind, fluid) = ("bottler", "ketchup");
+    {
+        let mut world =
+            reference_chain_with_budget(recipes(), common::STOCK_COST + common::WAGE_RESERVE);
+        common::stock_up(&mut world);
+        let machine = tile_of(&world, kind);
+        // Run until it has worked, so it has decided what it makes.
+        for _ in 0..SETTLE_TICKS {
+            common::supply(&mut world);
+            world.tick();
+            if entry_at(&world, machine).load.working > 0 {
+                break;
+            }
+        }
+        // Take up the pipe tile it draws from — its tap's own segment.
+        let tile = world
+            .fluid_snapshots()
+            .into_iter()
+            .find_map(|run| {
+                let tap = run.taps.iter().find(|t| t.machine_tile == machine)?;
+                Some(run.segments[tap.segment_index].tile)
+            })
+            .unwrap_or_else(|| panic!("the {kind} draws from a pipe"));
+        world.issue_command(PlayerCommand::Remove { tile });
+        let expected = Some((StallKind::NoSupplyPipe, fluid.to_string()));
+        let reason = |world: &World| {
+            entry_at(world, machine)
+                .stall
+                .map(|stall| (stall.kind, stall.item))
+        };
+        // Any craft in flight finishes first; then it is idle and says why.
+        for _ in 0..LOAD_WINDOW_TICKS {
+            if reason(&world) == expected {
+                break;
+            }
+            world.tick();
+        }
+        assert_eq!(
+            reason(&world),
+            expected,
+            "the {kind} names the pipe its recipe is missing"
+        );
     }
-    world.issue_command(PlayerCommand::Place {
-        kind: "bottler".to_string(),
-        tile: (0, 0),
-        direction: Direction::East,
-        item: None,
-    });
-    world.issue_command(PlayerCommand::Place {
-        kind: "cooking_vat".to_string(),
-        tile: (5, 5),
-        direction: Direction::East,
-        item: None,
-    });
-    for _ in 0..10 {
-        world.tick();
-    }
-    let snapshots = world.machine_load_snapshots();
-    assert_eq!(snapshots.len(), 2);
-    let bottler = snapshots.iter().find(|e| e.tile == (0, 0)).unwrap();
-    assert_eq!(
-        bottler.stall.as_ref().map(|s| (s.kind, s.item.as_str())),
-        Some((StallKind::NoSupplyPipe, "ketchup"))
-    );
-    let vat = snapshots.iter().find(|e| e.tile == (5, 5)).unwrap();
-    assert_eq!(
-        vat.stall.as_ref().map(|s| (s.kind, s.item.as_str())),
-        Some((StallKind::NoSupplyPipe, "ketchup_mix")),
-        "an idle vat is short of its input before it can be short of an outlet"
-    );
 }
 
 /// Load is a polled readout, like fluid: it must never dirty a chunk on

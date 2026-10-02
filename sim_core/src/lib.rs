@@ -330,9 +330,14 @@ impl SimBridge {
     ///    "occupies": [[0, 0]], "recipe": null},
     ///   {"kind": "cooking_vat", "tile": [14, 0], "direction": "east",
     ///    "footprint": {"width_tiles": 2, "height_tiles": 2},
-    ///    "occupies": [[14, 0], [15, 0], [14, 1], [15, 1]], "recipe": "ketchup"}
+    ///    "occupies": [[14, 0], [15, 0], [14, 1], [15, 1]], "recipe": "ketchup",
+    ///    "machine": true}
     /// ]
     /// ```
+    ///
+    /// **`recipe: null` does not mean "not a machine"** (2026-10-02): a
+    /// machine nothing has fed yet is *undecided* and carries `null` too.
+    /// `machine: true`, present on machines only, is the test.
     ///
     /// **Unlike `chain_layout_json` this is not static** — call it again
     /// after any `place`, `remove` or `rotate` command, and it is empty for

@@ -139,9 +139,10 @@ fn a_tank_turned_off_its_run_leaves_the_run_ambiguous() {
 
     // And the vat blames the run, where it used to report "no supply pipe"
     // about a pipe the player had laid. The `item` is whichever fluid its
-    // CURRENT recipe wants (an idle vat still holds the pick it was given),
-    // which is why only the kind is pinned here: the kind is the sentence
-    // the hover panel reads, and it is the half that used to be wrong.
+    // CURRENT recipe wants — empty here, since a vat nothing has reached yet
+    // is undecided and the run fault outranks that — which is why only the
+    // kind is pinned: the kind is the sentence the hover panel reads, and
+    // it is the half that used to be wrong.
     assert_eq!(
         stall_at(&world, (17, -3)).map(|(kind, _)| kind),
         Some(StallKind::AmbiguousPipe),
@@ -172,14 +173,15 @@ fn a_tank_plumbed_into_a_machine_run_leaves_it_unnameable() {
         Some(StallKind::UnnameablePipe),
         "the BBQ vat must say its supply run cannot be named"
     );
-    // The mixer on the other end is reported against its own first
-    // shortfall, which at tick zero is a solid one (`Stall`'s precedence:
-    // solids before fluids). That is deliberately unchanged — the point of
-    // the two new kinds is that a fluid shortfall stops lying, not that it
-    // jumps the queue.
+    // The mixer on the other end is reported against its own state, which
+    // at tick zero is that nothing has reached it yet: `undecided` (since
+    // 2026-10-02 — it was its first recipe's first solid). The fault is on
+    // its OUTLET, which a machine that has not started cannot be short of.
+    // That is deliberately unchanged — the point of the two new kinds is
+    // that a fluid shortfall stops lying, not that it jumps the queue.
     assert_eq!(
         stall_at(&world, (14, -3)).map(|(kind, _)| kind),
-        Some(StallKind::Input)
+        Some(StallKind::Undecided)
     );
 }
 
@@ -277,9 +279,9 @@ fn a_dry_crusher_touching_a_mix_run_does_not_make_it_ambiguous() {
         .find(|entry| entry.tile == (8, 2))
         .expect("a crusher stands at (8, 2)");
     assert_eq!(
-        crusher.recipe.as_deref(),
-        Some("tomato_paste"),
-        "the crusher this test parks there is the dry one"
+        crusher.recipe, None,
+        "the crusher this test parks there has been fed nothing, so it is undecided — its \
+         kind's claims on the run are what is under test, not its pick"
     );
 
     let run = run_at(&world, (6, 0));
