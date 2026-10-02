@@ -1,6 +1,6 @@
 # CONDIMENTAL — Tech debt
 
-**Changes since last overview audit: 17** · **Debt total: 0 points**
+**Changes since last overview audit: 19** · **Debt total: 0 points**
 
 Feature freeze: **off** — set by `scripts/tech-debt-status.sh --write`.
 Last audit: none yet (the counter started 2026-10-01).

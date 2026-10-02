@@ -275,6 +275,18 @@ flag, because a null recipe no longer means "not a machine". No save format
 change; an old save caught mid-craft finishes on the recipe it was really
 running. Rule in `DECISIONS_LOG.md`.
 
+### 2026-10-02 — The title sign hangs from the roof at every window size
+
+The owner saw the title sign floating in fullscreen: its rods are a fixed
+length on the model, and a taller window centres the menu column (and the
+sign framed into it) lower, so they stopped short of the top — by over 400 px
+on a 3024x1964 MacBook, and by 23 px even at 1920x1080. A new
+`title_sign_rods` voxel piece, two rod lengths on the sign's own footprint,
+is now stacked above the body as many times as the frame needs, so the rods
+always leave the top edge; 1280x720 renders pixel-identical. `test_main_menu`
+projects the real rod meshes through the title camera at 16:9, 16:10,
+ultrawide and portrait with the slot high, centred and low.
+
 ### 2026-10-02 — mustard is yellow and white
 
 The owner ruled the mustard bottle should be yellow and white, not yellow
