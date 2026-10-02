@@ -298,9 +298,11 @@
         // never starts at all. Upstream of this line nothing moved, so the
         // bill per case, every contract, both gates' thresholds and the 3:2
         // splits are untouched. The mustard gate does still open sooner
-        // (tick 131 000, was 155 000; `data/unlocks.ron` has the measurement),
-        // because a 200-tick bottler no longer beats the BBQ mixer to the
-        // shared ketchup run as often as the old 60-tick one did.
+        // (tick 131 000, was 155 000; `data/unlocks.ron` has the measurement).
+        // Two causes, measured apart in #225's review: the 200-tick fill alone
+        // is about 14 000 ticks of it (a 60-tick bottler with 8-bottle cases
+        // crosses at 141 000), and the rest comes with the 8-bottle output
+        // itself, which leaves the ketchup run to the BBQ mixer more often.
         //
         // **THE BELT INTO THE PACKER IS NOW THE LIMIT, BY CHOICE.** A lane
         // carries 40 items per 1 000 ticks, so 5 cases: one bottling line
