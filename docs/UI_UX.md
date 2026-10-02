@@ -61,7 +61,9 @@ shader pack** (voxel base + real lighting).
   so a panel closing under a held CTRL leaves the cursor free, and window
   focus loss forgets the key. On macOS Godot delivers CTRL+click as a right
   click; a hotbar slot takes a right press that still carries CTRL as the
-  same click. CTRL was bound to nothing before this. The legend's first-
+  same click. The slot's tooltip says "click or press N to select" while
+  CTRL is held. `test_ctrl_cursor.gd` also scans `main.gd` so that nothing
+  but `_apply_fp_mouse_mode` and `_set_view_mode` writes `Input.mouse_mode`. CTRL was bound to nothing before this. The legend's first-
   person text says "hold CTRL: mouse to hotbar".
 - **Tile grid always legible**: the player can always tell which tile a
   thing occupies.

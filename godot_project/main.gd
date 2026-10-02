@@ -15344,7 +15344,12 @@ func _fill_hotbar_tooltip(index: int, owned: int, price: float) -> void:
 	var kind: String = String(_hotbar_slots[index]["kind"])
 	_hotbar_tooltip_name.text = _kind_display_name(kind)
 	var key := _hotbar_key_label(index)
+	# With CTRL holding the first-person pointer on the HUD the player is
+	# reaching for the slot with the mouse, so the click is the verb named;
+	# otherwise the key is, since a captured pointer cannot click.
 	var select_line := ("press %s to select" % key) if key != "" else "click to select"
+	if key != "" and _fp_ctrl_cursor():
+		select_line = "click or press %s to select" % key
 	_hotbar_tooltip_body.text = "%s    ·    %.0f each\n%s    ·    buy in the build menu (E)" % [
 		("carrying %d" % owned) if owned > 0 else "carrying none",
 		price,

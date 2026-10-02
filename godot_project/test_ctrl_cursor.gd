@@ -25,8 +25,16 @@
 #   * CTRL released: the mouse is wanted CAPTURED again, the crosshair is
 #     back, the first motion after the recapture (the OS warping the pointer
 #     home) is dropped and the next one looks,
-#   * a panel closing under a held CTRL leaves the cursor free, and losing
-#     window focus forgets a CTRL whose release went to another window,
+#   * under CTRL the world hover tooltip steps aside (with a control: it is
+#     up over the same placed belt without CTRL) and the hotbar tooltip names
+#     the click,
+#   * a panel closing under a held CTRL is DECIDED to leave the cursor free,
+#     and losing window focus forgets a CTRL whose release went to another
+#     window,
+#   * main.gd writes `Input.mouse_mode` only in `_apply_fp_mouse_mode` and
+#     `_set_view_mode` — a source scan, because headless Godot reads the mode
+#     back as VISIBLE whatever was written, so this is the only check that
+#     fails when a panel setter captures the pointer itself again,
 #   * the first-person legend says so.
 extends SceneTree
 
@@ -233,11 +241,26 @@ func _run() -> void:
 		_fail("a CTRL-held click in first person opened a configuration panel")
 		return
 
+	# --- While CTRL holds the pointer, the world panels and the HUD's copy ---
+	# The slot's own tooltip names the click the player is making (the world
+	# hover line is checked further down, once there is a building to hover).
+	main._exit_build_mode()
+	main._on_hotbar_slot_hovered(_slot_index)
+	var tip: String = main._hotbar_tooltip_body.text
+	if not tip.contains("click"):
+		_fail("with CTRL held the hotbar tooltip must name the click, reads '%s'" % tip)
+		return
+	main._on_hotbar_slot_unhovered(_slot_index)
+	main._select_hotbar_slot(_slot_index)
+
 	# --- A panel closing under a held CTRL leaves the cursor free ------------
+	# What is DECIDED; that every setter obeys the decision is the source
+	# guard at the end (`_mouse_mode_writes`), because headless Godot reads
+	# `Input.mouse_mode` back as VISIBLE whatever was written.
 	main._set_market_open(true)
 	main._set_market_open(false)
 	if main._fp_wanted_mouse_mode() != Input.MOUSE_MODE_VISIBLE:
-		_fail("closing a panel while CTRL is still held must not capture the mouse")
+		_fail("closing a panel while CTRL is still held must not want the mouse captured")
 		return
 
 	# --- CTRL released: back to looking ---------------------------------------
@@ -276,6 +299,22 @@ func _run() -> void:
 		_fail("the control failed: a plain first-person click did not place, so the CTRL check above proves nothing")
 		return
 
+	# --- The world hover line steps aside under CTRL ---------------------------
+	# The belt just placed is under the crosshair, so out of build mode the
+	# hover tooltip has something to say — the control — and with CTRL held
+	# it must not say it: it describes a tile the mouse is not aimed at.
+	main._exit_build_mode()
+	main._update_hover_tooltip()
+	if not main._hover_tooltip.visible:
+		_fail("the control failed: no hover tooltip over the placed belt without CTRL, so the CTRL check would prove nothing")
+		return
+	_key(KEY_CTRL, true)
+	main._update_hover_tooltip()
+	if main._hover_tooltip.visible:
+		_fail("the world hover tooltip must step aside while CTRL has the pointer on the HUD")
+		return
+	_key(KEY_CTRL, false)
+
 	# --- Focus loss forgets CTRL ----------------------------------------------
 	_key(KEY_CTRL, true)
 	main._notification(Node.NOTIFICATION_APPLICATION_FOCUS_OUT)
@@ -283,15 +322,55 @@ func _run() -> void:
 		_fail("losing window focus must forget CTRL, or the cursor stays free with nobody holding it")
 		return
 
+	# --- Every first-person mouse-mode write goes through one function -------
+	# Headless Godot ignores `Input.mouse_mode` (it reads back VISIBLE after a
+	# CAPTURED write), so no runtime check can catch a panel setter that
+	# writes the mode itself — and before this change eight of them did, each
+	# capturing the pointer on close whatever else (a held CTRL, another
+	# panel) still wanted it. The source is the only witness: main.gd may
+	# write `Input.mouse_mode` in `_apply_fp_mouse_mode` and in
+	# `_set_view_mode`'s isometric branch, and nowhere else.
+	var stray := _mouse_mode_writes()
+	if stray != "":
+		_fail(stray)
+		return
+
 	# --- The legend says so -----------------------------------------------------
 	if main.FP_HELP_TEXT.find("CTRL") < 0:
 		_fail("FP_HELP_TEXT must tell the player CTRL frees the mouse for the hotbar")
 		return
 
-	print("CTRL_CURSOR_OK: CTRL in first person freed the mouse (crosshair off, look off, WASD live); a CTRL click on slot %d selected '%s' (left and macOS's right); a CTRL click on a buildable tile placed nothing (prompt hidden) while a plain one placed; a panel closing under CTRL kept the cursor; release recaptured, dropped the warp motion, then looked; focus loss forgot CTRL" % [
+	print("CTRL_CURSOR_OK: CTRL in first person freed the mouse (crosshair off, look off, WASD live); a CTRL click on slot %d selected '%s' (left and macOS's right); a CTRL click on a buildable tile placed nothing (prompt hidden) while a plain one placed; the world hover hid and the slot tooltip named the click; a panel closing under CTRL kept the cursor, and only _apply_fp_mouse_mode/_set_view_mode write the mouse mode; release recaptured, dropped the warp motion, then looked; focus loss forgot CTRL" % [
 		_slot_index, _kind,
 	])
 	quit(0)
+
+
+## "" when every `Input.mouse_mode =` in main.gd sits in a function allowed
+## to write it, else a message naming each stray write's line and function.
+func _mouse_mode_writes() -> String:
+	var allowed := ["_apply_fp_mouse_mode", "_set_view_mode"]
+	var source := FileAccess.get_file_as_string("res://main.gd")
+	if source == "":
+		return "could not read res://main.gd to check its mouse-mode writes"
+	var current_func := ""
+	var stray: Array = []
+	var found := 0
+	var lines := source.split("\n")
+	for i in range(lines.size()):
+		var line: String = lines[i]
+		if line.begins_with("func "):
+			current_func = line.substr(5).get_slice("(", 0)
+		var code := line.get_slice("#", 0)
+		if code.contains("Input.mouse_mode =") or code.contains("Input.set_mouse_mode("):
+			found += 1
+			if not current_func in allowed:
+				stray.append("line %d in %s()" % [i + 1, current_func])
+	if found == 0:
+		return "found no `Input.mouse_mode =` in main.gd at all — the scan is reading the wrong thing"
+	if not stray.is_empty():
+		return "main.gd writes Input.mouse_mode outside _apply_fp_mouse_mode/_set_view_mode (%s) — route it through _apply_fp_mouse_mode, or a panel closing under a held CTRL (or another panel) captures the pointer" % ", ".join(stray)
+	return ""
 
 
 func _make_motion(relative: Vector2) -> InputEventMouseMotion:
