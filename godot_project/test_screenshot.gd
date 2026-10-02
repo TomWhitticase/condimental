@@ -2562,11 +2562,11 @@ func _process(delta: float) -> bool:
 			if _intro_at == "":
 				_main.finish_intro()
 			else:
-				# Wound back by the warm-up still to run, so the intro clock
-				# reads `_intro_at` at the shutter.
-				_main._title_scene.intro_time = maxf(
-					0.0, float(_intro_at) - float(WARMUP_FRAMES - 1) / FIXED_FPS
-				)
+				# HELD there for the whole warm-up, not wound back by it: a
+				# clock started early by the warm-up's length could never
+				# show a moment earlier than the warm-up itself (0.73 s), and
+				# the lights strike at about 0.3.
+				_main._title_scene.intro_hold = maxf(0.0, float(_intro_at))
 		if _frames == 1 and _settings:
 			_main._on_settings_pressed()
 		elif _frames == 1 and not _title:

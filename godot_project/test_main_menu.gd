@@ -264,6 +264,47 @@ func _initialize() -> void:
 	if not moved:
 		_fail("product on the title line must move along the belt")
 		return
+	# The intro, from the START: the clock above has already run past its end
+	# (the drift check fed it six seconds), so a skip tested from there would
+	# pass with a skip that does nothing (PR #226's review).
+	backdrop.intro_time = 0.0
+	backdrop._process(0.1)
+	menu._apply_intro()
+	if backdrop.intro_time >= backdrop.INTRO_LENGTH or not menu._intro_running():
+		_fail("the intro must still be running 0.1 s in")
+		return
+	if menu._button_box.get_child(0).modulate.a > 0.0:
+		_fail("the buttons must be hidden while the sign is still dropping in")
+		return
+	# A click during the intro skips it, shows the buttons and is consumed —
+	# the handler marks it handled, so it never reaches the button underneath.
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	if not menu._skip_intro_for(click):
+		_fail("a click during the intro must skip it and be swallowed")
+		return
+	if backdrop.intro_time < backdrop.INTRO_LENGTH:
+		_fail("skipping must leave the intro at its settled end")
+		return
+	for button in menu._button_box.get_children():
+		if not is_equal_approx((button as Control).modulate.a, 1.0):
+			_fail("a skipped intro must leave every button fully shown")
+			return
+	# ...and once it has settled, clicks belong to the buttons again.
+	if menu._skip_intro_for(click):
+		_fail("a click after the intro must not be swallowed — it is a button press")
+		return
+	# A release is not a skip (it would swallow the release of the click
+	# that pressed a button).
+	backdrop.intro_time = 0.0
+	backdrop._process(0.0)
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	if menu._skip_intro_for(release):
+		_fail("a button release must not count as a skip")
+		return
 	backdrop.finish_intro()
 	if backdrop.intro_time < backdrop.INTRO_LENGTH:
 		_fail("finish_intro must leave the intro at its settled end")

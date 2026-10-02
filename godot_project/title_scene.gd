@@ -132,7 +132,8 @@ var MOTION_FRAMES_PER_SECOND: float = (
 )
 
 ## The marquee sign. Mirrors `assets.rs`'s `TITLE_SIGN_BULB_FRAMES` and
-## `TITLE_SIGN_ROD` — change one, change both.
+## `TITLE_SIGN_ROD`; the voxgen test `title_scene_gd_mirrors_the_sign_constants`
+## fails if either side moves without the other.
 const SIGN_ASSET := "title_sign"
 const SIGN_BULB_FRAMES := 3
 const SIGN_ROD_VOXELS := 60
@@ -168,6 +169,12 @@ var _world_env: WorldEnvironment
 ## Seconds into the intro. Public so `menu.gd` can fade its column up on the
 ## same clock, and so a skip is one assignment (`finish_intro`).
 var intro_time := 0.0
+## When >= 0, the intro is held at this moment instead of running: every
+## frame puts `intro_time` back to it. Only the screenshot harness sets it
+## (`--intro-at`), so a review frame shows the moment it names — including
+## the first fraction of a second, which a clock wound back by the warm-up
+## could not reach.
+var intro_hold := -1.0
 ## The exposure the hall is lit at once the intro is over — whatever
 ## `factory_environment.gd` built, so the intro never retunes the hall.
 var _full_exposure := 1.0
@@ -241,6 +248,8 @@ func _process(delta: float) -> void:
 func _animate(delta: float) -> void:
 	_elapsed += delta
 	intro_time = minf(intro_time + delta, INTRO_LENGTH)
+	if intro_hold >= 0.0:
+		intro_time = minf(intro_hold, INTRO_LENGTH)
 	var phase := sin(TAU * _elapsed / DRIFT_PERIOD)
 	_camera.position.x = _camera_home().x + phase * DRIFT_TRAVEL
 	_camera.rotation_degrees.y = _camera_yaw() + phase * DRIFT_YAW

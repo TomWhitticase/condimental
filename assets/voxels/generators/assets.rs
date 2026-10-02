@@ -9582,4 +9582,27 @@ mod tests {
             "the letters must stand on the front (low Y) face"
         );
     }
+
+    /// `title_scene.gd` frames the sign from two of this family's numbers —
+    /// how many bulb frames to load, and how far above the board the rods
+    /// reach (it hangs the sign from their top). GDScript cannot import a
+    /// Rust constant, so its copies are checked against these instead: a
+    /// change here that left them behind would frame the sign wrongly with
+    /// every Godot test still green (PR #226's review).
+    #[test]
+    fn title_scene_gd_mirrors_the_sign_constants() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../godot_project/title_scene.gd");
+        let script = std::fs::read_to_string(&path).expect("read title_scene.gd");
+        for (name, value) in [
+            ("SIGN_BULB_FRAMES", TITLE_SIGN_BULB_FRAMES as i32),
+            ("SIGN_ROD_VOXELS", TITLE_SIGN_ROD),
+        ] {
+            let line = format!("const {name} := {value}");
+            assert!(
+                script.lines().any(|l| l.trim() == line),
+                "title_scene.gd must declare `{line}` to match assets.rs"
+            );
+        }
+    }
 }

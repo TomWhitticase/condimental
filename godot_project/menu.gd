@@ -479,16 +479,27 @@ func _intro_running() -> bool:
 
 
 ## Any click or key during the intro skips to its end — and is swallowed, so
-## the click that skips cannot also land on a button still fading in.
+## the click that skips cannot also land on a button still fading in. `_input`
+## runs before the GUI does, so an event marked handled here never reaches a
+## Button; the decision itself is `_skip_intro_for`, which a headless test can
+## ask without a viewport.
 func _input(event: InputEvent) -> void:
+	if _skip_intro_for(event) and is_inside_tree():
+		get_viewport().set_input_as_handled()
+
+
+## True when `event` skipped the intro (and so must be swallowed): a press of
+## any key or mouse button while the intro is still running. Once it has
+## settled, nothing is consumed and the buttons get every click.
+func _skip_intro_for(event: InputEvent) -> bool:
 	if not _intro_running():
-		return
+		return false
 	var skip: bool = (event is InputEventKey and event.pressed) \
 			or (event is InputEventMouseButton and event.pressed)
 	if skip:
 		_title_scene.finish_intro()
 		_apply_intro()
-		get_viewport().set_input_as_handled()
+	return skip
 
 
 func _build_load_view() -> void:
