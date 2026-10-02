@@ -938,20 +938,16 @@ func _check_docket_case(strip: bool, window: Vector2i) -> bool:
 			"up" if strip else "down", str(window), main._crew_hint.text
 		])
 		return false
-	# Issue #13's trade is off against the SHORT-STAFFED strip: the board hint
-	# no longer competes with an alarm that is not on its plate. It does still
-	# yield its line to the docket stack, but only for the one thing worth a
-	# line of advice — a stack cut ABOVE the first docket's first line, which
-	# is a heading sliced through its own type (issue #17). So when the hint is
-	# down, the line it gave up has to be a line the stack got back.
-	if not main._contract_hint_label.visible:
-		var first_line: float = main._first_line_boundary(main._contract_cards_box)
-		var bought: float = main._contract_cards_scroll.custom_minimum_size.y
-		if bought < first_line - 0.5:
-			_fail("at %s the board hint is down and the stack still shows no whole docket line (%.0f < %.0f)" % [
-				where, bought, first_line
-			])
-			return false
+	# The plate always shows at least one whole line of its first row: a
+	# list cut above that has lost the cue that there is anything in it
+	# (issue #17).
+	var first_line: float = main._first_line_boundary(main._contract_cards_box)
+	var bought: float = main._contract_cards_scroll.custom_minimum_size.y
+	if bought < first_line - 0.5:
+		_fail("at %s the contracts list shows no whole line of its first row (%.0f < %.0f)" % [
+			where, bought, first_line
+		])
+		return false
 
 	# Neither plate is drawn ON the other. This is the fault that outranks
 	# every cut below: the earlier section checks it too, but only with the
@@ -1003,10 +999,8 @@ func _check_docket_case(strip: bool, window: Vector2i) -> bool:
 		for boundary in lines:
 			if absf(cut - float(boundary)) <= 0.5:
 				lands_on_line = true
-		# There is no escape hatch under the first line any more: the
-		# clipboard buys that line back by dropping the board hint
-		# (`_update_contract_panel`), so a cut between zero and the first line
-		# means that trade did not happen.
+		# There is no escape hatch under the first line: the plate's floor
+		# is that line (`_update_contract_panel`).
 		if not lands_on_line:
 			_fail("at %s the clamped stack is cut at %.0fpx, inside a line — lines end at %s" % [
 				where, cut, str(lines)
@@ -1246,7 +1240,7 @@ func _check_config_case(window: Vector2i, tile: Vector2i, what: String, across: 
 func _finish_sweep() -> void:
 	main._staff_snapshot = {}
 	_resize(BIG)
-	_summary += "; the docket stack is cut between dockets and the board hint buys back the first docket line when the stack cannot show one, and neither plate lands on the other, at both sizes with the strip up and down"
+	_summary += "; the contracts list is cut between rows and always shows its first row's first line, and neither plate lands on the other, at both sizes with the strip up and down"
 	_frame = 0
 
 

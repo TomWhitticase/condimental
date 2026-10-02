@@ -218,12 +218,34 @@ func _initialize() -> void:
 		return
 
 	# --- The PAID stamp, and its own reversal ------------------------------
-	var stamped_label: Label = null
+	# On the plate's row, as its status...
+	var paid_row: Dictionary = {}
+	var paid_contract: Dictionary = {}
 	for i in range(min(main._contract_cards.size(), main._contract_card_ids.size())):
 		if String(main._contract_card_ids[i]) == paid_id:
-			stamped_label = (main._contract_cards[i] as Dictionary).get("payout_label")
+			paid_row = main._contract_cards[i]
+	for contract in JSON.parse_string(main.sim.economy_snapshot_json()).get("contracts", []):
+		if String(contract["id"]) == paid_id:
+			paid_contract = contract
+	if paid_row.is_empty() or paid_contract.is_empty():
+		_fail("the paying contract '%s' has no row on the contracts plate" % paid_id)
+		return
+	main._update_contract_row(paid_row, paid_contract, payout_tick)
+	if not String(paid_row["status_label"].text).contains("PAID"):
+		_fail("the paid row reads '%s', expected PAID" % paid_row["status_label"].text)
+		return
+	main._update_contract_row(paid_row, paid_contract, payout_tick + main.PAYOUT_STAMP_TICKS)
+	if String(paid_row["status_label"].text).contains("PAID"):
+		_fail("after %d ticks the row should stop reading PAID" % main.PAYOUT_STAMP_TICKS)
+		return
+	# ...and on the board's docket, as its payout figure.
+	main._rebuild_board_active_cards(JSON.parse_string(main.sim.economy_snapshot_json()).get("contracts", []))
+	var stamped_label: Label = null
+	for i in range(min(main._board_active_cards.size(), main._board_active_ids.size())):
+		if String(main._board_active_ids[i]) == paid_id:
+			stamped_label = (main._board_active_cards[i] as Dictionary).get("payout_label")
 	if stamped_label == null:
-		_fail("the paying contract '%s' has no docket on the clipboard" % paid_id)
+		_fail("the paying contract '%s' has no docket on the board" % paid_id)
 		return
 	main._update_payout_stamps(payout_tick)
 	if stamped_label.text != "PAID":

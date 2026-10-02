@@ -259,6 +259,16 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-02 — the contracts plate
+
+The owner found the top-right contracts clipboard ugly, out of line with
+the other overlays and too full. It is now a dark plate like STOCK and CREW,
+at their width and on their edge: the balance on the heading line, then one
+compact row per order with its name, time left, a draining bar and its
+state (`1/2`, `⚠ 1/2`, `✔ READY`, `⚠ LAST CHANCE`, `✔ PAID`). Full docks
+and short wages appear only when true. Checklists, strikes and tallies are
+on the C board's dockets, which are unchanged. DECISIONS 2026-10-02.
+
 ### 2026-10-02 — mustard is yellow and white
 
 The owner ruled the mustard bottle should be yellow and white, not yellow

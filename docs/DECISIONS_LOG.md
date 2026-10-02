@@ -18,6 +18,18 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-02 **The contracts readout is a plate, not a clipboard.** The
+  always-visible contract readout (`_build_contract_panel`) is a dark plate
+  at the top of the right-hand column, at STOCK's width and margin
+  (`STOCK_PANEL_MIN_WIDTH`, `CONTRACT_PANEL_MARGIN = STOCK_PANEL_MARGIN`).
+  It shows the balance on its heading line and one compact row per signed
+  contract (`_build_contract_row`, `_contract_row_state`): icon, name, time
+  left, the countdown bar and a glyph-and-word status from
+  `_contract_risk_for`. Docks appear only as `⚠ DOCKS FULL`, wages only
+  when short. The checklist, strikes, cadence, tallies and payout belong to
+  the docket (`_build_contract_card`), and the docket lives only on the
+  C board's YOUR CONTRACTS column. Do not grow the row back into a docket;
+  add detail to the board. Full record in `docs/DECISIONS.md`.
 - 2026-10-02 **Mustard is yellow and white, not yellow and black.** The
   owner's ruling. The mustard bottle (`item_bottle_mustard`) is a
   `mustard_gold` body with a WHITE label band and cap — both

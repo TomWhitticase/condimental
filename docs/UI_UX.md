@@ -427,32 +427,44 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
 
 ## 5. UI style
 
-> **Status: built.** The contract readout is a diegetic clipboard; machine
-> detail is hover-only; the build menu (E) and market (M) are grids of
-> voxel-rendered icon slots; the hotbar is the primary way anything is
-> picked up (§5b); the main and pause menus are §5d. Other readouts use the
-> plain dark plate: the clipboard motif is reserved for orders and
-> checklists.
+> **Status: built.** The always-visible contract readout is the CONTRACTS
+> plate at the top of the right-hand column; an order's full docket is on the
+> C board. Machine detail is hover-only; the build menu (E) and market (M)
+> are grids of voxel-rendered icon slots; the hotbar is the primary way
+> anything is picked up (§5b); the main and pause menus are §5d. Readouts use
+> the plain dark plate; the paper docket motif is reserved for orders and
+> checklists on the board.
 
 - **Clean, simple, Minecraft-adjacent**: chunky panel borders, flat-shaded
   slot grids, limited palette per panel, generous hit targets. No modern
   skeuomorphic-app UI (gradients, drop shadows, hairline fonts).
 - **Icons are rendered from the real voxel assets** (§2b point 7), never
   separately-drawn 2D art.
-- **Several contracts are one board of dockets, not one clipboard each.**
-  One sheet, one clip bar, one printed docket card per contract (the
-  checkbox's paper tone plus a steel hairline, no third colour). Shared
-  facts (money, what stands on the docks) appear once above the dockets;
-  per-contract facts (checklist, payout, countdown, delivered/missed) on
-  each docket. Past a capped height the stack scrolls.
-- **Diegetic paper-and-metal widgets**: orders and objectives are clipboards
-  and checklists. A contract IS a clipboard.
+- **The CONTRACTS plate is a glance, not a docket** (the owner's call,
+  2026-10-02; it was a cream paper clipboard of full dockets, the widest
+  thing on screen and the one plate in the column that did not line up).
+  It is a dark plate like STOCK and CREW under it, at their width and on
+  their right edge, with a payout-green rule and heading. The heading line
+  carries the balance — shown once, the plate's largest figure, with what
+  just changed it flashed beside it. Then one row per signed contract, in
+  priority order, two short lines: the first product's icon, the name
+  (trimmed, never wrapped) and the time left in seconds; then the countdown
+  bar draining to the next check, with the status at its end — the tally
+  (`1/2`), `⚠ 1/2` at risk, `✔ READY`, `⚠ LAST CHANCE`, `✔ PAID` for a beat —
+  and the row's left rule in the state's colour. The plate says the docks
+  are FULL, and wages are short, only when they are. Past its share of the
+  column the list scrolls, cut between rows. Everything else about an order
+  is its docket on the board.
+- **Diegetic paper-and-metal widgets**: orders are paper dockets with
+  checklists — one printed card per contract (the checkbox's paper tone plus
+  a steel hairline, no third colour), carrying the checklist, payout,
+  countdown, strikes and delivered/missed tallies.
 - **The contracts board (C) is a dark-plate menu of paper offers.** What is
-  running lives on the clipboard; what is for sale lives on the board, a
+  running is glanced at on the plate; what is for sale lives on the board, a
   menu like the build menu and the market (centred above the hotbar, one
   modal at a time), whose rows are the clipboard's own docket card with the
   terms in words and one SIGN button that names the price. A SIGN button on
-  the clipboard would make every running order look like a thing to click.
+  the plate would make every running order look like a thing to click.
   The button says what a click will do or why it will not (**SIGNED**, **✗
   SIGN · 150**, **🔒 BBQ Sauce**) and, under it, a short line on where the offer
   stands (a lost offer says **✗ LOST — sign again**). Each card reads left
@@ -461,9 +473,8 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   green; the name; the mix with its icons and the terms — "every 34s · 3
   strikes", seconds, never ticks; and the button. The board
   is two columns: **FOR SALE** on the right, and **YOUR CONTRACTS** on the
-  left — the clipboard's running dockets, built and driven by the same code,
-  wider, with no button on them — so the next order is chosen looking at the
-  ones already signed. A signature lands in the left column on the same
+  left — the running dockets, with no button on them — so the next order is
+  chosen looking at the ones already signed. A signature lands in the left column on the same
   click; with nothing running it shows a paper card that says so and points
   right, its sentence wrapped inside the column's pinned width so the empty
   state takes nothing from the offers. **Each card breaks only as far as it
@@ -504,8 +515,8 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   docket stays paper, ink, its done-green and its one warning red; at-risk
   and last-chance share the red and are told apart by their words, border
   weight and pips. A lost or signed contract is announced in one line along
-  the top edge, and an empty clipboard says "press C" rather than showing a
-  money figure over nothing.
+  the top edge, and an empty contracts plate says "press C" rather than
+  showing a money figure over nothing.
 - **The production panel (P) is the same dark-plate menu, one row per
   item the factory has touched** (the production-stats epic, 2026-09-13 —
   Factorio's P screen, and P for the same reason). A window selector in
@@ -1063,7 +1074,9 @@ Two consequences worth keeping:
   `⚠ FULL` spelled out beside it (§7). The rule is unchanged, not bent: the
   bar appeared because the ceiling did, and with no `delivery_capacity` on
   the wire the line falls back to the bare figure rather than inventing a
-  full mark.
+  full mark. (Since 2026-10-02 the line is gone from the contracts
+  plate, which says only `⚠ DOCKS FULL` when it is; each dock's own hover
+  draws its places.)
 - **The warehouse's ceiling is drawn where it is spent, and that is not the
   STOCK plate** (2026-09-21). Racks cap raw stock (GAMEPLAY.md), so "how many
   tomatoes is full" finally has an answer and the §5f plate could have had a
@@ -1098,6 +1111,11 @@ clock; for a review render it is what makes the fade the same in two
 photographs of one command (issue #82).
 
 ### 5f. The right-hand column: what you have, and the legend that folds
+
+> Since 2026-10-02 "the clipboard" below is the **CONTRACTS plate** (§5): the
+> same top-right tenant, now a dark plate at the column's width whose list
+> scrolls between compact rows rather than between paper dockets. The fitting
+> rules below are unchanged; only what a "row" is changed.
 
 Three plates are drawn over the game and never asked for: the legend
 top-left, the contracts clipboard top-right, and — since 2026-09-16 — the
@@ -1595,8 +1613,8 @@ Four consequences worth knowing before changing it:
   **pulse** — lit, dark, lit — off the simulation tick like every other
   animation here (§6a), which reads across a floor at any zoom and cannot
   be confused with a steady lamp. The words are still where the detail is:
-  the hover says `⚠ FULL`, and the clipboard's ON THE DOCK line reads
-  its figure against the docks' places with its bar at the ceiling (§5e).
+  the hover says `⚠ FULL`, and the contracts plate says `⚠ DOCKS FULL` (until 2026-10-02 the clipboard's ON THE DOCK line read
+  its figure against the docks' places with its bar at the ceiling (§5e)).
 - **A dock's hover draws its places as a grid** (2026-09-26). The dock
   holds its own stock in places (GAMEPLAY §9), so its hover shows one socket
   per place under the words that count them: an occupied socket holds the
