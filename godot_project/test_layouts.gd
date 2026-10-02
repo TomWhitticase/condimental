@@ -2101,7 +2101,8 @@ const BELT_GALLERY_LEFT_CORNERS := {
 ## of it (`sim::world::resolve_network_fluids`), not from anything that has
 ## ever flowed through it, so the naming here is pure topology and is exact
 ## the moment the last pipe is placed — nothing has to run. The layout is
-## chosen so that each of the six runs narrows to exactly one candidate:
+## chosen so that each of the ketchup and BBQ chain's six runs narrows to
+## exactly one candidate:
 ##
 ##   tank -> [A] -> mixer -> [B] -> vat -> [C] -> mixer -> [D] -> vat -> [F]
 ##                                                          tank -> [E] ->
@@ -2297,7 +2298,7 @@ const FLUID_MIN_VISIBLE_PRESSURE := 0.02
 ## same save/load door `fund` and `deliver` use and for the same reason: a
 ## volume is simulation state and no player command sets one directly. The
 ## honest alternative is to run the factory, and for a fixture whose whole
-## job is to hold six colours still side by side that is both far more
+## job is to hold nine colours still side by side that is both far more
 ## expensive and actively wrong — a running line is a line in which half the
 ## runs are momentarily empty.
 ##

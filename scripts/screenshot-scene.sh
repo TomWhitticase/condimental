@@ -106,8 +106,9 @@
 # (9,3), (6,3) for left) to judge one junction.
 #
 # Pass --fluid-gallery to build the FLUID GALLERY (test_layouts.gd's
-# `build_fluid_gallery`): all SIX fluids standing in six full runs in one
-# frame — vinegar, ketchup mix, ketchup, BBQ mix, liquid smoke and BBQ — so
+# `build_fluid_gallery`): all NINE fluids standing in nine full runs in one
+# frame — vinegar, ketchup mix, ketchup, BBQ mix, liquid smoke, BBQ, mustard
+# mash, mustard mix and mustard — so
 # main.gd's FLUID_TINTS can be judged whole rather than three at a time,
 # which is all the shipped line or the BBQ fixture ever shows (issue #72).
 # It does not tick and does not need to: a run is NAMED by the recipes at

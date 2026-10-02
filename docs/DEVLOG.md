@@ -278,7 +278,8 @@ unlock comes about 13 minutes sooner (tick 131 000, down from 155 000).
 
 A scale sweep (the owner's 178-placement factory tiled 1×/5×/20×, frames
 timed headless against a release `sim_core`) found `_update_fluid_network`
-the largest script cost on a big floor: 0.9 ms a frame at 1×, 20 ms at 20×.
+the largest script cost on a big floor: roughly 0.9 ms a frame at 1× and
+20 ms at 20× on a heavily loaded machine.
 `_fluid_material_for` duplicated a fresh `StandardMaterial3D` for every
 network on every polled frame, only for it to be thrown away unless a body
 was being created. It now caches one material per fluid id, shared by every
