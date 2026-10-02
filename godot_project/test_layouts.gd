@@ -1095,8 +1095,8 @@ static func unlock_open(sim, id: String) -> bool:
 ## it.** `build_bbq_running_line` runs a ketchup line until BBQ's hundredth
 ## box of ketchup sells, and that is right for a fixture whose subject IS the
 ## unlock. Mustard then wants a hundred boxes of BBQ on top, which is another
-## 79 000 ticks — measured, by `measure_gate_ticks.gd`, which earns both gates
-## from a new game and reaches mustard at tick 131 000 — and this fixture's
+## 73 000 ticks — measured, by `measure_gate_ticks.gd`, which earns both gates
+## from a new game and reaches mustard at tick 125 000 — and this fixture's
 ## subject is the line, so it uses
 ## `open_every_gate` — the same door `test_ingredient_models.gd` and
 ## `test_screenshot.gd` already cross gates through. What stays real is

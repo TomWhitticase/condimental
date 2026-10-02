@@ -16,8 +16,10 @@ mod common;
 
 use sim_core::sim::types::Money;
 use sim_core::sim::{
-    ContractRegistry, MachineRegistry, PlayerCommand, RecipeRegistry, World, command_from_json,
+    Contract, ContractRegistry, MachineRegistry, PlayerCommand, RecipeRegistry, UnlockRegistry,
+    World, command_from_json,
 };
+use std::collections::BTreeSet;
 
 fn recipes() -> RecipeRegistry {
     RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
@@ -115,6 +117,144 @@ fn a_new_game_starts_with_no_contract_and_offers_the_whole_board() {
     assert!(
         snapshot.board.iter().any(|o| o.affordable && !o.locked),
         "and the starting balance can sign at least one of them"
+    );
+}
+
+/// **THE BOARD NEVER RUNS DRY** (2026-10-02, the owner: "add more
+/// contracts, aren't enough"). The board is a fixed list — one signature per
+/// offer, no refresh — so the only way a player at some stage of the game can
+/// find nothing left to sign is for that stage to have too few offers. This
+/// pins the pool's coverage from the content alone, no literal ids:
+///
+/// * every finished product (a recipe output no recipe consumes, item or
+///   fluid — the cases) has its own single-sauce ladder: at least four sizes,
+///   a small first rung (at most two cases) and a big top one (at least
+///   eight), so there is an early, a mid and a late order for every sauce;
+/// * every gate STAGE — what a new game offers, then what each unlock in
+///   `data/unlocks.ron` releases, in its order — releases at least five
+///   offers, at least one small (three cases or fewer) and one large (ten or
+///   more), and asks for more than one ketchup line's output on its own, so
+///   the next line built always has an order to go after;
+/// * the last stage has an order naming every product at once — the top of
+///   the board is a factory that runs every sauce, not one that runs the
+///   best one.
+#[test]
+fn the_contract_pool_covers_every_sauce_and_every_gate_stage() {
+    let recipes = recipes();
+    let board = ContractRegistry::bundled();
+    let unlocks = UnlockRegistry::bundled();
+
+    let consumed: BTreeSet<&str> = recipes
+        .ordered()
+        .iter()
+        .flat_map(|r| {
+            r.inputs
+                .iter()
+                .map(|(id, _)| id.as_str())
+                .chain(r.fluid_inputs.iter().map(|(id, _)| id.as_str()))
+        })
+        .collect();
+    let products: BTreeSet<&str> = recipes
+        .ordered()
+        .iter()
+        .flat_map(|r| r.outputs.iter().map(|(id, _)| id.as_str()))
+        .filter(|id| !consumed.contains(id))
+        .collect();
+    assert!(
+        products.len() >= 3,
+        "the recipe graph must end in every sauce's case, found only {products:?}"
+    );
+
+    let cases = |c: &Contract| -> u32 { c.mix.iter().map(|(_, q)| q).sum() };
+
+    for product in &products {
+        let mut sizes: Vec<u32> = board
+            .ordered()
+            .iter()
+            .filter(|c| matches!(c.mix.as_slice(), [(item, _)] if item == product))
+            .map(cases)
+            .collect();
+        sizes.sort_unstable();
+        sizes.dedup();
+        assert!(
+            sizes.len() >= 4,
+            "'{product}' has single-sauce orders of only {sizes:?} cases — every sauce needs a \
+             ladder of at least four sizes in data/contracts.ron"
+        );
+        assert!(
+            sizes[0] <= 2 && *sizes.last().unwrap() >= 8,
+            "'{product}' needs a small first order (<= 2 cases) and a big late one (>= 8), \
+             has {sizes:?}"
+        );
+    }
+
+    // One ketchup line's steady state, from the reference line's own
+    // bottleneck rather than a literal (the same unit the board's balance
+    // note is written in).
+    let bottleneck = sim_core::sim::linear_prefix(&recipes)
+        .iter()
+        .map(|r| r.time_ticks)
+        .max()
+        .expect("the reference line has stages") as f64;
+    let one_line_per_1000 = 1000.0 / bottleneck;
+
+    // Stage 0 is what no gate holds; stage i + 1 is what unlock i releases.
+    let stage_of = |c: &Contract| -> usize {
+        unlocks
+            .gate_for_contract(&c.id)
+            .map(|gate| {
+                1 + unlocks
+                    .ordered()
+                    .iter()
+                    .position(|u| u.id == gate.id)
+                    .expect("a contract's gate is in the registry")
+            })
+            .unwrap_or(0)
+    };
+    let stages = unlocks.ordered().len() + 1;
+    for stage in 0..stages {
+        let name = if stage == 0 {
+            "a new game".to_string()
+        } else {
+            format!("the '{}' gate", unlocks.ordered()[stage - 1].id)
+        };
+        let released: Vec<&Contract> = board
+            .ordered()
+            .iter()
+            .filter(|c| stage_of(c) == stage)
+            .collect();
+        assert!(
+            released.len() >= 5,
+            "{name} releases only {} offers — too few for the board to stay full until the \
+             next gate",
+            released.len()
+        );
+        assert!(
+            released.iter().any(|c| cases(c) <= 3),
+            "{name} releases no small order (<= 3 cases) for a line that has just been built"
+        );
+        assert!(
+            released.iter().any(|c| cases(c) >= 10),
+            "{name} releases no large order (>= 10 cases) to build towards"
+        );
+        let demand: f64 = released
+            .iter()
+            .map(|c| f64::from(cases(c)) * 1000.0 / c.cadence_ticks as f64)
+            .sum();
+        assert!(
+            demand > one_line_per_1000,
+            "{name} releases {demand:.2} cases per 1000 ticks, no more than one line makes \
+             ({one_line_per_1000:.2}) — the next line would have nothing to sell to"
+        );
+    }
+
+    let last_stage = stages - 1;
+    assert!(
+        board.ordered().iter().any(|c| stage_of(c) == last_stage
+            && products
+                .iter()
+                .all(|p| c.mix.iter().any(|(item, _)| item == p))),
+        "the deepest gate must release an order naming every sauce, {products:?}"
     );
 }
 
