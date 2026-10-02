@@ -1207,10 +1207,15 @@ mod tests {
         assert_eq!(
             bbq.contracts,
             [
+                "rib_shack",
                 "smokehouse_trial",
+                "picnic_caterer",
                 "grill_pub",
+                "steakhouse_group",
                 "roadhouse_group",
-                "bbq_festival"
+                "smokehouse_wholesale",
+                "bbq_festival",
+                "county_fair"
             ]
         );
         let mustard = unlocks

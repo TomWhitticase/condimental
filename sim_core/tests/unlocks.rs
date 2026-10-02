@@ -401,9 +401,9 @@ fn boxes_of_another_product_never_open_a_gate() {
 ///
 /// Some thresholds have to be reached this way. The BBQ gate's hundred boxes
 /// of ketchup are 52 000 ticks and worth simulating once; the mustard gate's
-/// hundred boxes of BBQ are another 79 000 on top of a branch the player
-/// must first build (tick 131 000 from a new game — `measure_gate_ticks.gd`),
-/// which is about seventy-three minutes of simulated factory for a claim about a
+/// hundred boxes of BBQ are another 73 000 on top of a branch the player
+/// must first build (tick 125 000 from a new game — `measure_gate_ticks.gd`),
+/// which is about sixty-nine minutes of simulated factory for a claim about a
 /// number in a content file. A played world also never visits an odd
 /// ketchup count, the starter order being two boxes wide, so an exact
 /// "one short" is only reachable from here.

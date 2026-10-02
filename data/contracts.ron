@@ -90,10 +90,26 @@
 // worth of demand":
 //
 //   starter tier   (corner_shop + diner_supply + market_stall)  ~3.9 / 1000
-//   growth tier    (the six orders below them)                 ~19.2 / 1000
-//   BBQ tier       (the four below those, in VAT output)        ~7.0 / 1000
-//   mustard tier   (the four at the bottom)                     ~5.1 / 1000
-//   whole board                                                ~35.1 / 1000
+//   growth tier    (the thirteen orders below them)            ~35.2 / 1000
+//   BBQ tier       (the nine below those, in VAT output)       ~14.5 / 1000
+//   mustard tier   (the eleven at the bottom)                  ~17.9 / 1000
+//   whole board                                                ~71.4 / 1000
+//
+// THE BOARD DOUBLED ON 2026-10-02 (the owner: "add more contracts, aren't
+// enough"), from 17 offers to 36. The board is a fixed list — one signature
+// per offer, no refresh, every offer always listed — so "not enough" could
+// only mean too few offers at some stage, and each gate stage now releases
+// a full ladder: 16 ketchup orders on a new game (1 to 20 cases), 9 behind
+// the BBQ gate, 11 behind the mustard gate, which as the LAST gate is the
+// biggest tier and includes the three orders that name every sauce at once.
+// `tests/contract_board.rs`'s `the_contract_pool_covers_every_sauce_and_
+// every_gate_stage` holds every stage and every sauce to that shape. The
+// figures in the paragraphs below this one are the pre-doubling board's,
+// kept as the record of why each tier was sized as it was; the table above
+// is current. In lines' worth the board is now roughly ten ketchup lines
+// before any gate, then about three and a half more in the BBQ tier and
+// about four mustard lines plus two ketchup-and-BBQ lines' worth in the
+// mustard tier.
 //
 // The BBQ tier is quoted in vat output rather than in boxes because that is
 // the only unit the two sauces share: it asks for 2.5 boxed_ketchup and ~4.5
@@ -156,7 +172,7 @@
 // reason to build one is not a better rate, it is that the ketchup rungs are
 // FINITE: once the good ones are served, another ketchup line has nothing
 // left to sell to (see the unsold-stock note at the end of this header),
-// while the mustard tier is four unserved orders. Capacity is worth what
+// while the mustard tier is eleven unserved orders. Capacity is worth what
 // there is demand for.
 //
 // PRIORITY ORDER IS SMALLEST FIRST, on purpose. When several orders fall
@@ -233,6 +249,47 @@
         // third, fourth and fifth line are built to meet. Small to large,
         // per the priority rule in the header.
 
+        // THE SMALL GROWTH RUNGS (2026-10-02, "add more contracts, aren't
+        // enough"). Three small orders priced exactly on the starter tier's
+        // rates (24, 25, 30 per box), so a player whose first line has
+        // headroom left after the starter tier has somewhere to put it
+        // before a second line exists — the board used to jump from
+        // one-box-a-window straight to `school_canteens`.
+
+        // A single box on its own cadence at the starter stall's rate
+        // (24/box). Two strikes: forgiving where `market_stall` is not.
+        Contract(
+            id: "food_truck",
+            name: "Food Truck Rally",
+            mix: [("boxed_ketchup", 1)],
+            cadence_ticks: 1200,
+            payout: 24,
+            price: 50,
+            strikes: 2,
+        ),
+        // `corner_shop`'s terms on a slower cadence (25/box). Three strikes,
+        // because it is the second cheap order a new player will sign.
+        Contract(
+            id: "cafe_condiments",
+            name: "High Street Cafe",
+            mix: [("boxed_ketchup", 2)],
+            cadence_ticks: 2000,
+            payout: 50,
+            price: 80,
+            strikes: 3,
+        ),
+        // `diner_supply`'s size on a quicker cadence (30/box): the rung
+        // that fills the first line to the brim.
+        Contract(
+            id: "takeaway_row",
+            name: "Takeaway Row",
+            mix: [("boxed_ketchup", 3)],
+            cadence_ticks: 2000,
+            payout: 90,
+            price: 160,
+            strikes: 2,
+        ),
+
         // A steady institutional order: four boxes on the market stall's
         // cadence, at a rate a shade above the diner's (32/box). The first
         // order a second line makes reachable — a line and a half serves
@@ -244,6 +301,17 @@
             cadence_ticks: 1500,
             payout: 128,
             price: 200,
+            strikes: 2,
+        ),
+        // Five boxes at 34/box, between the canteens' 32 and the grocer's
+        // 35: half a line on its own.
+        Contract(
+            id: "hospital_kitchens",
+            name: "Hospital Kitchens Trust",
+            mix: [("boxed_ketchup", 5)],
+            cadence_ticks: 2500,
+            payout: 170,
+            price: 300,
             strikes: 2,
         ),
         // Six boxes a window at 35/box, on a cadence long enough to bank
@@ -280,6 +348,18 @@
             price: 500,
             strikes: 2,
         ),
+        // Ten boxes on a 4000-tick cadence at 37/box, between the
+        // franchise's 36 and the stadium's 38: two thirds of a line,
+        // banked in a batch a one-dock factory can still hold.
+        Contract(
+            id: "cinema_chain",
+            name: "Cinema Chain Snack Bars",
+            mix: [("boxed_ketchup", 10)],
+            cadence_ticks: 4000,
+            payout: 370,
+            price: 650,
+            strikes: 2,
+        ),
         // Also a whole line's worth, but in bigger, slower batches (38/box):
         // twelve boxes must be standing on the dock at once, so the shared
         // pool has to be allowed to build up rather than skimmed by the
@@ -294,6 +374,18 @@
             price: 750,
             strikes: 2,
         ),
+        // Sixteen boxes every 5000 ticks at 39/box — 3.2 per 1000, most of a
+        // line held back for one window. The rung between the stadium and
+        // the pallet.
+        Contract(
+            id: "motorway_services",
+            name: "Motorway Services Group",
+            mix: [("boxed_ketchup", 16)],
+            cadence_ticks: 5000,
+            payout: 624,
+            price: 1000,
+            strikes: 2,
+        ),
         // The pallet order: twenty boxes every 5000 ticks at the best rate
         // any KETCHUP order pays (40/box). A whole line's throughput, held
         // back for 5000 ticks — the top of the ketchup ladder, and what the
@@ -305,6 +397,23 @@
             cadence_ticks: 5000,
             payout: 800,
             price: 1200,
+            strikes: 2,
+        ),
+        // The pallet again, every 4000 ticks instead of 5000: five boxes per
+        // 1000, MORE than one line's output, at the pallet's own 40/box (a
+        // rate cannot rise past the top of the band, so the reward for this
+        // one is volume). The ketchup ladder's ceiling: a factory serving
+        // every order above this is several lines deep, and this is still
+        // another line's worth of demand to build for. Twenty boxes, the
+        // same biggest single order on the board as `export_pallet`, so the
+        // dock's places (`tests/dock.rs`) need no change.
+        Contract(
+            id: "national_distributor",
+            name: "National Distributor",
+            mix: [("boxed_ketchup", 20)],
+            cadence_ticks: 4000,
+            payout: 800,
+            price: 1500,
             strikes: 2,
         ),
 
@@ -342,9 +451,43 @@
         // ketchup board's ~23.0, taking the whole board from about six
         // lines' worth of demand to about seven and a quarter.
 
+        // ADDED 2026-10-02 to this tier: `rib_shack`, `picnic_caterer`,
+        // `steakhouse_group`, `smokehouse_wholesale` and `county_fair`, one
+        // more rung between each pair the tier had. The BBQ single-sauce
+        // ladder now runs 58, 60, 62, 63, 65 per box; the new mixed orders
+        // are priced per side, as `grill_pub` is: each sauce at its own
+        // ladder's rate for that many cases, or between the two rungs either
+        // side where its ladder has no rung of that size.
+
+        // The smallest BBQ order: one box every 2000 ticks at 58 — under the
+        // trial's 60, because it is smaller. Three strikes, for the same
+        // reason the trial has them: the branch is new.
+        // PAYOUT: 1 x 58 = 58.
+        Contract(
+            id: "rib_shack",
+            name: "Rib Shack",
+            mix: [("boxed_bbq", 1)],
+            cadence_ticks: 2000,
+            payout: 58,
+            price: 120,
+            strikes: 3,
+        ),
+        // A small mixed order before `grill_pub`: two ketchup and one BBQ —
+        // a branch drawing one vat run in three.
+        // PAYOUT: 2 x 25 + 1 x 58 = 108 (the 2-case ketchup rung,
+        // `corner_shop`'s, and the 1-case BBQ rung, `rib_shack`'s).
+        Contract(
+            id: "picnic_caterer",
+            name: "Picnic Caterer",
+            mix: [("boxed_ketchup", 2), ("boxed_bbq", 1)],
+            cadence_ticks: 2000,
+            payout: 108,
+            price: 200,
+            strikes: 2,
+        ),
         // The tutorial order for the second sauce: two boxes on a slow
         // cadence, cheap to sign, and THREE strikes where the rest of the
-        // tier gets two. That is deliberate and it is the same call
+        // tier but `rib_shack` gets two. That is deliberate and it is the same call
         // `corner_shop` got — this is the first order for a line the player
         // has never built, and a branch will miss a window or two while it
         // is being plumbed. Losing the order that taught you the sauce would
@@ -381,6 +524,17 @@
             price: 350,
             strikes: 2,
         ),
+        // Four BBQ every 4000 ticks: one branch's whole output at 62/box.
+        // PAYOUT: 4 x 62 = 248.
+        Contract(
+            id: "steakhouse_group",
+            name: "Steakhouse Group",
+            mix: [("boxed_bbq", 4)],
+            cadence_ticks: 4000,
+            payout: 248,
+            price: 450,
+            strikes: 2,
+        ),
         // The same 3:2 shape at double the size on a slower cadence — two
         // lines-plus-branches' worth. Proof that the ratio scales: a player
         // who understood `grill_pub` knows exactly what this one needs, and
@@ -394,11 +548,22 @@
             price: 700,
             strikes: 2,
         ),
-        // The BBQ pallet, and the best rate on the board (65/box): ten boxes
+        // Six BBQ every 5000 ticks at 63/box — the rung under the festival.
+        // PAYOUT: 6 x 63 = 378.
+        Contract(
+            id: "smokehouse_wholesale",
+            name: "Smokehouse Wholesale",
+            mix: [("boxed_bbq", 6)],
+            cadence_ticks: 5000,
+            payout: 378,
+            price: 650,
+            strikes: 2,
+        ),
+        // The BBQ pallet, and the best single-sauce rate on the board (65/box): ten boxes
         // of the slow sauce every 5000 ticks, which at a 600-tick cook is
         // more than one branch can make — it takes the ketchup output of
         // several lines converted wholesale. `export_pallet`'s counterpart
-        // on the BBQ side, and the top of the board.
+        // on the BBQ side, and the top of the BBQ-only ladder.
         Contract(
             id: "bbq_festival",
             name: "Barbecue Festival",
@@ -406,6 +571,20 @@
             cadence_ticks: 5000,
             payout: 650,
             price: 1000,
+            strikes: 2,
+        ),
+        // The top of the BBQ tier: `roadhouse_group`'s 3:2 shape at twelve
+        // and eight, every 6000 ticks — twenty cases, the board's biggest
+        // single order, so it fits the dock's places as `export_pallet`
+        // does. Priced at the big-order end of both ladders.
+        // PAYOUT: 12 x 38 + 8 x 64 = 456 + 512 = 968.
+        Contract(
+            id: "county_fair",
+            name: "County Fair Concessions",
+            mix: [("boxed_ketchup", 12), ("boxed_bbq", 8)],
+            cadence_ticks: 6000,
+            payout: 968,
+            price: 1600,
             strikes: 2,
         ),
 
@@ -434,6 +613,31 @@
         // Each comment shows its own arithmetic, and the rate rises with
         // commitment inside the sauce: 44, then 46, then 52.
 
+        // ADDED 2026-10-02 to this tier: `pretzel_cart`, `food_court`,
+        // `ballpark_vendor`, `burger_bar`, `charcuterie_supplier`,
+        // `festival_caterers` and `national_condiments`. The mustard gate is
+        // the LAST gate in the game, so this tier is what a player with every
+        // sauce has left to build for — it is the biggest tier on purpose,
+        // and its top three orders are more than a fully built three-sauce
+        // factory of the earlier board could carry. The single-sauce ladder
+        // runs 44, 44, 46, 48, 52, 53 per box. The new mixed orders are priced
+        // per side: each sauce at its own ladder's rate for that many cases,
+        // or between the two rungs either side where its ladder has no rung
+        // of that size — except `national_condiments`, the top of the board,
+        // which pays the top rate of every ladder it names.
+
+        // The smallest mustard order: one box every 2000 ticks at the bottom
+        // of the band. Three strikes, as the trial has.
+        // PAYOUT: 1 x 44 = 44.
+        Contract(
+            id: "pretzel_cart",
+            name: "Pretzel Cart",
+            mix: [("boxed_mustard", 1)],
+            cadence_ticks: 2000,
+            payout: 44,
+            price: 100,
+            strikes: 3,
+        ),
         // The tutorial order for the third sauce, and `smokehouse_trial`'s
         // counterpart: two boxes on a slow cadence, cheap to sign, and THREE
         // strikes — as `hot_dog_stand` below has, where the two larger orders
@@ -470,6 +674,47 @@
             payout: 138,
             price: 300,
             strikes: 3,
+        ),
+        // The first order that names ALL THREE sauces, and a small one: two
+        // ketchup, one BBQ, one mustard every 2500 ticks. Small on purpose —
+        // it teaches that a three-way mix is all-or-nothing before a big one
+        // can punish it.
+        // PAYOUT: 2 x 25 + 1 x 58 + 1 x 44 = 50 + 58 + 44 = 152 (the 2-case
+        // ketchup rung, the 1-case BBQ and mustard rungs).
+        Contract(
+            id: "food_court",
+            name: "Food Court Operator",
+            mix: [("boxed_ketchup", 2), ("boxed_bbq", 1), ("boxed_mustard", 1)],
+            cadence_ticks: 2500,
+            payout: 152,
+            price: 300,
+            strikes: 2,
+        ),
+        // Five mustard every 4000 ticks at 48/box, between the hot dog
+        // stand's 46 and the franchise's 52.
+        // PAYOUT: 5 x 48 = 240.
+        Contract(
+            id: "ballpark_vendor",
+            name: "Ballpark Vendor",
+            mix: [("boxed_mustard", 5)],
+            cadence_ticks: 4000,
+            payout: 240,
+            price: 450,
+            strikes: 2,
+        ),
+        // The two newer sauces and no ketchup: two BBQ, two mustard every
+        // 3000 ticks — a branch and a second line, without the first line's
+        // own product.
+        // PAYOUT: 2 x 60 + 2 x 44 = 120 + 88 = 208 (the 2-case rungs,
+        // `smokehouse_trial`'s and `deli_counter`'s).
+        Contract(
+            id: "burger_bar",
+            name: "Gourmet Burger Bar",
+            mix: [("boxed_bbq", 2), ("boxed_mustard", 2)],
+            cadence_ticks: 3000,
+            payout: 208,
+            price: 400,
+            strikes: 2,
         ),
         // **THE SECOND MIXED ORDER, AND THE REASON THE MUSTARD COOK IS 360
         // TICKS.** Three ketchup and two mustard is what a factory that has
@@ -523,6 +768,46 @@
             cadence_ticks: 5000,
             payout: 416,
             price: 800,
+            strikes: 2,
+        ),
+        // Twelve mustard every 6000 ticks at 53/box, the best mustard rate on
+        // the board — two mustard lines' worth of banking.
+        // PAYOUT: 12 x 53 = 636.
+        Contract(
+            id: "charcuterie_supplier",
+            name: "Charcuterie Supplier",
+            mix: [("boxed_mustard", 12)],
+            cadence_ticks: 6000,
+            payout: 636,
+            price: 1100,
+            strikes: 2,
+        ),
+        // A big three-sauce order: six ketchup, four BBQ, four mustard every
+        // 5000 ticks.
+        // PAYOUT: 6 x 36 + 4 x 62 + 4 x 47 = 216 + 248 + 188 = 652 (the
+        // 6-case ketchup rung, `wholesale_grocer`'s; the 4-case BBQ rung,
+        // `steakhouse_group`'s; mustard between its 3- and 5-case rungs).
+        Contract(
+            id: "festival_caterers",
+            name: "Festival Caterers",
+            mix: [("boxed_ketchup", 6), ("boxed_bbq", 4), ("boxed_mustard", 4)],
+            cadence_ticks: 5000,
+            payout: 652,
+            price: 1200,
+            strikes: 2,
+        ),
+        // THE TOP OF THE BOARD: eight ketchup, six BBQ, six mustard every
+        // 6000 ticks — twenty cases (the board's biggest single order, inside
+        // the dock's places), at the top rate of every ladder it names. The
+        // last thing the board asks of a factory that runs all three sauces.
+        // PAYOUT: 8 x 40 + 6 x 65 + 6 x 53 = 320 + 390 + 318 = 1028.
+        Contract(
+            id: "national_condiments",
+            name: "National Condiment Contract",
+            mix: [("boxed_ketchup", 8), ("boxed_bbq", 6), ("boxed_mustard", 6)],
+            cadence_ticks: 6000,
+            payout: 1028,
+            price: 1800,
             strikes: 2,
         ),
     ],
