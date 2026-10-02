@@ -42,7 +42,8 @@ matches what code comments and data files cite.
   is a case-sized batch, the bottler fills 8 bottles from it, and the packer
   boxes 8. Every recipe before the bottler is byte-identical, so the bill per
   case (17 for mustard, still), every payout, the unlock thresholds and the
-  3:2 splits are untouched. The cookbook's `unit_cost`/`expand` already
+  3:2 splits are untouched, as long as each vat has its own bottling line
+  (next paragraph but two). The cookbook's `unit_cost`/`expand` already
   divided by a recipe's output count, so the Cookbook needed no code.
 
   **Why 200 ticks.** At the old 60, `machine_load.rs` caught the bottler
@@ -57,6 +58,32 @@ matches what code comments and data files cite.
   `MACHINE_OUTPUT_CAPACITY` was the alternative. It was rejected because it
   changes every machine's work-in-progress to fix one recipe, and it is a Rust
   change for what is a content question.
+
+  **The belt is now the cap, and that was chosen, not missed.** The first
+  review of PR #219 caught what the paragraphs above assumed without saying:
+  every fixture gives each vat its own bottler. A belt lane carries one item
+  per 25 ticks (`ITEM_MIN_SPACING_TILES` over `BELT_SPEED_TILES_PER_TICK`),
+  40 per 1 000 ticks. At one bottle a case that fed 40 cases per 1 000 into a
+  packer, enough for about four 240-tick vats; at eight it feeds 5, enough for
+  about 1.2. The reviewer ran a copy of the owner's own save (3 vats, 1
+  bottler, 1 packer) for 24 000 ticks with raws topped up: 264 cases on main,
+  115 on this branch, and still 115 with the bottler put back to 60 ticks, so
+  the cap is the belt and not the fill time. Four options went to the owner:
+  (1) keep 8 and make the belt the limit, so more vats need more bottling
+  lines; (2) 4 bottles a case, which halves the cut (about 2.4 vats a lane);
+  (3) keep 8 and speed every belt up, a sim change that touches every line
+  in the game; (4) drop the change. **The owner chose (1):** scaling out
+  bottling as vats are added is the kind of layout problem this game is
+  about. The cost is real and accepted: a save with several vats on one
+  bottler ships less until the player adds bottling lines. `world.rs`'s note
+  on `ITEM_MIN_SPACING_TILES` used to say a lane was "still well over" what
+  a line asks; it now states the cap.
+
+  The same review noted that nothing checks at load that a recipe's quantity
+  fits a machine's 8-slot buffer (`MACHINE_INPUT_CAPACITY`,
+  `MACHINE_OUTPUT_CAPACITY`), and this content sits exactly on it: a 9-bottle
+  case would stall forever, silently. Keep any case size at or under 8 unless
+  those buffers move with it.
 
   **Measured side effect: mustard opens sooner.** `measure_gate_ticks.gd`, run
   on main's data and then on this change: the BBQ gate is still tick 52 000,

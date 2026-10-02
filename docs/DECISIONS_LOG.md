@@ -23,7 +23,8 @@ See [WORKFLOW.md](WORKFLOW.md).
   sauce, and each `boxed_*` recipe packs 8 into one case. A unit of fluid
   everywhere upstream stays a case-sized batch, so nothing before the bottler
   changes: the ingredient bill per case, every contract, both gates and the
-  3:2 splits stand. Do not move the 8 to the vat: a vat making 8 small units
+  3:2 splits stand, for a factory with a bottler per vat (see the belt cap
+  below). Do not move the 8 to the vat: a vat making 8 small units
   lets the bottler sip them one at a time, and the BBQ mixer, which needs 8
   at once off the same run, never starts. The bottler fills in **200 ticks**
   because its output buffer holds exactly 8 (`MACHINE_OUTPUT_CAPACITY`) and a
@@ -31,7 +32,14 @@ See [WORKFLOW.md](WORKFLOW.md).
   "backed up" stall on the load lights, so keep any bottler time at or above
   the drain time and under the vat's 240. Conservation and costing tests
   share one yield-aware `raw_content` in `sim_core/tests/common/mod.rs`.
-  Full record in `docs/DECISIONS.md`.
+  **The belt is the cap, on purpose (owner's choice, 2026-10-02).** A lane
+  carries 40 items per 1 000 ticks, so one belt into a packer moves at most
+  5 cases per 1 000: one bottling line keeps up with about 1.2 vats, where it
+  used to keep up with about four. More vats need more bottlers, packers and
+  belts. The bottler's fill time does not move this. An existing factory with
+  several vats on one bottler ships less until it adds bottling lines (the
+  owner's own save: 264 cases to 115 over 24 000 ticks). Full record in
+  `docs/DECISIONS.md`.
 
 - 2026-10-02 **Tech debt is a scored register that can pause feature work.**
   `docs/TECH_DEBT.md` lists structural debt only (not bugs, not what the

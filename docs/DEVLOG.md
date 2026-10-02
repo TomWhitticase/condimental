@@ -259,7 +259,11 @@ A case used to hold one bottle, which read wrong on the belt: a stream of
 single bottles each becoming a box. The bottler now fills 8 bottles from
 each batch of sauce, and the packer packs 8 into a case. Nothing before
 the bottler changed, so prices, contracts and costs per case are as they
-were. The bottler takes 200 ticks per fill, matched to how fast a belt can
+were. **The belt is now the limit, by the owner's choice:** a belt into a
+packer carries about 5 cases per 1 000 ticks, so one bottling line keeps up
+with about 1.2 vats. A factory with more vats needs more bottlers, packers
+and belts, and an existing save with several vats on one bottler ships less
+until it adds them. The bottler takes 200 ticks per fill, matched to how fast a belt can
 carry 8 bottles away. One measured side effect: once the BBQ branch is
 built it gets closer to its designed share of the ketchup, and the mustard
 unlock comes about 13 minutes sooner (tick 131 000, down from 155 000).

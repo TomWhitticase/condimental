@@ -299,6 +299,14 @@
         // bill per case, every contract, both gates and the 3:2 splits are
         // untouched.
         //
+        // **THE BELT INTO THE PACKER IS NOW THE LIMIT, BY CHOICE.** A lane
+        // carries 40 items per 1 000 ticks, so 5 cases: one bottling line
+        // keeps up with about 1.2 vats, and more vats need more bottlers,
+        // packers and belts. And 8 is also the most a case can hold without
+        // a Rust change: a machine buffer holds 8 of an item, and nothing
+        // checks a recipe against it at load, so a 9-bottle case stalls the
+        // packer forever without a word.
+        //
         // **200 TICKS IS THE BELT, NOT THE NOZZLES.** A fill deposits all 8
         // into an output buffer that holds exactly 8 (`world.rs`'s
         // `MACHINE_OUTPUT_CAPACITY`), and a belt lane takes one item per 25
