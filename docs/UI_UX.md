@@ -45,6 +45,24 @@ shader pack** (voxel base + real lighting).
   every unit the balance covers, and while the camera still read held keys
   the one press also flew the player down, since SPACE/SHIFT are first
   person's up/down (2026-09-22).
+- **Holding CTRL in first person hands the mouse to the HUD** (the owner's
+  request, 2026-10-02). While it is held the pointer is visible, the
+  crosshair goes, mouse motion stops turning the camera, and a click is a
+  HUD click: on a hotbar slot it selects that slot exactly as its number key
+  does, and anywhere else it does nothing — it never places, removes or
+  configures what happens to be under the crosshair, which is why the
+  placement prompt ("click to build") and the world hover tooltip step aside
+  while it is held. Releasing CTRL
+  recaptures the mouse and drops the first motion after it (the pointer
+  warping home, which otherwise swung the view). CTRL takes the **mouse
+  only**, unlike a panel: WASD/SPACE/SHIFT still move the player
+  (`main.gd`'s `_fp_ui_cursor`, kept apart from `_fp_mouse_free` for that
+  reason). Every first-person capture goes through `_apply_fp_mouse_mode`,
+  so a panel closing under a held CTRL leaves the cursor free, and window
+  focus loss forgets the key. On macOS Godot delivers CTRL+click as a right
+  click; a hotbar slot takes a right press that still carries CTRL as the
+  same click. CTRL was bound to nothing before this. The legend's first-
+  person text says "hold CTRL: mouse to hotbar".
 - **Tile grid always legible**: the player can always tell which tile a
   thing occupies.
 - **Rotation**: 90° snap only (not yet implemented). Assets are modelled for

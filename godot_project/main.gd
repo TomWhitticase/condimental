@@ -2571,6 +2571,17 @@ var _camera_input_sealed := false
 var _fp_position := Vector3.ZERO
 var _fp_yaw := 0.0 # radians; see _fp_heading_basis()
 var _fp_pitch := 0.0 # radians, clamped to +/-FP_PITCH_LIMIT
+## CTRL is physically held — set and cleared by the key's own events in
+## `_input`, cleared on focus loss (a release that happens in another window
+## never arrives). It is a fact about the keyboard, true in either view; only
+## `_fp_ui_cursor` turns it into "the mouse belongs to the HUD", and only in
+## first person.
+var _ctrl_held := false
+## Set when the first-person mouse goes from free back to captured: the first
+## relative motion after a recapture is the OS warping the pointer home, not
+## the player looking, and applying it swung the camera on every CTRL release
+## (and every panel close). One event is dropped, then look resumes.
+var _fp_skip_next_look := false
 
 
 func _ready() -> void:
@@ -5422,8 +5433,13 @@ const CROSSHAIR_THICKNESS := 2.0 * UI_SCALE # px, each bar's width
 ## width by making every one of those keys undiscoverable, which is the one
 ## thing this legend exists to prevent. A key is printed here or it does not
 ## exist, so the line count is what yields.
+##
+## First person's "hold CTRL: mouse to hotbar" (2026-10-02, `_fp_ui_cursor`)
+## rides on the configure line rather than adding a seventh: that line is the
+## shortest on the legend, and both of its entries are about what a click
+## does. Isometric has a cursor already, so its legend does not print it.
 const ISO_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts\nH: staff    P: production    B: cookbook\nclick a building: configure\nWASD/drag/arrows: pan    scroll/+-: zoom    TAB: first-person"
-const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts\nH: staff    P: production    B: cookbook\nclick a building: configure\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
+const FP_HELP_TEXT := "1-9/0: pick from hotbar    click: place    R: rotate\nX: remove mode    ESC: close / pause menu\nE: build menu    M: market    C: contracts\nH: staff    P: production    B: cookbook\nclick a building: configure    hold CTRL: mouse to hotbar\nWASD: move    mouse: look    SPACE/SHIFT: up/down    TAB: isometric"
 
 
 ## The tile box the isometric camera frames at startup: whatever is placed,
@@ -7877,8 +7893,7 @@ func _set_shop_menu_open(open: bool) -> void:
 	# The menu is clickable in first-person too, which means handing the
 	# mouse back while it is up and recapturing it on close — otherwise the
 	# only way to buy in that mode would be the number keys.
-	if _view_mode == ViewMode.FIRST_PERSON:
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	_apply_fp_mouse_mode()
 	_update_crosshair_visibility()
 
 
@@ -7920,18 +7935,61 @@ func _modal_open() -> bool:
 			or _cookbook_open)
 
 
+## Whether the first-person pointer is a cursor on the HUD rather than the
+## player's eyes: a panel wants it (`_fp_mouse_free`), or the player is
+## holding CTRL to reach the hotbar with the mouse (the owner's request,
+## 2026-10-02). Deliberately NOT folded into `_fp_mouse_free`, because that
+## answer also takes the movement keys away (`_camera_keys_live`), and CTRL
+## takes only the mouse — the player can still walk while reaching for a
+## slot. Mouse capture, mouse-look and the crosshair read this one;
+## everything else keeps reading `_fp_mouse_free`.
+func _fp_ui_cursor() -> bool:
+	return _fp_mouse_free() or _ctrl_held
+
+
+## CTRL specifically, in first person: the pointer is on the HUD by the
+## player's choice, so the world panels that describe the crosshair's tile
+## (the hover tooltip, the placement prompt) step aside for the HUD's own.
+func _fp_ctrl_cursor() -> bool:
+	return _view_mode == ViewMode.FIRST_PERSON and _ctrl_held
+
+
+## The mouse mode first person wants right now — the decision, separate from
+## applying it, because headless Godot ignores `Input.mouse_mode` and a test
+## can only assert what was decided.
+func _fp_wanted_mouse_mode() -> int:
+	return Input.MOUSE_MODE_VISIBLE if _fp_ui_cursor() else Input.MOUSE_MODE_CAPTURED
+
+
 ## In first-person the mouse is captured for looking around unless a panel
-## wants it (`_fp_mouse_free`); in isometric it is always visible.
+## or a held CTRL wants it (`_fp_ui_cursor`); in isometric it is always
+## visible. Every first-person mouse-mode change goes through here, so a
+## panel closing while CTRL is held leaves the cursor free and a CTRL release
+## under an open panel leaves it free too.
 func _apply_fp_mouse_mode() -> void:
 	if _view_mode != ViewMode.FIRST_PERSON:
 		return
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if _fp_mouse_free() else Input.MOUSE_MODE_CAPTURED
+	var wanted := _fp_wanted_mouse_mode()
+	if wanted == Input.MOUSE_MODE_CAPTURED and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		_fp_skip_next_look = true
+	Input.mouse_mode = wanted
+
+
+## CTRL went down or up (or was lost with the window's focus). Re-decides the
+## cursor and the crosshair; a no-op when nothing changed, so key repeat and
+## a release after a focus loss cost nothing.
+func _set_ctrl_held(held: bool) -> void:
+	if held == _ctrl_held:
+		return
+	_ctrl_held = held
+	_apply_fp_mouse_mode()
+	_update_crosshair_visibility()
 
 
 func _update_crosshair_visibility() -> void:
 	if _crosshair == null:
 		return
-	_crosshair.visible = _view_mode == ViewMode.FIRST_PERSON and not _fp_mouse_free()
+	_crosshair.visible = _view_mode == ViewMode.FIRST_PERSON and not _fp_ui_cursor()
 
 
 func _toggle_shop_menu() -> void:
@@ -8702,8 +8760,7 @@ func _set_market_open(open: bool) -> void:
 	_cue(FactoryAudio.MENU_OPEN if open else FactoryAudio.MENU_CLOSE)
 	if open:
 		_update_ingredient_market()
-	if _view_mode == ViewMode.FIRST_PERSON:
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	_apply_fp_mouse_mode()
 	_update_crosshair_visibility()
 
 
@@ -9626,8 +9683,7 @@ func _set_contract_board_open(open: bool) -> void:
 	_cue(FactoryAudio.MENU_OPEN if open else FactoryAudio.MENU_CLOSE)
 	if open:
 		_update_contract_board()
-	if _view_mode == ViewMode.FIRST_PERSON:
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	_apply_fp_mouse_mode()
 	_update_crosshair_visibility()
 
 
@@ -10944,8 +11000,7 @@ func _set_staff_open(open: bool) -> void:
 	if open:
 		_poll_staff()
 		_update_staff_panel()
-	if _view_mode == ViewMode.FIRST_PERSON:
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	_apply_fp_mouse_mode()
 	_update_crosshair_visibility()
 
 
@@ -11596,8 +11651,7 @@ func _set_production_open(open: bool) -> void:
 	if open:
 		_poll_production()
 		_update_production_panel()
-	if _view_mode == ViewMode.FIRST_PERSON:
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	_apply_fp_mouse_mode()
 	_update_crosshair_visibility()
 
 
@@ -11703,8 +11757,7 @@ func _set_cookbook_open(open: bool) -> void:
 		# that opens a screen should reach the same screen every time.
 		_cookbook.show_tree()
 		_position_cookbook_panel()
-	if _view_mode == ViewMode.FIRST_PERSON:
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	_apply_fp_mouse_mode()
 	_update_crosshair_visibility()
 
 
@@ -13720,8 +13773,7 @@ func _open_config_panel(origin: Vector2i, kind: String) -> void:
 	_update_config_panel()
 	# In first-person the mouse is captured and there is nothing to click a
 	# button with, so it is handed back exactly as either shop panel does.
-	if _view_mode == ViewMode.FIRST_PERSON:
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_apply_fp_mouse_mode()
 	_update_crosshair_visibility()
 
 
@@ -13737,8 +13789,7 @@ func _close_config_panel() -> void:
 	# has to remember — a panel hidden by any other route would leave the
 	# legend gone for the rest of the session.
 	_set_legend_yielded(false)
-	if _view_mode == ViewMode.FIRST_PERSON and not _modal_open():
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_apply_fp_mouse_mode()
 	_update_crosshair_visibility()
 
 
@@ -14806,6 +14857,7 @@ func _build_hotbar_slot(strip: HBoxContainer, base_settings: LabelSettings, inde
 	# from the top-left corner and shove itself off the strip.
 	button.pivot_offset = HOTBAR_SLOT_SIZE / 2.0
 	button.pressed.connect(_on_hotbar_slot_pressed.bind(index))
+	button.gui_input.connect(_on_hotbar_slot_gui_input.bind(index))
 	button.mouse_entered.connect(_on_hotbar_slot_hovered.bind(index))
 	button.mouse_exited.connect(_on_hotbar_slot_unhovered.bind(index))
 	strip.add_child(button)
@@ -14966,6 +15018,19 @@ func _select_hotbar_slot(index: int) -> void:
 
 func _on_hotbar_slot_pressed(index: int) -> void:
 	_select_hotbar_slot(index)
+
+
+## The macOS half of CTRL+click. Godot on macOS turns a CTRL+left click into a
+## RIGHT click (the platform's one-button-mouse convention), so the click the
+## held-CTRL cursor exists for (`_fp_ui_cursor`) never reaches `pressed`,
+## which a Button raises for the left button only. A right press that still
+## carries CTRL is that click, and selects the slot exactly as a left one
+## does. A plain right click stays what it was — nothing.
+func _on_hotbar_slot_gui_input(event: InputEvent, index: int) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT \
+			and event.pressed and event.ctrl_pressed:
+		get_viewport().set_input_as_handled()
+		_select_hotbar_slot(index)
 
 
 ## The click pulse: the slot dips and springs back. Purely visual, ~100ms,
@@ -16009,7 +16074,11 @@ func _update_ghost() -> void:
 			else:
 				anchor = _pointer_pos(vp)
 			_placement_prompt.position = _world_panel_position(_placement_prompt, anchor)
-		_placement_prompt.visible = true
+		# Not while CTRL has the pointer on the HUD: a click then is a HUD
+		# click and builds nothing, so a prompt saying "click to build" would
+		# be wrong — and it is parked in the lower-left corner, where it
+		# covered the hotbar's own tooltip for the first slots.
+		_placement_prompt.visible = not _fp_ctrl_cursor()
 
 
 func _tint_ghost(tint: Color) -> void:
@@ -17505,6 +17574,11 @@ func _autosave(reason := "") -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
 		_quit_game()
+	# A CTRL released in another window never sends its release here, and a
+	# held flag that outlived the focus would leave first person's cursor free
+	# with nobody holding the key. Pressing it again re-arms it.
+	elif what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+		_set_ctrl_held(false)
 
 
 # --------------------------------------------------------------------------
@@ -17723,10 +17797,18 @@ func _advance_autosave(delta: float) -> void:
 ## true and the camera followed every mouse movement until the next right
 ## click (the quality pass, 2026-09-13). The same release is also lost
 ## when the pause menu opens mid-drag, hence `_set_pause_open` clears it.
+##
+## It also tracks CTRL, and for the same reason: a key release has to be seen
+## wherever focus is. Held in first person, CTRL hands the mouse to the HUD
+## (`_fp_ui_cursor`); a release swallowed by a focused LineEdit or a panel
+## would leave the cursor free for good. The event is only observed, never
+## consumed, so CTRL+A in the save-slot field still selects all.
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT \
 			and not event.pressed:
 		_iso_dragging = false
+	if event is InputEventKey and event.keycode == KEY_CTRL:
+		_set_ctrl_held(event.pressed)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -17787,6 +17869,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		_set_debug_open(not _debug_open)
 		return
 
+	# A CTRL-held click in first person is a click on the HUD (`_fp_ui_cursor`).
+	# One that landed on a hotbar slot was taken by the slot before this
+	# handler; one that missed every control falls through to here, and must
+	# not place, remove or configure whatever happens to be under the
+	# crosshair the player was not aiming with. `ctrl_pressed` as well as the
+	# held flag: a CTRL pressed while the window was unfocused sends no key
+	# event, but the click still carries the modifier.
+	if event is InputEventMouseButton and _view_mode == ViewMode.FIRST_PERSON \
+			and (_ctrl_held or event.ctrl_pressed):
+		return
+
 	if event is InputEventMouseButton:
 		# The left button is the build click (the "Real Placement" epic's
 		# ticket 2) — the button this handler had deliberately left unbound
@@ -17831,14 +17924,19 @@ func _unhandled_input(event: InputEvent) -> void:
 		if _view_mode == ViewMode.ISOMETRIC:
 			if _iso_dragging:
 				_apply_drag_pan(event.relative)
-		elif not _fp_mouse_free():
+		elif not _fp_ui_cursor() and _fp_skip_next_look:
+			# The pointer was just recaptured (`_apply_fp_mouse_mode`): this
+			# motion is the warp home, not a look.
+			_fp_skip_next_look = false
+		elif not _fp_ui_cursor():
 			# Only while the world actually holds the pointer. With a panel up
 			# in first person the mouse is visible and is being used to click
 			# slots — swinging the camera with it too would make the panel
 			# unusable. This used to list the five modals itself and so missed
 			# the configuration panel and the pause menu, which hand the cursor
-			# back just the same; `_fp_mouse_free` is the one rule, and
-			# `_camera_keys_live` is its half for held keys.
+			# back just the same; `_fp_ui_cursor` is the one rule (the panels'
+			# `_fp_mouse_free` plus a held CTRL), and `_camera_keys_live` is
+			# the panels' half for held keys.
 			_apply_look(event.relative)
 		return
 
@@ -18987,7 +19085,10 @@ func _rack_removal_refused(origin_key: String) -> bool:
 func _update_hover_tooltip() -> void:
 	if _hover_tooltip == null:
 		return
-	if _modal_open() or _pause_open or _config_open or _in_build_mode():
+	if _modal_open() or _pause_open or _config_open or _in_build_mode() or _fp_ctrl_cursor():
+		# A held CTRL in first person points the mouse at the HUD; the world
+		# line by the crosshair is not what the player is reading then.
+		#
 		# The build menu sits over the middle of the screen; a world tooltip
 		# chasing the cursor across it would just be two panels fighting. And
 		# in build mode the placement prompt is already the panel by the

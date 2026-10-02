@@ -78,6 +78,10 @@
 # the only way to review the selected-slot state, the name flyout and the
 # ghost it puts in the player's hand.
 #
+# Pass --ctrl (with --first-person) to hold CTRL down for the shot: the
+# crosshair goes and the hotbar slot in hand (or the first) shows the hover a
+# freed pointer gives it — the review frame for "hold CTRL: mouse to hotbar".
+#
 # Pass --legend-collapsed to fold the keybind legend away before the shot (the
 # HUD ticket). It is the only way to review what the fold LEAVES: the plate's
 # heading plus the button that names F1, and the corner of the floor the
@@ -451,7 +455,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--bbq] [--mustard] [--stalled-run] [--staff] [--staff-shortfall] [--payday-warning] [--production] [--cookbook|--cookbook-page [ID]|--cookbook-basics [ID]] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--split-docks [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--settings] [--debug] [--set KEY=VALUE] [--shop] [--market] [--board [--board-end] [--board-filter all|open|signed|locked|ITEM]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy] [--on-screen]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--bbq] [--mustard] [--stalled-run] [--staff] [--staff-shortfall] [--payday-warning] [--production] [--cookbook|--cookbook-page [ID]|--cookbook-basics [ID]] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--split-docks [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--settings] [--debug] [--set KEY=VALUE] [--shop] [--market] [--board [--board-end] [--board-filter all|open|signed|locked|ITEM]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--ctrl] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy] [--on-screen]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
