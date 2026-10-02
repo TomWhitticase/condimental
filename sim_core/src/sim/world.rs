@@ -1350,9 +1350,8 @@ pub struct MachineLoadEntry {
     /// one is handed its crew after all, so the per-tick stall blinks
     /// between `staff` and none (43 toggles in 201 polls on the
     /// `understaffed` fixture). The refusal is held for a whole window, and
-    /// neither the establishment nor the headcount moves with production —
-    /// only a change to the factory or a hire or fire does — so it holds
-    /// while the machine stays short
+    /// neither the establishment nor the headcount moves with production,
+    /// so it holds while the machine stays short
     /// (`an_understaffed_machine_stays_understaffed`).
     pub understaffed: bool,
 }
