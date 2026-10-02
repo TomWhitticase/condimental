@@ -145,6 +145,41 @@ func _note_head() -> String:
 	return String(main._config_picker_note.text.split("\n")[0])
 
 
+## The panel open now, re-laid out in a `size` window: does it end above the
+## hotbar (issue #206)? At 1280x720 a hopper with gates still shut used to
+## run its gate lines and footer off the bottom; it has to climb the yield
+## ladder instead, and fold the gate lines to a count of `locked` padlocks
+## if it climbs that far. At 1920x1080 it fits whole, so a big window loses
+## nothing. (1600x900 may shed a rung here: FILL's two-line refusal is showing
+## in this world, which the screenshot's is not.) Heights here are the headless font's, which have measured the
+## same as a real render's for this panel; the screenshot is the other half.
+func _config_panel_fits(size: Vector2i, locked: int) -> bool:
+	var was := root.size
+	root.size = size
+	main._update_config_panel()
+	var rect := Rect2(main._config_panel.position, main._config_panel.size)
+	var limit: float = float(size.y) - main._hotbar_reserved_height()
+	var note := String(main._config_picker_note.text)
+	var yielded: int = main._config_yielded
+	root.size = was
+	if rect.end.y > limit or rect.position.y < 0.0:
+		_fail("at %s the panel spans y %.0f..%.0f, past the hotbar at %.0f (yield %d)" % [
+			size, rect.position.y, rect.end.y, limit, yielded
+		])
+		return false
+	if size.y >= 1080 and yielded != 0:
+		_fail("at %s the panel shed %d rungs it had room for" % [size, yielded])
+		return false
+	var folded := "🔒 %d locked" % locked
+	if (yielded >= main.CONFIG_YIELD_GATE_LINES) != note.contains(folded):
+		_fail("at %s (yield %d) the note's gate lines are wrong:\n%s" % [size, yielded, note])
+		return false
+	if yielded < main.CONFIG_YIELD_GATE_LINES and note != main._config_note_full:
+		_fail("at %s (yield %d) the note is not the full one:\n%s" % [size, yielded, note])
+		return false
+	return true
+
+
 func _repoll() -> void:
 	main._refresh_buffers()
 	# `_process` re-reads the fluid networks every frame too, and since
@@ -909,8 +944,13 @@ func _run_checks() -> void:
 	# a gate above BBQ's. Every locked choice has to be named by one of them,
 	# which is also the stronger claim — a padlock no line explains is exactly
 	# the defect issue #90 was about.
+	#
+	# Read off the FULL note, the one a window tall enough shows: this
+	# headless window is 64px high, so the panel on screen here has climbed
+	# its whole yield ladder and folded the lines to one (issue #206). The
+	# fold and the fit are checked on their own below.
 	var gate_lines: Array = []
-	for line in main._config_picker_note.text.split("\n"):
+	for line in main._config_note_full.split("\n"):
 		if String(line).begins_with("🔒"):
 			gate_lines.append(String(line))
 	for id in locked_solids:
@@ -924,6 +964,23 @@ func _run_checks() -> void:
 				id, str(gate_lines)
 			])
 			return
+	# Every padlock carries its own gate's sentence as a tooltip, which is
+	# where those words live once the lines fold to one (issue #206).
+	for picker_slot in main._config_picker_slots:
+		var id := String(picker_slot["item"])
+		var tip := String((picker_slot["button"] as Button).tooltip_text)
+		if main._choice_locked(id) != (tip != ""):
+			_fail("slot '%s' (locked %s) has the tooltip %s" % [id, main._choice_locked(id), tip])
+			return
+		if tip != "" and not (tip.contains(main._item_display_name(id)) and tip.contains("0 of ")):
+			_fail("the padlock on '%s' does not name its gate and distance: %s" % [id, tip])
+			return
+	if not _config_panel_fits(Vector2i(1280, 720), locked_solids.size()):
+		return
+	if not _config_panel_fits(Vector2i(1600, 900), locked_solids.size()):
+		return
+	if not _config_panel_fits(Vector2i(1920, 1080), locked_solids.size()):
+		return
 	# Pressing it is refused by the SIMULATION — the hopper holds what it held.
 	var held_before := String(_hopper_snapshot(gate_hopper).get("item", ""))
 	main._on_config_picker_pressed(locked_slot)
@@ -958,5 +1015,5 @@ func _run_checks() -> void:
 		return
 	main._close_config_panel()
 
-	print("CONFIG_PANEL_OK: click opens/toggles/retargets/closes, FILL per building with reasons, AUTO-FILL round-trips and keeps a %d-unit hopper and a %.0f-unit tank full, picker retargets a placed hopper and declares a tank's fluid after warning what the click destroys (declared or not), while agreeing with the run destroys nothing, ESC/menus/modes/removal close it, unplumbed tank refused, the mothball switch round-trips through the sim on a machine AND on the dock and reads back in words, a belt gets no panel at all, a gated ingredient is padlocked, named in words and refused, SPACE/V/Q inert" % [capacity, tank_capacity])
+	print("CONFIG_PANEL_OK: click opens/toggles/retargets/closes, FILL per building with reasons, AUTO-FILL round-trips and keeps a %d-unit hopper and a %.0f-unit tank full, picker retargets a placed hopper and declares a tank's fluid after warning what the click destroys (declared or not), while agreeing with the run destroys nothing, ESC/menus/modes/removal close it, unplumbed tank refused, the mothball switch round-trips through the sim on a machine AND on the dock and reads back in words, a belt gets no panel at all, a gated ingredient is padlocked, named in words and on its slot's tooltip and refused, the panel fits above the hotbar at 1280x720 and 1600x900 by shedding lines and sheds none at 1920x1080, SPACE/V/Q inert" % [capacity, tank_capacity])
 	quit(0)

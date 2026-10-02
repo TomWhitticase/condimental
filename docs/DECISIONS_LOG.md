@@ -18,6 +18,17 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-02 **The configuration panel is six slots wide and sheds lines to
+  fit a short window.** `CONFIG_PANEL_WIDTH` fits six picker slots a row.
+  When the panel is still taller than the band above the hotbar,
+  `_fit_config_panel` climbs a yield ladder until it fits, judged from the
+  full panel every frame: close hint, level bar, auto-fill note, picker
+  heading, then the gate lines folded to one count. Every rung's words stay
+  under the pointer (✕ and AUTO-FILL tooltips, and a per-slot gate tooltip on
+  every padlock, always set). No scroll bar. `test_config_panel.gd` holds the
+  panel above the hotbar at 1280x720 and 1600x900 and whole at 1920x1080.
+  UI_UX §5g. Full record in `docs/DECISIONS.md`.
+
 - 2026-10-02 **A case is eight bottles; the multiplier lives on the
   bottler.** Each `bottled_*` recipe makes 8 bottles from ONE unit of its
   sauce, and each `boxed_*` recipe packs 8 into one case. A unit of fluid
