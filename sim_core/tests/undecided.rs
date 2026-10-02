@@ -105,6 +105,17 @@ fn stall_at(world: &World, tile: (i32, i32)) -> Option<(StallKind, String)> {
 fn a_freshly_placed_machine_names_no_sauce_on_any_surface() {
     let recipes = shipped();
     let kinds = multi_recipe_kinds(&recipes);
+    // A kind every one of whose recipes drinks a fluid can only be fed by a
+    // pipe, and these stand alone with none.
+    let pipe_only: Vec<String> = kinds
+        .iter()
+        .filter(|kind| {
+            recipes
+                .for_machine(kind)
+                .all(|r| !r.fluid_inputs.is_empty())
+        })
+        .cloned()
+        .collect();
     assert!(
         kinds.len() >= 4,
         "the shipped content has a choice at the crusher, mixer, vat, bottler and packer: {kinds:?}"
@@ -134,10 +145,16 @@ fn a_freshly_placed_machine_names_no_sauce_on_any_surface() {
             [None, None, None],
             "nor has one that has stood idle for 200 ticks — waiting is not a choice ({kind})"
         );
+        let expected = if pipe_only.contains(kind) {
+            StallKind::NoSupplyPipe
+        } else {
+            StallKind::Undecided
+        };
         assert_eq!(
             stall_at(&world, *tile),
-            Some((StallKind::Undecided, String::new())),
-            "and its readout says it is waiting for ingredients, naming none ({kind})"
+            Some((expected, String::new())),
+            "and its readout names no sauce — waiting for ingredients, or, for a kind only a \
+             pipe can feed, the missing pipe ({kind})"
         );
     }
 }
@@ -281,5 +298,54 @@ fn a_kind_with_one_recipe_holds_it_from_placement() {
     assert_eq!(
         stall_at(&world, (0, 0)),
         Some((StallKind::Input, "tomato".to_string()))
+    );
+}
+
+/// The review's case: a lone undecided bottler or vat — every recipe of
+/// its kind drinks a fluid — has no pipe, so it can NEVER be fed and never
+/// decide. "Waiting for ingredients" would be true forever and point at
+/// nothing; it says the fix instead, with no sauce named. Plumbed onto a
+/// run (even one nothing has filled), it goes back to waiting.
+#[test]
+fn an_undecided_machine_with_no_pipe_names_the_missing_pipe() {
+    let recipes = shipped();
+    let pipe_only: Vec<String> = multi_recipe_kinds(&recipes)
+        .into_iter()
+        .filter(|kind| {
+            recipes
+                .for_machine(kind)
+                .all(|r| !r.fluid_inputs.is_empty())
+        })
+        .collect();
+    assert!(
+        pipe_only.iter().any(|k| k == "bottler") && pipe_only.iter().any(|k| k == "cooking_vat"),
+        "the shipped bottler and vat are fed by pipe alone: {pipe_only:?}"
+    );
+    let mut world = funded(recipes);
+    place(&mut world, "bottler", (0, 0), None);
+    place(&mut world, "cooking_vat", (5, 0), None);
+    place(&mut world, "packer", (10, 0), None);
+    for _ in 0..50 {
+        world.tick();
+    }
+    for tile in [(0, 0), (5, 0)] {
+        assert_eq!(
+            stall_at(&world, tile),
+            Some((StallKind::NoSupplyPipe, String::new())),
+            "the machine at {tile:?} has no pipe and says so"
+        );
+    }
+    assert_eq!(
+        stall_at(&world, (10, 0)),
+        Some((StallKind::Undecided, String::new())),
+        "a packer is belt-fed, so it has no pipe to miss"
+    );
+    // A pipe laid against the bottler: it can be fed now, so it waits.
+    place(&mut world, "pipe", (-1, 0), None);
+    world.tick();
+    assert_ne!(
+        stall_at(&world, (0, 0)).map(|(kind, _)| kind),
+        Some(StallKind::NoSupplyPipe),
+        "plumbed in, the bottler no longer reports a missing pipe"
     );
 }

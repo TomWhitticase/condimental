@@ -17,7 +17,10 @@
 #   2. PANEL: the configuration panel's title says the same.
 #   3. TINT: the product mesh (vat, bottler, packer) carries no override, so
 #      it shows the voxel's own neutral pale.
-#   4. And the decision still lands: fed, the vat names its recipe in the
+#   4. A LONE bottler — no pipe, so it can never be fed — says plain "no
+#      supply pipe" rather than "waiting for ingredients" forever, and names
+#      no sauce (the review of PR #232).
+#   5. And the decision still lands: fed, the vat names its recipe in the
 #      hover and its product mesh takes a tint.
 #
 # The recipe names a machine must not show are read from `cookbook_json`'s
@@ -25,6 +28,10 @@
 extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
+
+## Where the lone, unplumbed bottler stands: well clear of the reference
+## line and anything it lays.
+const LONE_BOTTLER := Vector2i(0, 12)
 
 ## How long the fed line may take to get the vat cooking. Measured at about
 ## 600 ticks; the margin is for a slow shared machine, not the line.
@@ -137,7 +144,28 @@ func _run_checks() -> void:
 the voxels are not staged (run cargo xtask)" % tinted_kinds)
 		return
 
-	# 4. Fed, the vat decides — and every surface follows it.
+	# 4. A bottler with no pipe names the missing pipe, and no sauce.
+	var bare: String = main._stall_reason_text({"kind": "no_supply_pipe", "item": ""})
+	if bare != "no supply pipe":
+		_fail("an empty no_supply_pipe item reads '%s', expected plain 'no supply pipe'" % bare)
+		return
+	Layouts.place(main.sim, "bottler", LONE_BOTTLER, "east")
+	main.sim.tick()
+	main._rebuild_world()
+	_repoll()
+	if String(main._placement_at_tile(LONE_BOTTLER).get("kind", "")) != "bottler":
+		_fail("the lone bottler at %s did not place" % str(LONE_BOTTLER))
+		return
+	var lone: String = main._hover_text_at_tile(LONE_BOTTLER)
+	if not lone.contains("no supply pipe") or lone.contains("no supply pipe for"):
+		_fail("a lone bottler should say plain 'no supply pipe':\n%s" % lone)
+		return
+	for recipe_name in names["bottler"]:
+		if lone.contains(String(recipe_name)):
+			_fail("a lone bottler names '%s':\n%s" % [recipe_name, lone])
+			return
+
+	# 5. Fed, the vat decides — and every surface follows it.
 	var vat_placement: Dictionary = {}
 	for placement in machines:
 		if String(placement["kind"]) == "cooking_vat":

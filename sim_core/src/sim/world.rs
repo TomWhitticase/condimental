@@ -1247,9 +1247,12 @@ impl MachineLoadSnapshot {
 /// `undecided` (2026-10-02) is a machine that has not been handed anything
 /// that picks one of its kind's recipes ([`MachineSnapshot::recipe`] is
 /// `null`). It used to report the first recipe's first input — a fresh
-/// mixer was "waiting for Tomato Paste", a fresh bottler had "no supply
-/// pipe for Ketchup" — which named ketchup about a machine that could make
-/// any sauce. `item` is empty: no one ingredient is the missing one.
+/// mixer was "waiting for Tomato Paste" — which named ketchup about a
+/// machine that could make any sauce. `item` is empty: no one ingredient is
+/// the missing one. An undecided machine still reports two pipe-side kinds,
+/// also with an EMPTY `item`: a faulted draw run, and `no_supply_pipe` when
+/// it has no draw pipe at all and every recipe of its kind drinks a fluid
+/// (a lone bottler or vat could never be fed, so it names the fix).
 ///
 /// The last two are issue #54's, and they replace a *wrong* answer rather
 /// than filling a silence: a machine on a run the naming pass could not
@@ -6423,21 +6426,38 @@ impl World {
                 .collect()
         };
         // An undecided machine is waiting for SOMETHING to be fed in, but
-        // for no one ingredient it could name: it has no recipe yet. A
-        // faulted run on its draw side still outranks that (issue #54's
-        // rule: a run the sim cannot make sense of says so) — it is why
-        // nothing has arrived — with `item` empty for the same reason.
+        // has no recipe to name a missing ingredient from. What it can still
+        // say, in this order:
+        //
+        // 1. A faulted run on its draw side (issue #54's rule: a run the sim
+        //    cannot make sense of says so) — it is why nothing has arrived.
+        // 2. No draw pipe at all, on a kind every one of whose recipes
+        //    drinks a fluid: it can never be fed, so it says the fix — "no
+        //    supply pipe" — with no fluid named, since none is chosen yet.
+        // 3. Otherwise `undecided`: waiting for ingredients, naming none.
+        //
+        // Deliberately NOT "waiting for <the run's fluid>" off a run that is
+        // named but still empty: on a correctly plumbed line that has not
+        // filled yet that would put "Ketchup Mix" back on every fresh vat,
+        // which is the readout the owner asked to be rid of (2026-10-02).
         let Some(held) = body.recipe.as_ref() else {
-            let fault = taps_of(&self.topology.machine_taps)
+            let taps = taps_of(&self.topology.machine_taps);
+            let fault = taps
                 .iter()
                 .map(|&(network, _)| self.topology.networks[network].naming())
                 .find(|naming| naming.is_fault());
+            let needs_a_pipe = self
+                .recipes
+                .for_machine(&body.kind)
+                .all(|r| !r.fluid_inputs.is_empty());
+            let kind = match fault {
+                Some(PipeNaming::Ambiguous) => StallKind::AmbiguousPipe,
+                Some(_) => StallKind::UnnameablePipe,
+                None if taps.is_empty() && needs_a_pipe => StallKind::NoSupplyPipe,
+                None => StallKind::Undecided,
+            };
             return Some(Stall {
-                kind: match fault {
-                    Some(PipeNaming::Ambiguous) => StallKind::AmbiguousPipe,
-                    Some(_) => StallKind::UnnameablePipe,
-                    None => StallKind::Undecided,
-                },
+                kind,
                 item: String::new(),
             });
         };

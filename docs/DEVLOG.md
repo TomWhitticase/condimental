@@ -268,11 +268,13 @@ renderer: a kind with several recipes was placed on the first one
 machine's zero-for-everything tie kept it there. A machine is now
 *undecided* (`recipe: null`) until something it is handed picks a recipe,
 and any amount counts, so one tomato makes a tomato crusher. Godot titles an
-undecided machine "Mixer · any sauce", says "waiting for ingredients", and
-leaves its product mesh on the neutral pale. The layout gained a `machine`
+undecided machine "Mixer · any sauce", says "waiting for ingredients" (or
+plain "no supply pipe" for a lone bottler or vat that has no pipe to be fed
+by), and leaves its product mesh on the neutral pale. The layout gained a `machine`
 flag, because a null recipe no longer means "not a machine". No save format
 change; an old save caught mid-craft finishes on the recipe it was really
 running. Rule in `DECISIONS_LOG.md`.
+
 ### 2026-10-02 — mustard is yellow and white
 
 The owner ruled the mustard bottle should be yellow and white, not yellow

@@ -5217,9 +5217,6 @@ func _poll_machine_load() -> void:
 			)
 
 
-## The stall reason in words. Item ids go through `_item_display_name` like
-## every other id the player reads; an unknown kind says nothing rather than
-## guessing, and a `null` stall is no reason at all.
 ## What a machine is making, for a title: the recipe's display name, or —
 ## for an UNDECIDED machine, whose `recipe` is null on the wire — the words
 ## that say it will take any sauce. One helper so the hover and the
@@ -5230,6 +5227,9 @@ func _machine_making_text(recipe) -> String:
 	return _item_display_name(String(recipe))
 
 
+## The stall reason in words. Item ids go through `_item_display_name` like
+## every other id the player reads; an unknown kind says nothing rather than
+## guessing, and a `null` stall is no reason at all.
 func _stall_reason_text(stall) -> String:
 	if not (stall is Dictionary):
 		return ""
@@ -5245,6 +5245,10 @@ func _stall_reason_text(stall) -> String:
 		"fluid_input":
 			return "waiting for %s in the pipe" % item
 		"no_supply_pipe":
+			# An UNDECIDED machine with no pipe at all names no fluid: no
+			# recipe is chosen yet, so there is no one fluid it is missing.
+			if String(stall.get("item", "")) == "":
+				return "no supply pipe"
 			return "no supply pipe for %s" % item
 		# The two kinds a run that cannot be named produces (issue #54).
 		# They REPLACE what this machine used to say — "no supply pipe" about

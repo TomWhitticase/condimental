@@ -65,8 +65,22 @@ matches what code comments and data files cite.
   "not a machine", `PlacementSnapshot` gains `machine: true`, present on
   machines only (`split_mode`'s rule); Godot's three "is this a machine"
   checks read it. A new `StallKind::Undecided` (`item` empty) replaces the
-  first-recipe stall, except that a faulted run on the draw side still
-  reports `ambiguous_pipe`/`unnameable_pipe` (issue #54's rule).
+  first-recipe stall, with two exceptions, both also with an empty `item`:
+  a faulted run on the draw side still reports
+  `ambiguous_pipe`/`unnameable_pipe` (issue #54's rule), and a machine with
+  **no draw pipe at all** on a kind every one of whose recipes drinks a fluid
+  (the bottler, the vat) reports `no_supply_pipe` — it could never be fed,
+  so "waiting for ingredients" would be true forever and point at nothing
+  (the review of PR #232). Godot reads an empty `no_supply_pipe` as plain
+  "no supply pipe".
+
+  **Rejected: naming the wait off a named-but-empty run.** The review
+  suggested an undecided bottler on a run already named `ketchup` say
+  "waiting for Ketchup in the pipe", as it did before. On a correctly
+  plumbed line that has not filled yet — the fresh line the owner was
+  looking at — that puts "Ketchup Mix" back on every vat, which is the
+  readout the owner asked to be rid of. The run's name is about the pipe;
+  only what reaches the machine decides it.
 
   **The presentation.** `MACHINE_UNDECIDED_TEXT` ("any sauce") in
   `main.gd`, through one helper `_machine_making_text` for the hover and the
