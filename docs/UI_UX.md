@@ -665,7 +665,15 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   the amber progress bar. The words are the readout; the light and the bar
   are the same fact at two distances.
 - **Typography**: a sturdy, slightly blocky sans-serif, readable at UI
-  sizes; not a novelty pixel font.
+  sizes; not a novelty pixel font. **The typeface is Chakra Petch
+  SemiBold** (2026-10-02, the owner's pick from a side-by-side against
+  Barlow, Rubik and Godot's default). Its squared corners match the voxel
+  title sign (§5d), so the title and every panel after it read as one
+  product, and it stays legible at the HUD's smallest sizes. It is the
+  project's theme font (`project.godot`'s `gui/theme/custom_font`), so
+  every Label, Button and LabelSettings without a font of its own uses it;
+  nothing in GDScript names a font. The file and its SIL OFL licence are
+  in `godot_project/fonts/`.
 - **Layout**: hotbar along the bottom (§5b); build/recipe menus as icon
   grids; hover tooltips rather than dense always-on text.
 
@@ -1665,7 +1673,7 @@ suits the voxels.
 - Exact camera angle (true 2:1 isometric vs Sims-style dimetric): in
   practice true isometric via `CAMERA_DIRECTION`; a side-by-side is cheap.
 - Concrete palette hex ranges per material category.
-- Specific typeface.
+- ~~Specific typeface~~ — resolved: Chakra Petch SemiBold (§5).
 - Whether characters (if any) share the 32³ tile scale.
 - ~~`.vox` writer~~ — resolved: hand-written encoder (§2b point 1).
 - ~~`.vox` importer~~ — resolved: see ARCHITECTURE.md §1a.

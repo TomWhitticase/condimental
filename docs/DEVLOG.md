@@ -259,6 +259,17 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-02 — The game has its own typeface: Chakra Petch
+
+After the title sign, the owner wanted the rest of the text to match. Godot's
+default font was replaced by Chakra Petch SemiBold (SIL OFL), set once as
+`project.godot`'s theme font, so every menu, panel, tooltip and HUD plate
+changed together and no GDScript names a font. Chosen from a rendered
+side-by-side against Barlow and Rubik, then tried in the running game. Every
+fit-to-width panel was re-rendered at 1280x720 with the new metrics. UI_UX §5
+and §9 record it (closing the open "specific typeface" question), as does
+DECISIONS.
+
 ### 2026-10-02 — The title screen hangs a lit sign over a running factory
 
 The owner asked for a more impressive title screen than "a plain screen and

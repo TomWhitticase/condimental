@@ -25,6 +25,29 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-02: **The game's typeface is Chakra Petch SemiBold.** (Owner,
+  after the title sign: "all the other text in the game (all other menus)
+  should probably be using a more suitable font that looks good, is easy to
+  read and fits with the game's aesthetic".)
+
+  **What it replaces.** Godot's built-in default font. UI_UX §5 already
+  asked for "a sturdy, slightly blocky sans-serif, readable at UI sizes;
+  not a novelty pixel font", and §9 left the actual typeface open.
+
+  **The rule.** Chakra Petch SemiBold, under the SIL OFL 1.1, set as the
+  project's theme font. The owner saw it against Barlow SemiBold, Rubik
+  Medium and the default in one rendered sheet of the HUD and the settings
+  page, then played with it in the running game. Its squared corners echo
+  the voxel title sign, which is what makes the title screen and the menus
+  after it read as one game. Barlow was the more compact, more neutral
+  option.
+
+  **Why one project setting.** `gui/theme/custom_font` reaches every
+  Control and every LabelSettings without a font of its own, which is all
+  of them. Threading a font through `main.gd`'s panels one by one would be
+  hundreds of edits and a new panel that forgot one. Sizes are unchanged:
+  they still come from `UI_FONT_BASE` and the per-panel offsets.
+
 - 2026-10-02: **The title screen's wordmark is a lit voxel sign, and the
   poster runs.** (Owner: "make the intro screen more impressive and visually
   stunning, currently the screen is like minecraft with a plain screen and

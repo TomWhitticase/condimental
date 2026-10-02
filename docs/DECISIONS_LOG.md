@@ -18,6 +18,14 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-02 **The game's typeface is Chakra Petch SemiBold.** It is set
+  once, as `project.godot`'s `gui/theme/custom_font`, so every Label,
+  Button and LabelSettings uses it and no GDScript names a font. The owner
+  picked it from a side-by-side (Barlow, Rubik, Godot's default) and in the
+  running game. It closes UI_UX §9's "specific typeface". The font file and
+  its SIL OFL licence are in `godot_project/fonts/`. Full record in
+  `docs/DECISIONS.md`.
+
 - 2026-10-02 **The title screen's wordmark is a lit voxel sign, and the
   poster runs.** The game's name is `title_sign`, a voxel model from
   `assets.rs` (emissive letters, three chasing-bulb overlays) hung from the
