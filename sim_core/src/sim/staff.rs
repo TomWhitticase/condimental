@@ -671,11 +671,11 @@ impl StaffPools {
     /// Sets the ESTABLISHMENT — how many heads of each category the placed
     /// machinery needs to be fully crewed — from one line per category.
     ///
-    /// Called from `World::recompute_establishment`, which is reached by
-    /// `Place`, `Remove`, `Rotate` and `SetMothballed` — all four of them
-    /// deliberate player actions — so this figure is **stable during
-    /// play**: it cannot move because a belt ran dry or a vat finished a
-    /// batch. That stability is the whole point. `demand` (what was asked
+    /// Called from `World::recompute_establishment`, which is reached only
+    /// when the player changes the factory — `Place`, `Remove`, `Rotate`,
+    /// `SetMothballed`, a splitter's mode or a tank's fluid — or a save is
+    /// loaded, so this figure is **stable during play**: it cannot move
+    /// because a belt ran dry or a vat finished a batch. That stability is the whole point. `demand` (what was asked
     /// for this tick) breathes with production flow, which made
     /// "do I need to hire?" unanswerable from the HUD — the number that
     /// prompted a hire had already gone by the time the player acted
