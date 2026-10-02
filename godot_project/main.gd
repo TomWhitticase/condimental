@@ -4513,17 +4513,19 @@ func _read_dock_states() -> void:
 ## But only when the warehouse has changed: `storage_revision` moves when the
 ## stock or the racks do, which is a hopper refill or a player action, not
 ## every tick. Read every polled frame, a 500-rack floor's snapshot cost 24 ms
-## to build and parse in a debug build.
+## to build and parse in a debug build even with the refusals shared (about
+## 40 ms before). The revision is only recorded once a read has parsed, so a
+## bad one is retried on the next poll rather than waiting for the stock.
 func _refresh_racks() -> void:
 	var revision: int = sim.storage_revision()
 	if revision == _storage_revision:
 		return
-	_storage_revision = revision
 	_rack_states.clear()
 	_storage_state = {}
 	var parsed = JSON.parse_string(sim.storage_snapshot_json())
 	if not (parsed is Dictionary):
 		return
+	_storage_revision = revision
 	_storage_state = parsed
 	for snapshot in parsed.get("racks", []):
 		if not (snapshot is Dictionary):
@@ -4709,6 +4711,8 @@ func _dock_lamp_lit(stocked: bool, full: bool, current_tick: int) -> bool:
 	return phase % 2 == 0
 
 
+var _fluid_materials: Dictionary = {} # fluid id -> its one shared StandardMaterial3D
+
 ## A network's or tank's fluid id, or "" — `fluid` is NULLABLE on the wire
 ## (a run no machine taps has not been told what it carries), and `String(null)`
 ## is a hard error in GDScript rather than an empty string.
@@ -4721,10 +4725,20 @@ func _fluid_id_of(snapshot: Dictionary) -> String:
 ## dielectric — UI_UX.md §4's "visible liquid surfaces ... with subtle
 ## shading/reflection"), tinted per fluid id. Only the tint is decided here;
 ## the shading numbers stay in palette.ron like every other material.
+##
+## One material per fluid, made the first time it is asked for and shared by
+## every pipe body and tank fill holding that fluid. Nothing mutates it once
+## assigned, and the fluid poll asks for every network's on every polled
+## frame: duplicating a fresh one each time cost a material per network per
+## frame, the largest script cost on a big pipe floor.
 func _fluid_material_for(fluid_id: String) -> StandardMaterial3D:
+	var cached: StandardMaterial3D = _fluid_materials.get(fluid_id, null)
+	if cached != null:
+		return cached
 	var base: StandardMaterial3D = _class_materials.get("liquid", null)
 	var mat: StandardMaterial3D = base.duplicate() if base != null else _make_material(0.0, 0.14)
 	mat.albedo_color = FLUID_TINTS.get(fluid_id, FLUID_TINT_FALLBACK)
+	_fluid_materials[fluid_id] = mat
 	return mat
 
 
@@ -4754,8 +4768,9 @@ func _set_machine_product(key: String, recipe) -> void:
 
 ## A machine's product material: the same `liquid` class numbers the fluid in
 ## a pipe uses — it is the same substance, seen through glass instead of
-## steel — tinted per recipe rather than per fluid. Built fresh per call like
-## `_fluid_material_for` above, and called about as often.
+## steel — tinted per recipe rather than per fluid. Built fresh per call,
+## unlike `_fluid_material_for` above: `_set_machine_product` only asks when a
+## machine's recipe changes, not on every poll, so there is nothing to cache.
 func _product_material_for(recipe_id: String) -> StandardMaterial3D:
 	var base: StandardMaterial3D = _class_materials.get("liquid", null)
 	var mat: StandardMaterial3D = base.duplicate() if base != null else _make_material(0.0, 0.14)

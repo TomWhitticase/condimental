@@ -3011,7 +3011,8 @@ impl World {
     ///
     /// The warehouse is polled, not dirtied (see [`StorageSnapshot`]), and
     /// at 500 racks a snapshot built and parsed every frame cost the
-    /// presentation layer 24 ms in a debug build. Stock and racks change on
+    /// presentation layer 24 ms in a debug build even with the refusals
+    /// shared (`World::rack_verdicts`; about 40 ms before). Stock and racks change on
     /// a hopper refill or a player action, not every tick, so the poll asks
     /// for this first and skips the read when it has not moved.
     pub fn storage_key(&self) -> StorageKey {
