@@ -980,9 +980,8 @@ fn every_item_leaves_a_splitter_by_the_exit_it_was_drawn_heading_for() {
         }
         assert_eq!(handoffs, 12, "{mode}: every unit crossed the splitter");
         assert_eq!(cross.counts(), expected, "{mode}: dealing is unchanged");
-        assert_eq!(
+        assert!(
             seen_turn,
-            mode != "left" || expected.1 > 0,
             "{mode}: a side exit is planned while the item is still on the tile"
         );
     }
@@ -1033,6 +1032,118 @@ fn a_backed_up_side_is_planned_past_like_the_fallback_passes_it() {
         "the fixture must send more than one unit past the full straight tile \
          ({fallbacks}; straight holds {full})"
     );
+    assert_eq!(
+        misplanned, 0,
+        "every hand-off went where it was drawn heading"
+    );
+}
+
+/// Raw tomatoes waiting in the input buffer of the machine at `tile`.
+fn machine_input_at(world: &World, tile: TileCoord) -> u32 {
+    world
+        .chunk_snapshot((0, 0))
+        .machines
+        .into_iter()
+        .find(|m| m.tile == tile)
+        .expect("the machine is standing")
+        .input
+        .iter()
+        .map(|(_, qty)| qty)
+        .sum()
+}
+
+/// A MACHINE whose input buffer is full is planned past, by the same test
+/// the belt-to-machine hand-off refuses on (`Machine::input`'s room), not
+/// only a backed-up belt: a `left` splitter whose straight side is a
+/// switched-off crusher draws every item turning left once that crusher has
+/// filled up.
+#[test]
+fn a_full_machine_is_planned_past_like_the_fallback_passes_it() {
+    let mut world = funded();
+    build(&mut world, "hopper", (-1, 0), Direction::East);
+    build(&mut world, SPLITTER_KIND, (0, 0), Direction::East);
+    // Straight (east): a crusher with its inlet face on the splitter,
+    // switched off so it never crafts and its input buffer only fills.
+    build(&mut world, "crusher", (1, 0), Direction::East);
+    world.issue_command(PlayerCommand::SetMothballed {
+        tile: (1, 0),
+        enabled: true,
+    });
+    let branch = build_belt_run(&mut world, (0, -1), Direction::South, 12);
+    common::buy(&mut world, "tomato", HOPPER_CAPACITY);
+    world.issue_command(PlayerCommand::FillHopper {
+        amount: HOPPER_CAPACITY,
+        tile: None,
+    });
+    let (mut to_machine, mut to_branch, mut misplanned) = (0, 0, 0);
+    for _ in 0..6000 {
+        let before = (machine_input_at(&world, (1, 0)), items_on(&world, &branch));
+        let (_, exits) = splitter_plan(&world);
+        world.tick();
+        let after = (machine_input_at(&world, (1, 0)), items_on(&world, &branch));
+        let landed = if after.0 > before.0 {
+            to_machine += 1;
+            Some("east")
+        } else if after.1 > before.1 {
+            to_branch += 1;
+            Some("south")
+        } else {
+            None
+        };
+        if landed.is_some_and(|direction| exits[0] != direction) {
+            misplanned += 1;
+        }
+    }
+    assert!(to_machine > 0, "the crusher took some before it filled");
+    assert!(
+        to_branch > to_machine,
+        "the fixture must send most units past the full crusher \
+         ({to_machine} to it, {to_branch} past it)"
+    );
+    assert_eq!(
+        misplanned, 0,
+        "every hand-off went where it was drawn heading"
+    );
+}
+
+/// A MOTHBALLED dock is planned past too — the dock hand-off's refusal
+/// (`Dock::mothballed`, then `Dock::has_room_for`) is what the plan asks: a
+/// `left` splitter whose left side is a switched-off dock draws every item
+/// going straight on, not alternately turning toward a dock that will never
+/// take it.
+#[test]
+fn a_mothballed_dock_is_planned_past_like_the_fallback_passes_it() {
+    let mut world = funded();
+    build(&mut world, "hopper", (-1, 0), Direction::East);
+    build(&mut world, SPLITTER_KIND, (0, 0), Direction::East);
+    let straight = build_belt_run(&mut world, (1, 0), Direction::East, 6);
+    // Left (south): a dock whose inlet face is (0, -1), as in
+    // `a_splitter_feeds_a_machine_and_a_dock_the_way_a_belt_does`.
+    build(&mut world, "dock", (0, -2), Direction::South);
+    world.issue_command(PlayerCommand::SetMothballed {
+        tile: (0, -2),
+        enabled: true,
+    });
+    common::buy(&mut world, "tomato", HOPPER_CAPACITY);
+    world.issue_command(PlayerCommand::FillHopper {
+        amount: 12,
+        tile: None,
+    });
+    let (mut handoffs, mut misplanned) = (0, 0);
+    for _ in 0..3000 {
+        let before = items_on(&world, &straight);
+        let (_, exits) = splitter_plan(&world);
+        world.tick();
+        if items_on(&world, &straight) > before {
+            handoffs += 1;
+            if exits[0] != "east" {
+                misplanned += 1;
+            }
+        }
+    }
+    let shipped: u32 = world.dock_snapshots().iter().map(|d| d.shipped_total).sum();
+    assert_eq!(shipped, 0, "a mothballed dock takes nothing");
+    assert_eq!(handoffs, 12, "every unit went straight on");
     assert_eq!(
         misplanned, 0,
         "every hand-off went where it was drawn heading"
