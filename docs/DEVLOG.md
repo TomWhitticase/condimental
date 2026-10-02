@@ -282,6 +282,15 @@ that. The extra BBQ demand moved the mustard gate from tick 131 000 to
 125 000 (`measure_gate_ticks.gd`), about three minutes sooner. The BBQ gate
 stays at 52 000.
 
+### 2026-10-02 — mustard is yellow and white
+
+The owner ruled the mustard bottle should be yellow and white, not yellow
+and black. Its label band and cap were a near-black olive ink, put there
+so the bottle's top would not wash into its bright body. They are now a
+white brighter than the other bottles' caps, which keeps that contrast
+from the light side (31.3 over the body, where 26 reads). A new voxgen
+test holds the ruling. DECISIONS 2026-10-02.
+
 ### 2026-10-02 — A big save loads in linear time
 
 The scale sweep's other finding: loading the owner's factory tiled 20×
