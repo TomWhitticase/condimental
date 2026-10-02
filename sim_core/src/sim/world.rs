@@ -2481,6 +2481,11 @@ pub struct World {
     /// where the registries live.
     guide: GuideRegistry,
     topology: Topology,
+    /// True only inside the save loader's structure rebuild
+    /// ([`World::begin_bulk_place`]): `Place` records its tiles in the grid
+    /// and leaves the full topology pass to the one the loader runs at the
+    /// end. Never true on a live world, so never saved.
+    bulk_placing: bool,
     /// What the factory made and used, per item, over several rolling
     /// windows and for all time (the production-stats epic, `stats.rs`).
     /// Written by `Machine::tick` and by a contract payout in step 7 of
@@ -2656,6 +2661,7 @@ impl World {
             staff: StaffPools::bundled(),
             guide: GuideRegistry::bundled(),
             topology: Topology::default(),
+            bulk_placing: false,
             production: ProductionLedger::new(),
         }
     }
@@ -3320,7 +3326,11 @@ impl World {
                 self.assemble_crossing(occupant, kind, direction);
                 let taken = self.shop.owned.take_one(kind);
                 debug_assert!(taken, "plan_place checked the owned count");
-                self.recompute_topology();
+                // The occupant already holds its tile and its count, so a
+                // load has nothing to keep exact here and defers the pass.
+                if !self.bulk_placing {
+                    self.recompute_topology();
+                }
                 self.mark_tiles_dirty(&tiles);
                 return occupant;
             }
@@ -3433,7 +3443,19 @@ impl World {
 
         let taken = self.shop.owned.take_one(kind);
         debug_assert!(taken, "plan_place checked the owned count");
-        self.recompute_topology();
+        if self.bulk_placing {
+            // The grid is all the check above reads (the loader's validation
+            // has already refused overlapping footprints, but the check keeps
+            // its meaning), and `all` is what the loader's refusal check
+            // counts (`placement_count`): a load keeps those two exact as it
+            // goes and defers everything else.
+            for &claimed in &tiles {
+                self.topology.grid.insert(claimed, entity);
+            }
+            self.topology.all.push(entity);
+        } else {
+            self.recompute_topology();
+        }
         self.mark_tiles_dirty(&tiles);
         entity
     }
@@ -3619,6 +3641,24 @@ impl World {
     /// volumes across by tile, which is what lets it run on a live world at
     /// all.
     pub(super) fn recompute_topology_after_restore(&mut self) {
+        self.recompute_topology();
+    }
+
+    /// Starts the save loader's structure rebuild: until
+    /// [`World::end_bulk_place`], each `Place` claims its tiles in the grid —
+    /// which is all a later `Place` checks against — and counts itself in
+    /// [`World::placement_count`], and skips the full topology pass.
+    /// Replaying a save's placements one full pass each was quadratic: 7.2 s
+    /// of a 3 560-placement load in a release build.
+    pub(super) fn begin_bulk_place(&mut self) {
+        self.bulk_placing = true;
+    }
+
+    /// Ends [`World::begin_bulk_place`] with the one topology pass the
+    /// replayed placements skipped — the same pass a last ordinary `Place`
+    /// would have run, over the same entities.
+    pub(super) fn end_bulk_place(&mut self) {
+        self.bulk_placing = false;
         self.recompute_topology();
     }
 

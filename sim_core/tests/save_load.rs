@@ -23,7 +23,7 @@
 mod common;
 
 use sim_core::sim::save::{SAVE_SCHEMA_VERSION, SaveData, SavedBody};
-use sim_core::sim::types::Money;
+use sim_core::sim::types::{Direction, Money};
 use sim_core::sim::{
     PlayerCommand, RecipeRegistry, SavedProduction, World, reference_chain_with_budget,
 };
@@ -226,6 +226,46 @@ fn a_saved_factory_comes_back_running_state_identical() {
     // And after all that, the loaded world still saves to the same file the
     // original does — the round trip is stable, not merely close.
     assert_eq!(original.to_save_ron(), loaded.to_save_ron());
+}
+
+/// A load places everything before it works out the factory's topology
+/// once (`World::begin_bulk_place`), and has to hand back a world that is
+/// done with that: a `Place` after the load joins the topology exactly as it
+/// does in the world that was saved — two belts laid end to end link up.
+#[test]
+fn a_placement_after_a_load_joins_the_factory() {
+    let mut original = mid_flight_world();
+    let text = original.to_save_ron();
+    let mut loaded = World::from_save_ron(&text, recipes()).expect("the save must load");
+
+    for world in [&mut original, &mut loaded] {
+        let before = world.placement_count();
+        world.issue_command(PlayerCommand::DebugGrantMoney {
+            amount: Money::from_num(10_000),
+        });
+        world.issue_command(PlayerCommand::Purchase {
+            kind: "belt".to_string(),
+            quantity: 2,
+        });
+        for tile in [(40, 40), (41, 40)] {
+            world.issue_command(PlayerCommand::Place {
+                kind: "belt".to_string(),
+                tile,
+                direction: Direction::East,
+                item: None,
+            });
+        }
+        assert_eq!(
+            world.placement_count(),
+            before + 2,
+            "both belts must go down"
+        );
+    }
+    assert_eq!(
+        fingerprint(&loaded),
+        fingerprint(&original),
+        "a placement after a load must join the factory as it would have before the save"
+    );
 }
 
 /// An auto-filling factory comes back auto-filling — and, crucially, **keeps
@@ -586,6 +626,23 @@ fn a_save_from_another_build_and_a_file_that_is_not_a_save_are_both_refused() {
     assert!(
         error.contains("schema_version 6") && error.contains("migrate-save-v6-to-v7.py"),
         "unhelpful: {error}"
+    );
+
+    // A real old file is a different SHAPE, not just a different number, so
+    // the typed parse fails before the version is ever compared — and the
+    // refusal must still be the version, not "could not parse". v4 had no
+    // boxes-sold ledger, a field v7 requires.
+    assert!(text.contains("lifetime_boxes_sold:"), "{text}");
+    let start = text.find("lifetime_boxes_sold:").unwrap();
+    let end = start + text[start..].find("},").unwrap() + 2;
+    let v4_shaped = from_the_past.replacen(&text[start..end], "", 1);
+    let Err(error) = World::from_save_ron(&v4_shaped, recipes()) else {
+        panic!("a v4-shaped save must be refused");
+    };
+    let error = error.to_string();
+    assert!(
+        error.contains("schema_version 4") && !error.contains("parse"),
+        "an old save that fails the parse must still be refused as old: {error}"
     );
 
     let Err(error) = World::from_save_ron("this is not a save file", recipes()) else {

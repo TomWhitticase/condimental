@@ -1061,17 +1061,28 @@ impl SaveData {
             schema_version: u32,
         }
         // A version mismatch is far more likely than a corrupt file, and its
-        // message is far more useful, so it is checked against a shape that
-        // only has the one field in it.
-        if let Ok(header) = ron::from_str::<Header>(text)
-            && header.schema_version != SAVE_SCHEMA_VERSION
-        {
-            return Err(SaveError::UnsupportedSchemaVersion {
-                found: header.schema_version,
-                supported: SAVE_SCHEMA_VERSION,
-            });
-        }
-        let data: SaveData = ron::from_str(text).map_err(SaveError::Parse)?;
+        // message is far more useful, so a file that does not parse is asked
+        // again against a shape that only has the one field in it.
+        //
+        // Only once the real parse has failed: reading that shape skips every
+        // other field through `deserialize_any`, and ron 0.12.2 scans the
+        // whole rest of the text for `..` on each number it skips that way
+        // (`Parser::next_bytes_is_float`), so on a good file it made every
+        // load quadratic: 3 560 placements took 3.8 s with it, 23 ms without.
+        let data: SaveData = match ron::from_str(text) {
+            Ok(data) => data,
+            Err(error) => {
+                if let Ok(header) = ron::from_str::<Header>(text)
+                    && header.schema_version != SAVE_SCHEMA_VERSION
+                {
+                    return Err(SaveError::UnsupportedSchemaVersion {
+                        found: header.schema_version,
+                        supported: SAVE_SCHEMA_VERSION,
+                    });
+                }
+                return Err(SaveError::Parse(error));
+            }
+        };
         if data.schema_version != SAVE_SCHEMA_VERSION {
             return Err(SaveError::UnsupportedSchemaVersion {
                 found: data.schema_version,
@@ -1641,6 +1652,16 @@ fn check_item(
 /// commands (module doc). Funded one item at a time, so an arbitrarily large
 /// factory loads whatever its total bill (which once had to fit in `Fx`).
 fn rebuild_structure(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
+    world.begin_bulk_place();
+    let rebuilt = replay_placements(world, data);
+    world.end_bulk_place();
+    rebuilt
+}
+
+/// One `Purchase` + `Place` per saved placement, in save order — inside
+/// [`World::begin_bulk_place`], so each costs its own tiles rather than a
+/// pass over the whole floor.
+fn replay_placements(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
     for (index, placement) in data.placements.iter().enumerate() {
         if placement.kind == CROSSING_KIND {
             rebuild_crossing(world, placement)?;

@@ -259,6 +259,22 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-02 — A big save loads in linear time
+
+The scale sweep's other finding: loading the owner's factory tiled 20×
+(3,560 placements) took 19.6 s in a release build, and 1× to 5× to 20× ran
+46 ms → 1 s → 19.6 s. Two quadratics, each enough on its own. Before the real
+parse, `SaveData::from_ron` read a one-field `schema_version` header, and
+skipping the rest of the file sends every number through ron 0.12.2's
+`next_bytes_is_float`, which scans the whole remaining text for `..` — the
+header is now read only when the typed parse has failed. And the loader
+replayed each `Place` with a full topology pass; inside the rebuild it now
+places in bulk (`World::begin_bulk_place`), keeping the grid and placement
+count exact, and runs the pass once. Either fix alone left 3.8 s or 7.2 s; both
+together load the 20× save in 23–27 ms. `tests/save_load.rs` gained an
+old-shaped save that fails the parse but is still refused as old, and a
+placement after a load that must join the factory exactly as before the save.
+
 ### 2026-10-02 — The game has its own typeface: Chakra Petch
 
 After the title sign, the owner wanted the rest of the text to match. Godot's
