@@ -29,7 +29,9 @@ See [WORKFLOW.md](WORKFLOW.md).
   when short. The checklist, strikes, cadence, tallies and payout belong to
   the docket (`_build_contract_card`), and the docket lives only on the
   C board's YOUR CONTRACTS column. Do not grow the row back into a docket;
-  add detail to the board. Full record in `docs/DECISIONS.md`.
+  add detail to the board. The list never shows less than its first whole
+  row (`_contract_list_hard`), and every plate line is one line no wider than
+  the column — no autowrap. Full record in `docs/DECISIONS.md`.
 - 2026-10-02 **Mustard is yellow and white, not yellow and black.** The
   owner's ruling. The mustard bottle (`item_bottle_mustard`) is a
   `mustard_gold` body with a WHITE label band and cap — both
@@ -907,7 +909,9 @@ See [WORKFLOW.md](WORKFLOW.md).
   below the stack's first line boundary (`_first_line_boundary`); that line is
   what buys the cut back onto a boundary at 1280x720 with every offer signed,
   the case issue #17 had left ragged. `_update_staff_alert` no longer touches
-  the hint.
+  the hint. **Superseded 2026-10-02:** the contracts plate has no board-hint
+  line (the legend and the empty plate name C); the list's floor is its first
+  row's first line.
 
 - 2026-09-20 **The bank at the moment of building decides whether the BBQ
   branch costs you the board.** `data/unlocks.ron`'s `after_deliveries: 10`
@@ -1171,6 +1175,8 @@ See [WORKFLOW.md](WORKFLOW.md).
   stays for the clipboard, which shows the per-item levels beside it.
   **Superseded 2026-09-26:** the pool is gone; each dock holds 32 places
   of its own (see that entry). The lamp pulse and the clipboard bar stand.
+  **Superseded 2026-10-02:** the clipboard's ON THE DOCK bars are gone; the
+  contracts plate says only `⚠ DOCKS FULL` when full. The lamp pulse stands.
   **The crusher throws pulp, and a BEAT is a third size of feedback**
   beside §6a's two: five `crush_bit` flecks every `CRUSH_BEAT_TICKS` of
   the machine's own WORK ticks, so a starved or blocked crusher throws
@@ -1716,7 +1722,8 @@ See [WORKFLOW.md](WORKFLOW.md).
 - 2026-09-08 **Contracts, ticket 2 (clipboard).** One board, one paper
   docket per contract, money and the shared delivery pool shown once above
   them, per-contract facts on each docket. Past a capped height the stack
-  scrolls.
+  scrolls. **Superseded 2026-10-02:** the dockets live on the C board only;
+  the always-visible readout is the contracts plate's compact rows.
 - 2026-09-08 **Milestone 7, ticket 2 (aging rack, since deleted).** The
   rack itself is gone (ageing isn't a mechanic this game wants), but the
   progress-gauge rules it proved survive: a bar recomputed from

@@ -1497,8 +1497,8 @@ var _legend_yielded := false
 
 # --- Contracts plate (UI_UX.md §5) -----------------------------------------
 # The top of the right-hand column: the balance, and one compact row per
-# signed contract — name, payout, how much of this window's ask is in, its
-# state in a glyph and a word, and the time left. A dark plate like STOCK and
+# signed contract — name, time left, a draining bar, and how the order
+# stands (the tally of this window's ask, or its state in a glyph and a word). A dark plate like STOCK and
 # CREW under it, the same width and the same right edge, because the three
 # are one column of glanceable readouts. Everything else about an order (the
 # checklist per product, strikes, cadence, tallies) is on its docket on the C
@@ -1527,7 +1527,9 @@ var _last_money := INF
 ## stands on each dock is on the dock's own hover.
 var _contract_dock_full_label: Label
 ## Wages, on the plate only when the balance cannot cover the next bill
-## (`_contract_wages_state`); the calm countdown is the CREW plate's.
+## (`_contract_wages_state`); the calm countdown is the CREW plate's. Broken
+## onto its second line at the sentence's own dash, never autowrapped, so the
+## plate's measured height is the height it draws at (see the line itself).
 var _contract_wages_label: Label
 ## The wages line's own ink, so switching it to the warning red cannot bleed
 ## into every docket footnote (they share `_contract_meta_settings`).
@@ -6188,10 +6190,10 @@ func _legend_rect() -> Rect2:
 ## readouts and its right edge is one line.
 ##
 ## WHAT IS ON IT, AND WHAT IS NOT (the owner's 2026-10-02 call). A row is
-## what a glance needs to decide whether to act: which order, what it pays,
-## how much of this window's ask is in, whether it is in danger (a glyph and
+## what a glance needs to decide whether to act: which order, how much of
+## this window's ask is in, whether it is in danger (a glyph and
 ## a word, never colour alone — UI_UX.md §7), and how long is left, as a
-## draining bar and in seconds. The per-product checklist, strikes, cadence
+## draining bar and in seconds. The payout, the per-product checklist, strikes, cadence
 ## and done/missed tallies are the order's DOCKET, and the docket lives on
 ## the C board's YOUR CONTRACTS column (`_build_contract_card`), built and
 ## driven by the same code it always was. The plate used to carry all of it
@@ -6332,7 +6334,7 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_empty_label = Label.new()
 	_contract_empty_label.name = "NoContracts"
 	_contract_empty_label.label_settings = _contract_plate_hint_settings
-	_contract_empty_label.text = "none signed — press C to sign one"
+	_contract_empty_label.text = "none signed — press C"
 	_contract_empty_label.visible = false
 	body.add_child(_contract_empty_label)
 
@@ -6344,9 +6346,10 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_dock_full_label = Label.new()
 	_contract_dock_full_label.name = "DockFull"
 	_contract_dock_full_label.label_settings = full_settings
-	_contract_dock_full_label.text = "⚠ DOCKS FULL — the line is backing up"
-	_contract_dock_full_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_contract_dock_full_label.custom_minimum_size.x = CONTRACT_PLATE_TEXT_WIDTH
+	# ONE line, and short enough to stay one at the plate's width: a line that
+	# wrapped here was measured at one line and drawn at two, which pushed the
+	# first row's status under the list's cut (PR #235's review).
+	_contract_dock_full_label.text = "⚠ DOCKS FULL — line backing up"
 	_contract_dock_full_label.visible = false
 	body.add_child(_contract_dock_full_label)
 
@@ -6357,10 +6360,11 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_wages_label.name = "WagesLabel"
 	_contract_wages_settings = _contract_plate_hint_settings.duplicate()
 	_contract_wages_label.label_settings = _contract_wages_settings
-	# Wrapped inside a PINNED width (godot_project/CLAUDE.md's autowrap rule):
-	# the shortfall sentence is longer than the plate is wide.
-	_contract_wages_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_contract_wages_label.custom_minimum_size.x = CONTRACT_PLATE_TEXT_WIDTH
+	# The shortfall sentence is longer than the plate is wide, so
+	# `_update_contract_wages` breaks it at its own dash rather than
+	# autowrapping it: a wrapping Label's minimum height is shaped at whatever
+	# width it was last drawn at, and this plate is fitted by its minimum
+	# (godot_project/CLAUDE.md's autowrap rule).
 	body.add_child(_contract_wages_label)
 
 	# One row per active contract, read live from economy_snapshot_json rather
@@ -6503,12 +6507,10 @@ func _build_docket_styles() -> void:
 	_contract_card_style_locked.border_color = Color(0.42, 0.41, 0.38, 1.0)
 
 
-## Rebuilds the docket stack from a `contracts` array. Called once at build
-## time and again only if the SET of contract ids changes — the shipped world
-## loads its contracts once and never adds or drops one, but a future
-## "contract accepted / contract lost" mechanic (GAMEPLAY.md §11's open
-## question about what a missed window costs) would, and the guard costs a
-## string compare per frame.
+## Rebuilds the plate's rows from a `contracts` array. Called at build time
+## and again only when the SET of contract ids changes — a signature or a
+## lost order — which the guard (`_contract_cards_match`) costs a string
+## compare per frame to notice.
 func _rebuild_contract_cards(contracts: Array) -> void:
 	for card in _contract_cards:
 		# Detach FIRST, then queue_free: queue_free is deferred to the end of
@@ -6695,10 +6697,10 @@ func _update_contract_row(row: Dictionary, contract: Dictionary, current_tick: i
 ## clocks independently in sim_core, so this countdown is per docket and is
 ## never shared the way money is.
 ##
-## Built into `box`: the clipboard's stack, or the C board's left column
-## (`_rebuild_board_active_cards`), which shows the same dockets larger and
-## drives them through the same `_update_contract_card` — one docket, two
-## places it hangs.
+## Built into `box`: the C board's YOUR CONTRACTS column
+## (`_rebuild_board_active_cards`), driven through `_update_contract_card`.
+## The contracts plate shows each order as a compact row instead
+## (`_build_contract_row`).
 ##
 ## Returns the record `_update_contract_panel` drives it through:
 ##   {"id", "panel", "name_label", "payout_label", "meta_label",
@@ -6749,7 +6751,7 @@ func _build_contract_card(contract: Dictionary, box: VBoxContainer, status_width
 	var status_label := Label.new()
 	status_label.name = "Status"
 	status_label.label_settings = _contract_ink_settings
-	# The board's column is a fixed width and the clipboard's is not: there the
+	# The board's column is a fixed width: there the
 	# status line wraps inside that PINNED width (the `autowrap_mode` rule
 	# under MODAL_EDGE_MARGIN), because "⚠ LAST CHANCE — … it is LOST" on one
 	# line is wider than the board can give a running docket beside its offers.
@@ -19669,10 +19671,9 @@ func _pushed_clear_of(rect: Rect2, r: Rect2, bounds_x: float, lower_bound: float
 	return rect
 
 
-## Drives the contract clipboard (UI_UX.md §5) from `economy_snapshot_json`:
-## the one shared money figure, what stands on every dock, and then EVERY
-## active contract's own docket — its checklist boxes, its numeric progress
-## and its own countdown to its own next delivery check.
+## Drives the contracts plate (UI_UX.md §5) from `economy_snapshot_json`:
+## the one balance, the full-docks and short-wages warnings when true, and
+## one row per active contract with its own countdown to its own check.
 func _update_contract_panel(econ: Dictionary = {}) -> void:
 	if econ.is_empty():
 		econ = _read_economy()
@@ -19736,18 +19737,17 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 			hard = maxf(0.0, ceiling_y - top)
 			# Stop EARLIER than that where the column allows: at the line the
 			# STOCK plate stands on with its whole list (`_stock_list_ceiling_y`)
-			# — floored by one whole line of the first row, the least that still
-			# says "there is an order here, and more under the cut".
+			# — floored by the first WHOLE row. A row is two short lines, and
+			# its second is the order's status: a first line alone names an
+			# order and hides whether it is in trouble, which is the one thing
+			# the plate is for (PR #235's review, full docks at 1280x720).
 			var wanted_y: float = _stock_list_ceiling_y()
 			if is_finite(wanted_y):
 				var own_chrome: float = (
 					_contract_panel.get_combined_minimum_size().y
 					- _contract_cards_scroll.custom_minimum_size.y
 				)
-				hard = minf(hard, maxf(
-					maxf(0.0, wanted_y - top),
-					own_chrome + _first_line_boundary(_contract_cards_box)
-				))
+				hard = _contract_list_hard(hard, maxf(0.0, wanted_y - top), own_chrome)
 		var stack_available: float = (
 			column - _stock_reserved_height() - _crew_reserved_height()
 		)
@@ -19762,6 +19762,15 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 		_contract_cards_scroll.custom_minimum_size.y = _contract_cards_box.get_combined_minimum_size().y
 
 	_position_contract_panel()
+
+
+## The tallest the plate may stand, given the most the column allows
+## (`absolute`: STOCK down to one row), where it would rather stop
+## (`wanted`: STOCK with its whole list) and its own chrome. It stops where it
+## would rather — but never short of its first WHOLE row, unless the
+## absolute line forbids it.
+func _contract_list_hard(absolute: float, wanted: float, own_chrome: float) -> float:
+	return minf(absolute, maxf(wanted, own_chrome + _whole_rows_height(_contract_cards_box, 0.0)))
 
 
 ## Top-right corner, inset by the column's one margin, sized to its content
@@ -19855,7 +19864,7 @@ func _update_money_flyout() -> void:
 		_contract_money_change.modulate = Color(1, 1, 1, 0)
 
 
-## Draws `_contract_wages_state` onto the clipboard's wages line. The staff
+## Draws `_contract_wages_state` onto the plate's wages line. The staff
 ## snapshot it reads is polled on its own cadence whether or not the H panel
 ## is open (see `_poll_staff`), so this costs no extra trip across the wire;
 ## the line simply hides itself while there is nothing honest to show.
@@ -19866,7 +19875,7 @@ func _update_contract_wages(money: float) -> void:
 	_contract_wages_label.visible = not state.is_empty()
 	if state.is_empty():
 		return
-	_contract_wages_label.text = String(state["text"])
+	_contract_wages_label.text = String(state["text"]).replace(" — ", " —\n")
 	_contract_wages_settings.font_color = (
 		METER_FILL_WARN if bool(state["short"]) else STOCK_NONE_COLOR
 	)
@@ -19899,13 +19908,6 @@ func _update_staff_alert() -> void:
 		# categories and how many, and the heading has one line.
 		_crew_hint.text = "▲ SHORT-STAFFED  ·  H"
 		_crew_plate_style.border_color = METER_FILL_WARN
-	# Issue #13 made the board hint yield to the SHORT-STAFFED strip, because
-	# the clipboard had room for one line of advice and hiring beat signing.
-	# The strip is on the CREW plate now and the two are no longer competing
-	# for the same pixels. The hint's line is still the clipboard's to spend,
-	# but there is exactly ONE place that decides whether it is spent —
-	# `_update_contract_panel`, which is the only thing that knows what the
-	# docket stack got — so this no longer touches it.
 	if _staff_alert_known_short < 0:
 		_staff_alert_known_short = short
 		return

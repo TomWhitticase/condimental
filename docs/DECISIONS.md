@@ -59,7 +59,14 @@ matches what code comments and data files cite.
   **A fitting rule that changed with it.** `_line_boundary_height` used to
   prefer a line inside the row the cut fell in. With many short rows that
   cut through the second row when the first had fit whole. It now returns
-  the last whole row above the cut when there is one.
+  the last whole row above the cut when there is one. And the list's floor
+  (`_contract_list_hard`) is its first WHOLE row, not its first line: a row's
+  second line is its status, and the review's 1280x720 full-docks render
+  showed an order's name with its state cut off — the one thing the plate is
+  for. Every line on the plate is one line by construction (the wages
+  warning breaks at its own dash; no autowrap), so the plate's measured
+  height is its drawn height, and none is wider than the column — both
+  pinned by font measurement in `test_contract_panel.gd`.
 - 2026-10-02: **Mustard is yellow and white, not yellow and black.**
   (Owner, verbatim: "Mustard should be yellow and white not yellow and
   black".)

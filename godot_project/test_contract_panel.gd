@@ -164,8 +164,11 @@ func _initialize() -> void:
 	if risky["level"] != "risk" or not String(risky["status_text"]).begins_with("⚠"):
 		_fail("an at-risk row carries the warning glyph, got %s" % str(risky))
 		return
-	if not risky["due"] and risky["fraction"] <= main.CONTRACT_DUE_FRACTION:
-		_fail("a row this close to its check should read as due")
+	if risky["due"]:
+		_fail("a fifth of the window left is not yet due, got %s" % str(risky))
+		return
+	if not main._contract_row_state(base, 950)["due"]:
+		_fail("a twentieth of the window left should read as due")
 		return
 	var last := base.duplicate()
 	last["consecutive_misses"] = 2
@@ -244,6 +247,75 @@ func _initialize() -> void:
 		return
 	if main._contract_money_change.label_settings != main._contract_spend_settings:
 		_fail("a debit must be inked as a debit, not as a payout")
+		return
+
+	# --- Every line on the plate fits the column, on one line ------------
+	# Measured off the FONT, not the Label (godot_project/CLAUDE.md: a
+	# headless run cannot prove a width): a line wider than the plate either
+	# widens it past STOCK and CREW or, wrapped, draws taller than the plate
+	# was fitted at and pushes a row's status under the list's cut — both
+	# found on PR #235's 1280x720 renders.
+	var short_staffed := {
+		"categories": [{"id": "manufacturing", "wage": 2, "headcount": 8, "owed": 8}],
+		"next_payday_tick": 1700 + 120, "next_bill": 16, "shortfall": 6,
+	}
+	var wage_state: Dictionary = main._contract_wages_state(short_staffed, 1700, 10.0)
+	var wage_lines: String = String(wage_state.get("text", "")).replace(" — ", " —\n")
+	if wage_lines.find("\n") < 0:
+		_fail("the wage warning should break at its dash for the plate, got '%s'" % wage_lines)
+		return
+	var lines_to_fit: Array = [
+		[main._contract_empty_label, main._contract_empty_label.text],
+		[main._contract_dock_full_label, main._contract_dock_full_label.text],
+	]
+	for line in wage_lines.split("\n"):
+		lines_to_fit.append([main._contract_wages_label, line])
+	for pair in lines_to_fit:
+		var label: Label = pair[0]
+		var text: String = pair[1]
+		var font: Font = label.label_settings.font if label.label_settings.font != null else label.get_theme_font("font")
+		var width: float = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, label.label_settings.font_size).x
+		if width > main.CONTRACT_PLATE_TEXT_WIDTH:
+			_fail("'%s' is %.0fpx, wider than the plate's %.0fpx inside" % [text, width, main.CONTRACT_PLATE_TEXT_WIDTH])
+			return
+		if label.autowrap_mode != TextServer.AUTOWRAP_OFF:
+			_fail("'%s' autowraps — the plate is fitted by its minimum height, which a wrapping Label misreports" % label.name)
+			return
+
+	# --- A capped list is cut after a whole row, not inside the next ------
+	# `_line_boundary_height` used to prefer a line INSIDE the row the cut
+	# fell in, so with the first row whole and the second's top line fitting
+	# it cut the second row in half. Built against the real rows.
+	main._rebuild_contract_cards(contracts)
+	for i in range(contracts.size()):
+		main._update_contract_row(main._contract_cards[i], contracts[i], main.sim.current_tick())
+	var list_box: VBoxContainer = main._contract_cards_box
+	var first_row: float = (list_box.get_child(0) as Control).get_combined_minimum_size().y
+	var gap: float = float(list_box.get_theme_constant("separation"))
+	var second_first_line: float = main._row_line_boundary(list_box.get_child(1) as Control, INF, true)
+	if first_row <= 0.0 or second_first_line <= 0.0:
+		_fail("the rows report no height headlessly (%.0f, %.0f) — this check proves nothing" % [first_row, second_first_line])
+		return
+	var cap: float = first_row + gap + second_first_line + 1.0
+	var cut: float = main._line_boundary_height(list_box, cap)
+	if absf(cut - first_row) > 0.5:
+		_fail("a cap with the first row whole and only the second's top line under it should cut after the first row (%.0f), cut at %.0f" % [first_row, cut])
+		return
+
+	# --- The list's floor is its first WHOLE row --------------------------
+	# A row's second line is the order's status. Floored at one line, a tight
+	# column (1280x720 with the docks full) showed an order's name and hid
+	# whether it was in trouble (PR #235's review). The absolute line — STOCK
+	# down to one row — still wins over the floor.
+	var floor_hard: float = main._contract_list_hard(INF, 0.0, 0.0)
+	if absf(floor_hard - first_row) > 0.5:
+		_fail("with the column wanting the plate short, it should still stand its first whole row (%.0f), got %.0f" % [first_row, floor_hard])
+		return
+	if main._contract_list_hard(10.0, 0.0, 0.0) != 10.0:
+		_fail("the absolute line must still cap the plate below its floor")
+		return
+	if main._contract_list_hard(INF, first_row * 3.0, 0.0) != first_row * 3.0:
+		_fail("where the column allows more, the plate takes it")
 		return
 
 	# --- The single-contract case still renders --------------------------

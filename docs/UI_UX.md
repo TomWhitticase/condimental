@@ -446,7 +446,10 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   It is a dark plate like STOCK and CREW under it, at their width and on
   their right edge, with a payout-green rule and heading. The heading line
   carries the balance — shown once, the plate's largest figure, with what
-  just changed it flashed beside it. Then one row per signed contract, in
+  just changed it flashed beside it. It is a bare figure, not `Money: N` as
+  the modals print it: on a plate one column wide the word costs the room the
+  flyout needs, and the one large number under a money-green rule is not
+  mistaken for anything else. Then one row per signed contract, in
   priority order, two short lines: the first product's icon, the name
   (trimmed, never wrapped) and the time left in seconds; then the countdown
   bar draining to the next check, with the status at its end — the tally
@@ -1119,8 +1122,13 @@ photographs of one command (issue #82).
 
 > Since 2026-10-02 "the clipboard" below is the **CONTRACTS plate** (§5): the
 > same top-right tenant, now a dark plate at the column's width whose list
-> scrolls between compact rows rather than between paper dockets. The fitting
-> rules below are unchanged; only what a "row" is changed.
+> scrolls between compact rows rather than between paper dockets. Two of the
+> rules below changed with it, and each says so where it is stated: the board
+> hint is gone, and when the column cuts the list short the cut ends after the
+> last WHOLE row above it, falling back to a line inside a row only when not
+> even the first row fits (`_line_boundary_height`); and the list's floor is
+> its first whole row, not its first line, because a row's second line is the
+> order's status (`_contract_list_hard`).
 
 Three plates are drawn over the game and never asked for: the legend
 top-left, the contracts clipboard top-right, and — since 2026-09-16 — the
@@ -1175,6 +1183,10 @@ unchanged — the clamp still wins, and the cut still goes down, never up.
 It is the third rank that got sharper: "a list showing less than it could"
 now means a docket showing fewer of its own lines, not a docket sliced
 through one.
+**Amended 2026-10-02:** with many short rows, preferring a line inside the
+row the cut falls in sliced the second row while the first fit whole, so the
+cut now ends after the last whole row and looks inside a row only when not
+one row fits (`test_contract_panel.gd` pins it).
 
 **Three tenants in one column, and the tie goes to what cannot be reached**
 (2026-09-21, the warehouse work). The CREW plate made this column three
@@ -1217,6 +1229,8 @@ least useful sentence on a clipboard whose every order is signed. Issue #13
 made the same trade against the SHORT-STAFFED strip; the difference now is
 that there is exactly ONE owner of the hint's visibility, so
 `_update_staff_alert` no longer touches it.
+**Superseded 2026-10-02:** the contracts plate has no board hint; the list's
+floor is its first row's first line, which `_update_contract_panel` keeps.
 
 **The legend folds, and folding is not a modal.** Its plate gains a heading
 row — `CONTROLS` and a button naming its key — and folds to that stub, so

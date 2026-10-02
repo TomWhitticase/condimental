@@ -938,14 +938,19 @@ func _check_docket_case(strip: bool, window: Vector2i) -> bool:
 			"up" if strip else "down", str(window), main._crew_hint.text
 		])
 		return false
-	# The plate always shows at least one whole line of its first row: a
-	# list cut above that has lost the cue that there is anything in it
-	# (issue #17).
+	# The plate shows its first WHOLE row wherever the column has room for it
+	# above STOCK's one-row floor: a row's second line is the order's status,
+	# and a first line alone hides whether the order is in trouble (PR #235's
+	# review). Where even that room is short, one whole line is the least.
 	var first_line: float = main._first_line_boundary(main._contract_cards_box)
+	var first_row: float = main._whole_rows_height(main._contract_cards_box, 0.0)
 	var bought: float = main._contract_cards_scroll.custom_minimum_size.y
-	if bought < first_line - 0.5:
-		_fail("at %s the contracts list shows no whole line of its first row (%.0f < %.0f)" % [
-			where, bought, first_line
+	var chrome: float = main._contract_panel.get_combined_minimum_size().y - bought
+	var room: float = main._stock_ceiling_y() - main._contract_panel.get_global_rect().position.y - chrome
+	var owed: float = maxf(first_line, minf(first_row, room))
+	if bought < owed - 0.5:
+		_fail("at %s the contracts list shows %.0fpx of its first row where the column has room for %.0f (row %.0f, line %.0f)" % [
+			where, bought, owed, first_row, first_line
 		])
 		return false
 
