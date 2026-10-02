@@ -296,8 +296,16 @@
         // vat making 8 small units instead, this bottler sips them one at a
         // time and the BBQ mixer, which needs 8 at once off the same run,
         // never starts at all. Upstream of this line nothing moved, so the
-        // bill per case, every contract, both gates and the 3:2 splits are
-        // untouched.
+        // bill per case, every contract, both gates' thresholds and the 3:2
+        // splits are untouched. The mustard gate does still open sooner
+        // (tick 131 000, was 155 000; `data/unlocks.ron` has the measurement).
+        // Measured one bottler at a time in #225's review, the whole shift is
+        // the BBQ bottler's, and only with both of its changes: 8 bottles and
+        // a 200-tick fill. Either one alone on that bottler leaves 155 000,
+        // and putting THIS ketchup bottler back to 1 bottle in 60 ticks
+        // leaves 131 000. (Giving this one 8 bottles in 60 ticks slows the
+        // gate to 141 000, which is that shape's own cost, not a share of the
+        // shift.) Why the BBQ pair speeds it up is not instrumented.
         //
         // **THE BELT INTO THE PACKER IS NOW THE LIMIT, BY CHOICE.** A lane
         // carries 40 items per 1 000 ticks, so 5 cases: one bottling line

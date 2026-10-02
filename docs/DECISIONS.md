@@ -186,12 +186,17 @@ matches what code comments and data files cite.
   on main's data and then on this change: the BBQ gate is still tick 52 000,
   and the mustard gate moves from **155 000 to 131 000** (~86 to ~73 minutes).
   BBQ sells about 1.4 cases per 1 000 ticks after the hand-off, up from about
-  1.0. The likely reason is that the 60-tick ketchup bottler had been winning
-  the shared run's ketchup ahead of the BBQ mixer more often than the 3:2
-  design intends, and a bottler busy 200 ticks per fill no longer does. The
-  split test's ±0.1 band around 1.5 passes both before and after. The cause
-  is inferred, not instrumented. GAMEPLAY.md §2, `data/unlocks.ron`,
-  `measure_gate_ticks.gd` and `test_layouts.gd` carry the new figure.
+  1.0. This record first blamed the 60-tick ketchup bottler for winning the
+  shared ketchup ahead of the BBQ mixer, and that was wrong. PR #225's second
+  review measured one bottler at a time: the ketchup bottler at its old 1
+  bottle in 60 ticks still gives 131 000, while the BBQ bottler at its old
+  shape gives 155 000. The BBQ bottler at 8 bottles in 60 ticks, or at 1
+  bottle in 200 ticks, also gives 155 000. So the whole shift is the BBQ
+  bottler's, and it needs both changes together. The mechanism is not
+  instrumented. The split test's ±0.1 band around 1.5 passes both before
+  and after. GAMEPLAY.md §2, `data/unlocks.ron`, `measure_gate_ticks.gd`,
+  `test_layouts.gd` and `sim_core/tests/unlocks.rs` carry the new figure
+  (the last one was missed in #219 and corrected in #225).
 
   **Tests.** Three test files each had their own `raw_content`, which assumed
   one output per craft; with 8 bottles from one craft, the mass-conservation

@@ -276,9 +276,11 @@
         // 0.67, roadhouse_group 4/4 000 = 1.00, bbq_festival 10/5 000 = 2.00)
         // and the branch put about 1.4 of them into paid windows (92 boxes in
         // the 64 000 ticks measured; it was 1.0 and 88 000 ticks while a case
-        // was one bottle, when the 60-tick ketchup bottler took the vat's
-        // output before the BBQ mixer could), so it is the branch's throughput against the cadences
-        // the orders keep, not a shortage of demand. Whoever wants
+        // was one bottle, and the whole of that change follows the BBQ
+        // bottler's 8-bottle, 200-tick shape, measured in PR #225's review —
+        // see the note on `bottled_ketchup` in `data/recipes.ron`), so it is
+        // the branch's throughput against the cadences the orders keep, not
+        // a shortage of demand. Whoever wants
         // mustard sooner has three content-side levers and no Rust to write:
         // a smaller `boxes` here, more BBQ demand in `data/contracts.ron`, or
         // a faster BBQ recipe.

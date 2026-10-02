@@ -317,9 +317,10 @@ packer carries about 5 cases per 1 000 ticks, so one bottling line keeps up
 with about 1.2 vats. A factory with more vats needs more bottlers, packers
 and belts, and an existing save with several vats on one bottler ships less
 until it adds them. The bottler takes 200 ticks per fill, matched to how fast a belt can
-carry 8 bottles away. One measured side effect: once the BBQ branch is
-built it gets closer to its designed share of the ketchup, and the mustard
-unlock comes about 13 minutes sooner (tick 131 000, down from 155 000).
+carry 8 bottles away. One measured side effect: the mustard unlock comes
+about 13 minutes sooner (tick 131 000, down from 155 000). All of that
+comes from the BBQ bottler's new shape (PR #225 measured it one bottler at
+a time); why is not yet instrumented.
 
 ### 2026-10-02 — The fluid poll stops making a material per network per frame
 
