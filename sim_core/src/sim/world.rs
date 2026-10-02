@@ -1173,7 +1173,11 @@ pub struct MachineSnapshot {
     pub kind: String,
     pub direction: Direction,
     pub footprint: Footprint,
-    pub recipe: RecipeId,
+    /// What it is making, or `null` while it is **undecided** — placed but
+    /// not yet handed anything that names a sauce (`Machine::choose`'s rule
+    /// 4). Godot draws an undecided machine as handling any sauce: neutral
+    /// tint, no sauce named.
+    pub recipe: Option<RecipeId>,
     /// (start_tick, required_ticks) — Godot derives progress from this plus
     /// the current tick count rather than needing a snapshot every tick.
     pub process: Option<(u64, u64)>,
@@ -1247,7 +1251,19 @@ impl MachineLoadSnapshot {
 /// {"kind": "staff",          "item": "manufacturing"} // refused its crew; item = category id
 /// {"kind": "unnameable_pipe","item": "liquid_smoke"} // a run is here, nothing can name it
 /// {"kind": "ambiguous_pipe", "item": "liquid_smoke"} // a run is here, it could be several fluids
+/// {"kind": "undecided",      "item": ""}         // nothing fed yet names a sauce
 /// ```
+///
+/// `undecided` (2026-10-02) is a machine that has not been handed anything
+/// that picks one of its kind's recipes ([`MachineSnapshot::recipe`] is
+/// `null`). It used to report the first recipe's first input — a fresh
+/// mixer was "waiting for Tomato Paste" — which named ketchup about a
+/// machine that could make any sauce. `item` is empty: no one ingredient is
+/// the missing one. An undecided machine still reports two pipe-side kinds,
+/// also with an EMPTY `item`: a faulted draw run, and `no_supply_pipe` when
+/// it has no draw pipe at all and every recipe of its kind drinks a fluid
+/// (today the mixer, the vat and the bottler — a lone one could never be
+/// fed, so it names the fix).
 ///
 /// The last two are issue #54's, and they replace a *wrong* answer rather
 /// than filling a silence: a machine on a run the naming pass could not
@@ -1272,7 +1288,7 @@ pub struct Stall {
     pub item: String,
 }
 
-/// The ten ways a machine can be waiting — see [`Stall`]. Serialized in
+/// The eleven ways a machine can be waiting — see [`Stall`]. Serialized in
 /// `snake_case`, exactly as listed there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -1301,6 +1317,9 @@ pub enum StallKind {
     /// meaningful supply state and "waiting for Tomato" about one is a lie
     /// the player then has to debug.
     Mothballed,
+    /// Nothing it has been fed picks a recipe yet — see [`Stall`]. `item`
+    /// is empty.
+    Undecided,
 }
 
 /// One entry of [`World::machine_load_snapshots`]: the machine's origin
@@ -1711,7 +1730,8 @@ pub struct StorageSnapshot {
 pub struct FluidTapSnapshot {
     /// Origin tile of the machine on this end of the network.
     pub machine_tile: TileCoord,
-    pub machine_recipe: RecipeId,
+    /// `null` for an undecided machine — see [`MachineSnapshot::recipe`].
+    pub machine_recipe: Option<RecipeId>,
     /// How much the recipe moves per craft — consumed for a tap in `taps`,
     /// deposited for one in `producers`.
     pub units_per_craft: u32,
@@ -1848,7 +1868,8 @@ pub enum TileSnapshot {
         direction: Direction,
         footprint: Footprint,
         origin_tile: TileCoord,
-        recipe: RecipeId,
+        /// `null` while undecided — see [`MachineSnapshot::recipe`].
+        recipe: Option<RecipeId>,
         process: Option<(u64, u64)>,
         load: MachineLoadSnapshot,
         mothballed: bool,
@@ -2205,6 +2226,10 @@ pub struct PlacementSnapshot {
     pub direction: Direction,
     pub footprint: Footprint,
     pub occupies: Vec<TileCoord>,
+    /// The recipe a machine is making — `null` for every placement that is
+    /// not a machine, **and for a machine that is still undecided** (see
+    /// [`MachineSnapshot::recipe`]). So `recipe != null` does not say "this
+    /// is a machine"; [`Self::machine`] does.
     pub recipe: Option<RecipeId>,
     /// Whether the hired headcount covers this placement's crew (issue
     /// #20) — see [`World::uncrewed_placements`] for the rule and why it is
@@ -2221,6 +2246,12 @@ pub struct PlacementSnapshot {
     /// the body is staged from this list.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub split_mode: Option<SplitMode>,
+    /// `true` on a recipe-running machine and **absent** on every other
+    /// kind, `split_mode`'s rule. It exists because `recipe` stopped being
+    /// the answer to "is this a machine": an undecided machine carries a
+    /// `null` recipe exactly like a belt (2026-10-02).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub machine: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub links: Option<Links>,
 }
@@ -3436,22 +3467,28 @@ impl World {
                 WarehouseRack::default(),
             )),
             machine_kind => {
-                // A freshly placed machine starts on its kind's first recipe
-                // in file order; from its first idle tick onwards it re-picks
-                // whichever one its inputs satisfy. See
-                // `RecipeRegistry::for_machine`.
-                let recipe = self
-                    .recipes
-                    .for_machine(machine_kind)
-                    .next()
-                    .expect("can_construct checked this kind has a recipe")
-                    .id
-                    .clone();
+                // A freshly placed machine is UNDECIDED when its kind has a
+                // choice to make: it names no sauce until its inputs pick
+                // one (`Machine::choose`'s rule 4). It used to start on the
+                // kind's first recipe in file order — ketchup's, at every
+                // stage — so every fresh line read as a ketchup line until
+                // something else was fed in (owner's request, 2026-10-02).
+                // A kind with exactly one recipe has nothing to decide and
+                // holds it from the start, so its stall readout can still
+                // name the raw it is waiting for.
+                let mut candidates = self.recipes.for_machine(machine_kind);
+                let only = candidates.next().map(|recipe| recipe.id.clone());
+                let recipe = only.filter(|_| candidates.next().is_none());
                 self.ecs.spawn((
                     position,
                     placement,
                     BodyKind::Machine,
-                    Machine::new(recipe, MACHINE_INPUT_CAPACITY, MACHINE_OUTPUT_CAPACITY),
+                    Machine::new(
+                        machine_kind,
+                        recipe,
+                        MACHINE_INPUT_CAPACITY,
+                        MACHINE_OUTPUT_CAPACITY,
+                    ),
                 ))
             }
         };
@@ -6108,12 +6145,10 @@ impl World {
             .map(|&entity| {
                 let placement = self.placement_of(entity);
                 let origin = self.position_of(entity);
+                let machine = self.ecs.get::<&Machine>(entity).ok();
                 PlacementSnapshot {
-                    recipe: self
-                        .ecs
-                        .get::<&Machine>(entity)
-                        .ok()
-                        .map(|machine| machine.recipe.clone()),
+                    machine: machine.is_some(),
+                    recipe: machine.and_then(|machine| machine.recipe.clone()),
                     split_mode: self.ecs.get::<&Splitter>(entity).ok().map(|s| s.mode()),
                     links: self.topology.links.get(&entity).cloned(),
                     occupies: placement.tiles(origin),
@@ -6269,9 +6304,10 @@ impl World {
                 // a run the current recipe has no use for — the machine is
                 // plumbed into it but is not drawing from it this craft.
                 let fluid = self.topology.networks[index].fluid.as_deref();
-                let units_per_craft = self
-                    .recipes
-                    .get(&body.recipe)
+                let units_per_craft = body
+                    .recipe
+                    .as_ref()
+                    .and_then(|id| self.recipes.get(id))
                     .and_then(|r| {
                         let side = if producing {
                             &r.fluid_outputs
@@ -6455,7 +6491,6 @@ impl World {
     /// The input/output half of [`Self::machine_stall`]: the six kinds that
     /// predate staff, in their original precedence.
     fn machine_supply_stall(&self, machine: Entity, body: &Machine) -> Option<Stall> {
-        let recipe = self.recipes.get(&body.recipe)?;
         // Every tap on one side, in the order `tick` would be handed them.
         // Plural now: a recipe may draw several fluids, each from whichever
         // touching run carries it.
@@ -6465,6 +6500,43 @@ impl World {
                 .map(|&(_, network, segment)| (network, segment))
                 .collect()
         };
+        // An undecided machine is waiting for SOMETHING to be fed in, but
+        // has no recipe to name a missing ingredient from. What it can still
+        // say, in this order:
+        //
+        // 1. A faulted run on its draw side (issue #54's rule: a run the sim
+        //    cannot make sense of says so) — it is why nothing has arrived.
+        // 2. No draw pipe at all, on a kind every one of whose recipes
+        //    drinks a fluid: it can never be fed, so it says the fix — "no
+        //    supply pipe" — with no fluid named, since none is chosen yet.
+        // 3. Otherwise `undecided`: waiting for ingredients, naming none.
+        //
+        // Deliberately NOT "waiting for <the run's fluid>" off a run that is
+        // named but still empty: on a correctly plumbed line that has not
+        // filled yet that would put "Ketchup Mix" back on every fresh vat,
+        // which is the readout the owner asked to be rid of (2026-10-02).
+        let Some(held) = body.recipe.as_ref() else {
+            let taps = taps_of(&self.topology.machine_taps);
+            let fault = taps
+                .iter()
+                .map(|&(network, _)| self.topology.networks[network].naming())
+                .find(|naming| naming.is_fault());
+            let needs_a_pipe = self
+                .recipes
+                .for_machine(&body.kind)
+                .all(|r| !r.fluid_inputs.is_empty());
+            let kind = match fault {
+                Some(PipeNaming::Ambiguous) => StallKind::AmbiguousPipe,
+                Some(_) => StallKind::UnnameablePipe,
+                None if taps.is_empty() && needs_a_pipe => StallKind::NoSupplyPipe,
+                None => StallKind::Undecided,
+            };
+            return Some(Stall {
+                kind,
+                item: String::new(),
+            });
+        };
+        let recipe = self.recipes.get(held)?;
         let stall = |kind: StallKind, item: &str| {
             Some(Stall {
                 kind,

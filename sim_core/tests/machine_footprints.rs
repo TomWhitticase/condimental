@@ -54,7 +54,9 @@ fn the_network(world: &World) -> Option<FluidSnapshot> {
 /// just if they are in the wrong place.
 #[derive(Debug, Clone)]
 struct StageView {
-    recipe: String,
+    /// `None` on a line nothing has been fed into yet — every machine of a
+    /// kind with several recipes starts undecided.
+    recipe: Option<String>,
     machine_kind: String,
     machine_tile: (i32, i32),
     machine_footprint: Footprint,
@@ -66,7 +68,7 @@ fn stages(world: &World) -> Vec<StageView> {
     let layout = world.world_layout();
     let mut stages: Vec<StageView> = layout
         .iter()
-        .filter(|p| p.recipe.is_some())
+        .filter(|p| p.machine)
         .map(|p| {
             let mut belt_length_tiles = 0;
             while matches!(
@@ -76,7 +78,7 @@ fn stages(world: &World) -> Vec<StageView> {
                 belt_length_tiles += 1;
             }
             StageView {
-                recipe: p.recipe.clone().unwrap(),
+                recipe: p.recipe.clone(),
                 machine_kind: p.kind.clone(),
                 machine_tile: p.tile,
                 machine_footprint: p.footprint,
@@ -220,7 +222,6 @@ fn the_shipped_chains_tile_layout_is_what_the_footprint_rule_says() {
         let (recipe, kind, belt_start, belt_len, machine_tile, footprint) = expected;
         assert_eq!(
             (
-                stage.recipe.as_str(),
                 stage.machine_kind.as_str(),
                 stage.belt_start_tile,
                 stage.belt_length_tiles,
@@ -230,9 +231,8 @@ fn the_shipped_chains_tile_layout_is_what_the_footprint_rule_says() {
                     stage.machine_footprint.height_tiles
                 ),
             ),
-            (recipe, kind, belt_start, belt_len, machine_tile, footprint),
-            "stage '{}' is not where the footprint rule puts it",
-            stage.recipe
+            (kind, belt_start, belt_len, machine_tile, footprint),
+            "stage '{recipe}' is not where the footprint rule puts it"
         );
     }
 }
@@ -306,7 +306,7 @@ fn every_tile_of_the_shipped_cooking_vat_resolves_to_the_cooking_vat() {
             }) => {
                 assert_eq!(machine_kind, "cooking_vat", "at {tile:?}");
                 assert_eq!(origin_tile, origin, "at {tile:?}");
-                assert_eq!(recipe, "ketchup", "at {tile:?}");
+                assert_eq!(*recipe, None, "never fed, so undecided — at {tile:?}");
                 assert_eq!(
                     (footprint.width_tiles, footprint.height_tiles),
                     (2, 2),
@@ -342,7 +342,12 @@ fn every_shipped_stage_reports_the_machine_kind_its_recipe_names() {
     let recipes = shipped_recipes();
     let world = reference_chain(shipped_recipes());
     for (stage, recipe) in stages(&world).iter().zip(recipes.ordered()) {
-        assert_eq!(stage.recipe, recipe.id);
+        // Built and never fed, so no machine has been told its sauce yet.
+        assert_eq!(
+            stage.recipe, None,
+            "{} at {:?}",
+            recipe.id, stage.machine_tile
+        );
         assert_eq!(stage.machine_kind, recipe.machine);
     }
 }
@@ -361,7 +366,10 @@ fn the_shipped_pipe_run_feeds_the_mixer() {
     let tap = fluid.taps.first().expect("a machine taps the run");
     assert_eq!(tap.machine_tile, (9, 0));
     assert_eq!(tap.segment_index, 3);
-    assert_eq!(tap.machine_recipe, "ketchup_mix");
+    assert_eq!(
+        tap.machine_recipe, None,
+        "never fed, so the mixer is undecided"
+    );
 
     // ...and the machine at that tile really is the mixer, not some other
     // stage that merely shares the coordinate.
@@ -429,7 +437,7 @@ fn query_tile_resolves_a_machine_from_every_tile_of_its_footprint() {
             }) => {
                 assert_eq!(machine_kind, "crusher", "at {tile:?}");
                 assert_eq!(origin_tile, origin, "at {tile:?}");
-                assert_eq!(recipe, "item2", "at {tile:?}");
+                assert_eq!(recipe.as_deref(), Some("item2"), "at {tile:?}");
                 assert_eq!(
                     (footprint.width_tiles, footprint.height_tiles),
                     (3, 2),

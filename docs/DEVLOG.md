@@ -259,6 +259,23 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-02 — An unfed machine is any sauce's, not ketchup's
+
+The owner: every fresh machine said ketchup and was painted ketchup until
+another sauce's ingredients arrived. The cause was in the sim, not the
+renderer: a kind with several recipes was placed on the first one
+`recipes.ron` lists for it — ketchup's at every stage — and an empty
+machine's zero-for-everything tie kept it there. A machine is now
+*undecided* (`recipe: null`) until something it is handed picks a recipe,
+and any amount counts, so one tomato makes a tomato crusher. Godot titles an
+undecided machine "Mixer · any sauce", says "waiting for ingredients" (or
+plain "no supply pipe" when it has no pipe and every recipe of its kind
+needs a fluid — today the mixer, vat and bottler — since it could never be
+fed), and leaves its product mesh on the neutral pale. The layout gained a
+`machine` flag, because a null recipe no longer means "not a machine". No save format
+change; an old save caught mid-craft finishes on the recipe it was really
+running. Rule in `DECISIONS_LOG.md`.
+
 ### 2026-10-02 — Hold CTRL in first person to click the hotbar
 
 The owner asked for a way to use the mouse on the HUD without leaving first

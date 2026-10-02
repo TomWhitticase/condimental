@@ -147,12 +147,15 @@ func _run_checks() -> void:
 		_fail("tile %s should resolve to the crusher, got %s" % [str(resolved_tile), str(placement)])
 		return
 
-	# The tooltip names the recipe the way every other panel in the game names
-	# an item — "Tomato Paste", not the wire format's `tomato_paste` — since
-	# the UI visualisation pass (docs/UI_UX.md §5).
+	# Nothing has been fed to the demo line's crusher, so it is UNDECIDED and
+	# the tooltip names its kind and "any sauce" rather than a recipe it has
+	# not been given (2026-10-02 — it used to read "Tomato Paste", the first
+	# crusher recipe in the file). Once fed, the recipe's display name leads,
+	# which `test_undecided_machines.gd` checks.
 	var hover_text: String = main._hover_text_at_tile(resolved_tile)
-	if hover_text == "" or not hover_text.begins_with("Tomato Paste"):
-		_fail("hover text over the crusher should start with its recipe's display name, got: %s" % hover_text)
+	var undecided_title := "%s  ·  %s" % [main._kind_display_name("crusher"), main.MACHINE_UNDECIDED_TEXT]
+	if hover_text == "" or not hover_text.begins_with(undecided_title):
+		_fail("hover text over the unfed crusher should start with '%s', got: %s" % [undecided_title, hover_text])
 		return
 	# Which way it faces is a fact only placement created, and one the player
 	# can change — so the tooltip has to carry it.

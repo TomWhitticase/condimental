@@ -233,8 +233,19 @@ impl TimedProcess {
 
 #[derive(Debug)]
 pub struct Machine {
+    /// The machine kind (`machines.ron` id) this body was placed as — what
+    /// [`Machine::choose`] asks [`RecipeRegistry::for_machine`] about. It
+    /// used to be read off the held recipe (`recipe.machine`), which was
+    /// only possible because a machine always held one; an undecided
+    /// machine holds none, so the kind is carried on its own. Never
+    /// changes: a placement's kind is fixed for its life.
+    pub kind: String,
     /// The recipe this machine is running, or — when it is idle — the one
-    /// it would run next.
+    /// it would run next. **`None` until its inputs pick one**: a freshly
+    /// placed machine of a kind with several recipes has not been told
+    /// which sauce it is making yet, and says so rather than naming the
+    /// first in `recipes.ron` (the owner's 2026-10-02 ruling — every fresh
+    /// mixer, vat, bottler and packer used to read as a ketchup machine).
     ///
     /// A machine's *kind* used to name exactly one recipe, so this was
     /// content wearing a field's clothes: `world.rs` looked it up once at
@@ -246,7 +257,7 @@ pub struct Machine {
     /// the length of a craft** — a batch that started as BBQ finishes as
     /// BBQ even if its inputs are gone, which is exactly why it is now
     /// saved (`save.rs`'s `SavedMachine::recipe`).
-    pub recipe: RecipeId,
+    pub recipe: Option<RecipeId>,
     pub input: Inventory,
     pub output: Inventory,
     pub process: Option<TimedProcess>,
@@ -287,8 +298,16 @@ pub struct Machine {
 }
 
 impl Machine {
-    pub fn new(recipe: RecipeId, input_capacity: u32, output_capacity: u32) -> Self {
+    /// A machine of `kind` holding `recipe` — `None` for an undecided one,
+    /// which is what `World` places for any kind with more than one recipe.
+    pub fn new(
+        kind: impl Into<String>,
+        recipe: Option<RecipeId>,
+        input_capacity: u32,
+        output_capacity: u32,
+    ) -> Self {
         Self {
+            kind: kind.into(),
             recipe,
             input: Inventory::new(input_capacity),
             output: Inventory::new(output_capacity),
@@ -420,29 +439,32 @@ impl Machine {
             self.load.record(WorkState::Starved);
             return changed;
         }
-        let Some(running) = recipes.get(&self.recipe) else {
-            // A machine with no recipe can never start, which is a
-            // permanent starve; `World` refuses to place one, so this is
-            // for completeness of the "exactly one state per tick" rule.
-            self.load.record(WorkState::Starved);
-            return false;
-        };
         // An in-flight craft owns the recipe for its whole length; only an
         // idle machine re-reads its inputs to pick one (see this method's
         // doc). `satisfied` is the same question `Plan::Start` needs asked,
         // asked once.
-        let (recipe, satisfied) = match self.process {
-            Some(_) => (running, false),
-            None => {
-                let (chosen, satisfied) = self
-                    .choose(recipes, &running.machine, &fluid_in)
-                    .unwrap_or((running, false));
-                if chosen.id != self.recipe {
-                    self.recipe = chosen.id.clone();
+        let held = self.recipe.as_ref().and_then(|id| recipes.get(id));
+        let picked = match (self.process, held) {
+            (Some(_), Some(running)) => Some((running, false)),
+            // A process with no recipe behind it cannot be finished; only a
+            // corrupt save could build one, and `save.rs` refuses it.
+            (Some(_), None) => None,
+            (None, _) => {
+                let chosen = self.choose(recipes, &self.kind, &fluid_in);
+                let chosen_id = chosen.map(|(recipe, _)| &recipe.id);
+                if chosen_id != self.recipe.as_ref() {
+                    self.recipe = chosen_id.cloned();
                     changed = true;
                 }
-                (chosen, satisfied)
+                chosen
             }
+        };
+        let Some((recipe, satisfied)) = picked else {
+            // Undecided — nothing it has been handed names a sauce yet — or
+            // a kind with no recipe at all, which `World` refuses to place.
+            // Either way there is nothing to start: a tick spent waiting.
+            self.load.record(WorkState::Starved);
+            return changed;
         };
         // Starved until something below says otherwise: a tick that starts
         // nothing and completes nothing is a tick spent waiting for input.
@@ -611,11 +633,22 @@ impl Machine {
     ///    `bottled_ketchup` — so it reported waiting for ketchup it had
     ///    never touched, and (since 2026-09-21, when a machine started
     ///    drawing the sauce its recipe names) stood a row of red bottles in
-    ///    a BBQ line. A machine that has never run holds its kind's first
-    ///    recipe and keeps on holding it, so a fresh factory is unchanged.
+    ///    a BBQ line.
+    /// 4. **Nothing met at all decides nothing.** When every candidate ties
+    ///    at zero the machine keeps what it holds — rule 3 — and a machine
+    ///    that has never been fed holds `None`, so it stays undecided rather
+    ///    than taking the first recipe in the file. That first recipe is
+    ///    ketchup's at every stage, which is how every fresh machine came to
+    ///    read as a ketchup machine (owner's request, 2026-10-02). One input
+    ///    met is enough to decide: a mixer that has been handed sugar or
+    ///    stands on a vinegar run is a ketchup mixer, and says what it is
+    ///    still waiting for. "Met" here is looser than rule 1's: any amount
+    ///    of an input counts ([`Machine::fed`]), so a crusher handed one
+    ///    tomato of the four a batch needs already knows it is crushing
+    ///    tomatoes.
     ///
-    /// `None` only for a kind no recipe names, which `World` refuses to
-    /// place.
+    /// `None` for an undecided machine with nothing met, and for a kind no
+    /// recipe names (which `World` refuses to place).
     fn choose<'r>(
         &self,
         recipes: &'r RecipeRegistry,
@@ -631,13 +664,28 @@ impl Machine {
             // Rule 3's tie-break: `met > best` alone leaves the earliest
             // candidate holding a tie, so the held recipe has to be able to
             // take it back off one that got there first.
-            if closest
-                .is_none_or(|(best, _)| met > best || (met == best && candidate.id == self.recipe))
-            {
+            let held = self.recipe.as_ref() == Some(&candidate.id);
+            if closest.is_none_or(|(best, _)| met > best || (met == best && held)) {
                 closest = Some((met, candidate));
             }
         }
-        closest.map(|(_, recipe)| (recipe, false))
+        match closest {
+            // Rule 4: a zero tie decides nothing by itself. The held recipe,
+            // if there is one, already won the tie above; an undecided
+            // machine has nothing to win it with, so it goes by what it has
+            // been HANDED, however little — or stays undecided.
+            Some((0, recipe)) if self.recipe.as_ref() != Some(&recipe.id) => {
+                let mut best: Option<(u32, &'r Recipe)> = None;
+                for candidate in recipes.for_machine(kind) {
+                    let fed = self.fed(candidate, fluid_in);
+                    if fed > best.map_or(0, |(most, _)| most) {
+                        best = Some((fed, candidate));
+                    }
+                }
+                best.map(|(_, recipe)| (recipe, false))
+            }
+            other => other.map(|(_, recipe)| (recipe, false)),
+        }
     }
 
     /// How many of `recipe`'s inputs this machine could satisfy this tick,
@@ -669,6 +717,24 @@ impl Machine {
         }
         let wanted = (recipe.inputs.len() + recipe.fluid_inputs.len()) as u32;
         (met, wanted)
+    }
+
+    /// How many of `recipe`'s inputs this machine holds ANY of — a solid
+    /// in the buffer, or a touching run with fluid of that id in it. The
+    /// undecided machine's question ([`Machine::choose`]'s rule 4): not
+    /// "can it start" but "has it been handed this recipe's ingredients".
+    fn fed(&self, recipe: &Recipe, fluid_in: &[FluidTap<'_>]) -> u32 {
+        let solids = recipe
+            .inputs
+            .iter()
+            .filter(|(item, _)| self.input.count(item) > 0)
+            .count();
+        let fluids = recipe
+            .fluid_inputs
+            .iter()
+            .filter(|(id, _)| fluid_in.iter().any(|tap| tap.can_supply(id, Fx::DELTA)))
+            .count();
+        (solids + fluids) as u32
     }
 
     /// The first tap in `fluid_in` not already `claimed` that carries
@@ -708,7 +774,7 @@ mod tests {
     fn stays_idle_without_enough_input() {
         let mut ledger = ProductionLedger::new();
         let recipes = registry();
-        let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
+        let mut machine = Machine::new("cooker", Some("tomato_sauce".into()), 10, 10);
         machine.input.add("tomato", 2);
         for tick in 0..20 {
             machine.tick(tick, &recipes, vec![], None, None, &mut ledger);
@@ -721,7 +787,7 @@ mod tests {
     fn runs_a_full_craft_cycle() {
         let mut ledger = ProductionLedger::new();
         let recipes = registry();
-        let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
+        let mut machine = Machine::new("cooker", Some("tomato_sauce".into()), 10, 10);
         machine.input.add("tomato", 4);
 
         machine.tick(0, &recipes, vec![], None, None, &mut ledger); // consumes input, starts process
@@ -746,7 +812,7 @@ mod tests {
     fn holds_finished_output_when_buffer_is_full() {
         let mut ledger = ProductionLedger::new();
         let recipes = registry();
-        let mut machine = Machine::new("tomato_sauce".into(), 10, 1);
+        let mut machine = Machine::new("cooker", Some("tomato_sauce".into()), 10, 1);
         machine.output.add("tomato_sauce", 1); // pre-fill the only slot
         machine.input.add("tomato", 4);
 
@@ -830,7 +896,7 @@ mod tests {
     fn never_crafts_with_plenty_of_solid_input_but_no_fluid() {
         let mut ledger = ProductionLedger::new();
         let recipes = fluid_registry();
-        let mut machine = Machine::new("ketchup".into(), 10, 10);
+        let mut machine = Machine::new("reducer", Some("ketchup".into()), 10, 10);
         machine.input.add("tomato_sauce", 10);
         let mut network = empty_network(); // unfilled tank: stays empty forever
 
@@ -862,7 +928,7 @@ mod tests {
     fn never_crafts_when_no_network_is_connected_at_all() {
         let mut ledger = ProductionLedger::new();
         let recipes = fluid_registry();
-        let mut machine = Machine::new("ketchup".into(), 10, 10);
+        let mut machine = Machine::new("reducer", Some("ketchup".into()), 10, 10);
         machine.input.add("tomato_sauce", 10);
 
         for tick in 0..500 {
@@ -877,7 +943,7 @@ mod tests {
     fn crafts_and_consumes_fluid_once_the_network_can_supply_it() {
         let mut ledger = ProductionLedger::new();
         let recipes = fluid_registry();
-        let mut machine = Machine::new("ketchup".into(), 10, 10);
+        let mut machine = Machine::new("reducer", Some("ketchup".into()), 10, 10);
         machine.input.add("tomato_sauce", 1);
         let (mut network, mut tank) = supplied_network();
         let before = network.segments()[1].volume;
@@ -957,7 +1023,7 @@ mod tests {
     fn deposits_its_fluid_output_into_the_outlet_network_on_completion() {
         let mut ledger = ProductionLedger::new();
         let recipes = producer_registry();
-        let mut machine = Machine::new("ketchup".into(), 10, 10);
+        let mut machine = Machine::new("cooking_vat", Some("ketchup".into()), 10, 10);
         let mut inflow = one_tile_network("ketchup_mix", 10, 4);
         let mut outflow = one_tile_network("ketchup", 10, 0);
 
@@ -1004,7 +1070,7 @@ mod tests {
     fn holds_a_finished_batch_when_the_outlet_pipe_is_full() {
         let mut ledger = ProductionLedger::new();
         let recipes = producer_registry();
-        let mut machine = Machine::new("ketchup".into(), 10, 10);
+        let mut machine = Machine::new("cooking_vat", Some("ketchup".into()), 10, 10);
         let mut inflow = one_tile_network("ketchup_mix", 10, 4);
         let mut outflow = one_tile_network("ketchup", 10, 10); // brim full
 
@@ -1046,7 +1112,7 @@ mod tests {
     fn never_completes_a_fluid_producing_craft_with_no_outlet_network_at_all() {
         let mut ledger = ProductionLedger::new();
         let recipes = producer_registry();
-        let mut machine = Machine::new("ketchup".into(), 10, 10);
+        let mut machine = Machine::new("cooking_vat", Some("ketchup".into()), 10, 10);
         let mut inflow = one_tile_network("ketchup_mix", 10, 10);
 
         for tick in 0..500 {
@@ -1074,7 +1140,7 @@ mod tests {
     fn refuses_to_deposit_into_a_network_carrying_the_wrong_fluid() {
         let mut ledger = ProductionLedger::new();
         let recipes = producer_registry();
-        let mut machine = Machine::new("ketchup".into(), 10, 10);
+        let mut machine = Machine::new("cooking_vat", Some("ketchup".into()), 10, 10);
         let mut inflow = one_tile_network("ketchup_mix", 10, 10);
         let mut outflow = one_tile_network("water", 10, 0);
 
@@ -1096,7 +1162,7 @@ mod tests {
     fn refuses_a_network_carrying_the_wrong_fluid() {
         let mut ledger = ProductionLedger::new();
         let recipes = fluid_registry();
-        let mut machine = Machine::new("ketchup".into(), 10, 10);
+        let mut machine = Machine::new("reducer", Some("ketchup".into()), 10, 10);
         machine.input.add("tomato_sauce", 10);
         let (mut network, mut tank) = supplied_network();
         network.fluid = Some("water".to_string());
@@ -1215,7 +1281,7 @@ mod tests {
     fn a_continuously_fed_and_drained_machine_reads_exactly_full_load() {
         let mut ledger = ProductionLedger::new();
         let recipes = registry();
-        let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
+        let mut machine = Machine::new("cooker", Some("tomato_sauce".into()), 10, 10);
         for tick in 0..LOAD_WINDOW_TICKS as u64 * 2 {
             let short = 10 - machine.input.count("tomato").min(10);
             machine.input.add("tomato", short);
@@ -1237,7 +1303,7 @@ mod tests {
     fn a_machine_that_is_never_fed_reads_starved() {
         let mut ledger = ProductionLedger::new();
         let recipes = registry();
-        let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
+        let mut machine = Machine::new("cooker", Some("tomato_sauce".into()), 10, 10);
         for tick in 0..50 {
             machine.tick(tick, &recipes, vec![], None, None, &mut ledger);
         }
@@ -1251,7 +1317,7 @@ mod tests {
     fn a_machine_held_on_a_full_output_reads_blocked() {
         let mut ledger = ProductionLedger::new();
         let recipes = registry();
-        let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
+        let mut machine = Machine::new("cooker", Some("tomato_sauce".into()), 10, 10);
         for tick in 0..LOAD_WINDOW_TICKS as u64 * 2 {
             let short = 10 - machine.input.count("tomato").min(10);
             machine.input.add("tomato", short);
@@ -1276,7 +1342,7 @@ mod tests {
     fn a_machine_held_on_a_full_outlet_pipe_reads_blocked() {
         let mut ledger = ProductionLedger::new();
         let recipes = producer_registry();
-        let mut machine = Machine::new("ketchup".into(), 10, 10);
+        let mut machine = Machine::new("cooking_vat", Some("ketchup".into()), 10, 10);
         let mut inflow = one_tile_network("ketchup_mix", 10, 10);
         let mut outflow = one_tile_network("ketchup", 10, 10); // brim full
         for tick in 0..100 {
@@ -1299,7 +1365,7 @@ mod tests {
     fn a_craft_records_its_inputs_as_consumed_and_its_outputs_as_produced() {
         let recipes = registry();
         let mut ledger = ProductionLedger::new();
-        let mut machine = Machine::new("tomato_sauce".into(), 10, 10);
+        let mut machine = Machine::new("cooker", Some("tomato_sauce".into()), 10, 10);
         machine.input.add("tomato", 4);
 
         machine.tick(0, &recipes, vec![], None, None, &mut ledger);
@@ -1329,7 +1395,7 @@ mod tests {
     fn a_batch_held_on_a_full_output_is_recorded_only_when_it_lands() {
         let recipes = registry();
         let mut ledger = ProductionLedger::new();
-        let mut machine = Machine::new("tomato_sauce".into(), 10, 1);
+        let mut machine = Machine::new("cooker", Some("tomato_sauce".into()), 10, 1);
         machine.output.add("tomato_sauce", 1);
         machine.input.add("tomato", 4);
         for tick in 0..=20 {
@@ -1347,7 +1413,7 @@ mod tests {
         let recipes = fluid_registry();
         let mut ledger = ProductionLedger::new();
         let (mut network, _tank) = supplied_network();
-        let mut machine = Machine::new("ketchup".into(), 10, 10);
+        let mut machine = Machine::new("reducer", Some("ketchup".into()), 10, 10);
         machine.input.add("tomato_sauce", 1);
         machine.tick(
             0,

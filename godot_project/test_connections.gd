@@ -153,7 +153,9 @@ func _run_checks() -> void:
 	# belt meets", which is what the seam fix and the housings both had to be
 	# true of.
 	for placement in main._placements:
-		if placement.get("recipe") == null:
+		# `machine`, not `recipe`: an unfed machine is undecided and its
+		# recipe is null like a belt's.
+		if not bool(placement.get("machine", false)):
 			continue
 		var tile: Array = placement["tile"]
 		var node: Node3D = main.get_node_or_null("World/%s_%d,%d" % [

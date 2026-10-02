@@ -56,7 +56,13 @@ the plan is `docs/ARCHITECTURE.md` §3/§4/§6/§10.
   `Machine::choose` starts the first fully-satisfied recipe
   `RecipeRegistry::for_machine` offers, so `recipes.ron` file order is the
   tiebreak; with none satisfied it holds the closest, which is what makes the
-  stall readout name a raw the machine is really waiting for. **There is no
+  stall readout name a raw the machine is really waiting for. **A machine
+  nothing has fed is undecided** (`recipe: None`, the `undecided` stall —
+  or an item-less `no_supply_pipe` for a pipe-fed kind with no pipe,
+  2026-10-02): a kind with several recipes is placed with none, and a zero
+  tie never hands it the first in the file — only what it is handed
+  (`Machine::fed`) decides it. "Is this a machine" is the layout's
+  `machine` flag, not `recipe != null`. **There is no
   player-facing picker and no command that sets a recipe** — do not add one.
   The in-flight recipe *is* saved (`SavedMachine::recipe`): a craft under way
   has already eaten the inputs it would be re-derived from.
