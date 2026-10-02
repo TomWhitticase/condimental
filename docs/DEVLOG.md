@@ -221,6 +221,12 @@ below is history and should only ever be appended to.)*
   are narrower than a real window's — so only a render can prove a width.
   Issue #88 (a building's configuration panel over the STOCK, CREW and
   CONTRACTS plates) was folded in, being the same fix.
+- **Belts and pipes cross (DONE, 2026-10-01; plan:
+  `docs/BELT_PIPE_CROSSING_PLAN.md`).** Placing a pipe across a belt, or a
+  belt across a pipe, turns the tile into one `crossing` — the pipe lifted
+  over the lane on a gantry, items passing under it, both halves working.
+  Right angles only; remove refunds both. The ghost asks the sim's
+  `preview_command` whether a placement is valid rather than guessing.
 - **Settings and a development menu (DONE, 2026-09-21).** The game has a
   settings screen, reachable from the main menu and from the pause menu — the
   same eight rows hosted twice, replacing the button column in whichever one
@@ -296,6 +302,23 @@ worktree as its final step, instead of handing the user a command to paste.
 A guard first checks that the tree is a linked Orca worktree, so the primary
 checkout is never removed. A red banner or a custom ask passed with the skill
 keeps the tree. The full record is in `docs/DECISIONS.md`.
+
+### 2026-10-01 — Belts and pipes cross on `main`, five days late
+
+The owner played `main` and could not lay a pipe across a belt. The feature
+was built and reviewed on 2026-09-25/26 (PRs #169–#172, #175, #176), but
+every one of those PRs targeted the integration branch
+`TomWhitticase/belt-pipe-crossings`, and the integration branch's own PR
+into `main` was never opened — T4, the docs ticket, never ran, so nothing
+marked the epic unfinished. Merged now, 34 commits behind: ten files
+conflicted (the save format had moved to v7, splitters gained modes, racks
+gained filters, the fluid gallery gained mustard). `SavedBody::Crossing`
+stays an additive variant on version 7. One conflict was not textual: the
+crossing's own clearance test caught mustard's seed sack filling the whole
+16-voxel lane, which the gantry's lane is exactly wide enough for, so the
+constant moved and the art did not. T4's docs land with it. Lesson: an epic
+on an integration branch is not done until that branch's PR into `main`
+has merged.
 
 ### 2026-10-01 — A red check is rerun locally, and a local pass is enough
 
@@ -866,6 +889,67 @@ mutation-tested before being believed: uncapping the trail, stacking the
 crumbs, leaving a title unfilled and blinding the loader to titles each
 turned the suite red.
 
+
+### 2026-09-25 — The crossing fixture is made to prove it is running
+
+`--fixture crossing` shipped in PR #172 building its line and never ticking
+it, so every frame shot of it was a bare belt under one grey pipe run and
+one barely tinted — and
+every one of those frames printed `SCREENSHOT_OK`. A dead fixture does not
+look like a harness nobody ran; it looks like art that has not landed, which
+is exactly the judgement a PR screenshot is there to support. Its own doc
+comment described items backing up under the arch, which was true of the
+sim and false of every picture.
+
+Two things now stand between that frame and a PR body. `test_screenshot.gd`
+gained `SETTLED_FIXTURES`, applied after `_resolve_fixture` so it catches a
+fixture named with `--fixture` and not only one a convenience flag picked —
+the gap `crossing` fell through, having no flag of its own to set `_populate`
+beside. And because a list is the thing that gets forgotten, the fixture also
+carries `Layouts.crossing_line_idle`, asked in `_frame_health` ahead of the
+`HEALTHY_FIXTURES` gate: the line makes nothing and ships nothing, so
+`produced == 0` is its healthy state and the production check says nothing
+about it at all. What it has to prove instead is that it moved — an item on
+each crossing tile, fluid in every segment of every run. The list makes the
+good frame the default; the check makes the bad frame impossible.
+
+The line was also starved, and the first attempt at fixing that was wrong in
+a way worth writing down. The obvious reading — four auto-filling tanks
+sharing the 64 vinegar the fixture bought — is not what happened. The FIRST
+tank drinks whatever it can reach, so the count of tanks changes nothing:
+64 left the `CROSSING_BELT_ONTO_PIPE_X` run at 0.000 pressure across four
+tanks and across two alike. The amount was always the cause. Measured under
+auto-fill alone, 128 gets that run to 0.114, 160 to 0.571 and 200 to 0.999,
+so `CROSSING_VINEGAR` is 200.
+
+One tank per run stays, for a different reason than it was first given: fed
+from the north only, fluid reaches a run's south half *through* the crossing,
+so the colour is evidence the crossing joined the run. That is legibility,
+not fill.
+
+And "wet" turned out not to mean "visible". `main.gd` draws pipe liquid by
+scaling a one-voxel body by `pressure × PIPE_BORE_HEIGHT_VOXELS` (7) up from
+the bore floor, and the sight window is cut from one voxel above that floor
+— so below 2/7 there is no whole voxel of liquid in the window and the run
+photographs grey while every segment reports fluid (forced renders: 0.15
+grey, 0.2 barely there, 0.286 a thin amber line). A first cut of the bar at
+1/7 put the surface exactly level with the window floor. The x = 9 run sat
+at 0.114 — eight tenths of a voxel — and sailed through a `volume > 0` check
+and into a PR body captioned "both runs wet". The check now asks for
+`CROSSING_MIN_DRAWN_PRESSURE`, and counts the runs it found rather than
+passing vacuously over an empty list.
+
+Doc corrections alongside: `BELT_PIPE_CROSSING_PLAN.md` now names the
+shipped `pipe_crossing` rather than the spike's `pipe_gantry`, and its
+clearance figure is re-measured on the shipped model — the gantry's lowest
+voxel between the risers (y 8..23) is z = 28, three clear of
+`CROSSING_ITEM_TOP_Z`, where the spike said 27. **`preview_command` is no
+longer "planned":** it landed in PR #171 and the ghost has asked it since
+#172, so the two `DECISIONS.md` passages that called it future work, and the
+one claiming ghost validity is a pure Godot-side footprint check, say what
+is true now. The 2026-09-08 belt-shapes entry below still calls it planned;
+that entry is history and was accurate when written, and this paragraph is
+the correction the log's append-only rule asks for.
 
 ### 2026-09-25 — THE COOKBOOK: the game explains itself, out of the data files
 

@@ -466,11 +466,8 @@ impl VoxModel {
     /// Draws every voxel of `other` into this model (later wins), clipped to
     /// this model's volume. How a composition Godot makes from two models
     /// (a pipe shape plus an overlaid fitting) can be tested as one voxel
-    /// solid here.
-    #[allow(
-        dead_code,
-        reason = "a test-facing primitive, kept with rotated_cw below"
-    )]
+    /// solid here, and how an icon-only model (`crossing`) shows what the
+    /// scene stacks from several.
     pub fn merge(&mut self, other: &VoxModel) -> &mut Self {
         for (&(x, y, z), &idx) in &other.voxels {
             self.set(x as i32, y as i32, z as i32, idx);

@@ -132,6 +132,56 @@ matches what code comments and data files cite.
   added is the user steering. The guard printing `KEEP`. In each case the
   removal commands are printed instead.
 
+- 2026-10-01: **A belt and a pipe cross as one entity of kind `crossing`,
+  never as two layers on one tile.** (Design doc: "CONDIMENTAL — Design:
+  letting belts and pipes cross (2026-09-25)", in Drive; build order in
+  `docs/BELT_PIPE_CROSSING_PLAN.md`.) Built 2026-09-25/26 on the
+  `belt-pipe-crossings` integration branch (PRs #169–#172, #175, #176) and
+  landed on `main` 2026-10-01, after the owner played main and found it
+  missing — the integration branch's own PR into `main` had never been
+  opened.
+
+  **Why not a layered grid.** The Rust is not the cost — `topology.grid` has
+  roughly seventeen lookup sites. The cost is that every tile-addressed
+  command becomes ambiguous: `Remove`, `Rotate`, `targets`, hover and the
+  ghost all have to ask which layer the player meant, and that is an
+  unanswered UX question, not a refactor. A `crossing` kind never asks it:
+  one placement, one tile, one `Direction` (the belt's; the pipe runs
+  `rotate_cw` of it), carrying a `BeltSegment` and a `PipeTile`. Factorio's
+  undergrounds were the third option and were rejected for adding a part to
+  buy and a distance rule to learn for what is a single-tile problem here.
+
+  **The rules that follow.** Only at right angles — a pipe along a belt is
+  refused, with the reason on the ghost. Placing assembles the crossing in
+  place (`World::assemble_crossing`): the belt keeps the very component its
+  items are in, so upgrading a live line destroys nothing; the pipe's volume
+  is carried across by tile like any topology change. Removal takes the whole
+  tile and refunds both parts — "remove just the pipe" is the layer question
+  coming back at removal time. Rotation turns the pair. Nothing is bought and
+  nothing goes on the hotbar.
+
+  **The art had to change from the design doc.** The doc claimed the
+  ordinary straight pipe clears the belt; it clears the belt's cleats and
+  not the belt's traffic — a bottle stands to z = 24, through a bore at
+  z 12–19. The shipped `pipe_crossing` is a gantry lifting the run a whole
+  tile (`CROSSING_LIFT`, mirrored by `main.gd`), held to the real item models
+  by `a_crossing_clears_every_item_the_line_can_carry`. That test caught
+  mustard's seed sack — added on `main` while the crossing waited — filling
+  the full 16-voxel lane; the lane between the risers is exactly that wide,
+  so `CROSSING_ITEM_Y` became `(8, 23)` with no row to spare, and the art did
+  not change.
+
+  **Presentation asks, never decides.** The ghost reads
+  `preview_command_json` (`valid`, `reason`, `result_kind`), which calls the
+  same `plan_place` the command does, so a ghost cannot go green on a
+  placement the sim then refuses. There is no "is a crossing" flag on the
+  chunk wire; the layout's `kind` is the one source.
+
+  **Save format.** `SavedBody::Crossing` is a new variant and the save stays
+  at version 7: no file written before crossings can contain one and no
+  other record changed shape, so a version 7 file still means one thing.
+  Pinned by `tests/crossings.rs`' round trip.
+
 - 2026-10-01: **A red check that passes when rerun locally meets the
   green-checks gate.** (Owner's rule: "If CI checks fail on a PR then run them
   locally, and if they pass, then thats good enough (This is because we are
@@ -857,9 +907,9 @@ matches what code comments and data files cite.
   Clamped with `.max(Money::ZERO)` against GAMEPLAY §1's one non-negative
   counter.
 
-  **Not `preview_command`.** ARCHITECTURE §4's planned validation pass exists
-  on the unmerged `belt-pipe-crossings` branch as `PreviewResult { valid,
-  reason, result_kind }`. Building a second copy on `main` would collide with
+  **Not `preview_command`.** ARCHITECTURE §4's planned validation pass existed
+  on the then-unmerged `belt-pipe-crossings` branch as `PreviewResult { valid,
+  reason, result_kind }` (it reached `main` 2026-10-01). Building a second copy on `main` would collide with
   it, and it answers a different question: *may this command happen* versus
   *what would this valid spend do to the payday*. When that epic lands,
   `SpendPreview` becomes `PreviewResult`'s `payday` field and the two calls
@@ -6578,11 +6628,13 @@ matches what code comments and data files cite.
      scan the `links` field was built to remove, and it would drift from
      the sim's rule the first time the rule changed. The would-be links of
      an unplaced tile are a fact the sim has not computed, and
-     ARCHITECTURE.md §4's planned `preview_command` is the mechanism for
-     asking it; when that lands the ghost reads its shape from the answer.
-     Until then the ghost's job is the tile, the facing (the arrow on the
-     straight tile) and whether the click will succeed, and the corner
-     appears the instant the tile is placed, since placing rebuilds. The
+     ARCHITECTURE.md §4's `preview_command` is the mechanism for asking it.
+     **It landed in PR #171**, and PR #172 has the ghost read its `valid`,
+     its `reason` and its `result_kind` — which is how a crossing's ghost
+     knows to draw as a crossing. It still does not return a would-be SHAPE,
+     so the build ghost is still the straight tile with its facing arrow,
+     and the corner still appears the instant the tile is placed. Shape is
+     the next thing to add to the answer, not a second scan in GDScript. The
      REMOVE ghost, which is over a placed tile, does show the real shape.
 
   6. **The retired names are deleted, not kept as aliases.** `belt`,
@@ -8054,10 +8106,15 @@ matches what code comments and data files cite.
   The affordance is printed on the slot's own owned line and in the menu
   footer.
 
-  (5) **Ghost validity is a pure Godot-side, footprint-aware check against
-  the occupancy map, and it is signalled by glyph and word as well as
-  colour** (UI_UX.md §7): **✔ PLACE** / **✗ BLOCKED** / **✗ NONE OWNED** in a
-  prompt beside the cursor, plus a tint and a matching panel border. The
+  (5) **Ghost validity is signalled by glyph and word as well as colour**
+  (UI_UX.md §7): **✔ PLACE** / **✗ BLOCKED** / **✗ NONE OWNED** in a
+  prompt beside the cursor, plus a tint and a matching panel border. It was
+  a pure Godot-side, footprint-aware check against the occupancy map when
+  this was written; since the belt/pipe crossing epic (PR #171, PR #172) the
+  ghost asks the sim's `preview_command` instead and prints the reason the
+  sim gives, because a crossing is valid on an occupied tile and a second
+  copy of that rule in GDScript would have had to be kept in step. The
+  signalling above is unchanged. The
   ghost's tint MULTIPLIES over the model's own vertex colours rather than
   replacing them — the first cut replaced them and a rendered frame showed a
   belt ghost as a featureless green rectangle, which says a tile is involved

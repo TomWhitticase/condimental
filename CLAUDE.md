@@ -105,4 +105,4 @@ Skills cover the repeatable procedures: `voxel-asset`, `verify`,
 
 Add these when a milestone needs them; do not improvise a different shape.
 `rayon` parallelism and the tiered scheduler (ARCHITECTURE §3.7/§3.8,
-milestone 8); `preview_command`/`undo`/`redo` (ARCHITECTURE §4).
+milestone 8); `undo`/`redo` (ARCHITECTURE §4).
