@@ -4768,8 +4768,9 @@ func _set_machine_product(key: String, recipe) -> void:
 
 ## A machine's product material: the same `liquid` class numbers the fluid in
 ## a pipe uses — it is the same substance, seen through glass instead of
-## steel — tinted per recipe rather than per fluid. Built fresh per call like
-## `_fluid_material_for` above, and called about as often.
+## steel — tinted per recipe rather than per fluid. Built fresh per call,
+## unlike `_fluid_material_for` above: `_set_machine_product` only asks when a
+## machine's recipe changes, not on every poll, so there is nothing to cache.
 func _product_material_for(recipe_id: String) -> StandardMaterial3D:
 	var base: StandardMaterial3D = _class_materials.get("liquid", null)
 	var mat: StandardMaterial3D = base.duplicate() if base != null else _make_material(0.0, 0.14)
