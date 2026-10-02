@@ -259,6 +259,20 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-02 — Hold CTRL in first person to click the hotbar
+
+The owner asked for a way to use the mouse on the HUD without leaving first
+person. Holding CTRL now frees the pointer: the crosshair goes, mouse motion
+stops turning the view, and a click selects a hotbar slot or, anywhere else,
+does nothing (it never builds at the crosshair). Releasing it recaptures the
+mouse and drops the warp-home motion that would otherwise jerk the camera.
+Unlike a panel, CTRL leaves WASD live. On the way, the eight panel setters
+that each set `Input.mouse_mode` themselves now all go through
+`_apply_fp_mouse_mode`, so a panel closing under a held CTRL (or under
+another panel) leaves the cursor free. macOS delivers CTRL+click as a right
+click, so a hotbar slot takes that too. `test_ctrl_cursor.gd` proves each
+half with real events pushed through the viewport.
+
 ### 2026-10-02 — the maintenance crew is called engineering
 
 The owner asked for the fourth staff category to be called engineering

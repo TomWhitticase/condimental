@@ -559,6 +559,11 @@ var _payday_warning := false
 var _short_staffed := false
 var _hotbar_key := ""
 var _stock := false
+## `--ctrl` holds CTRL down in first person (a real key event through
+## `main._input`) and hovers hotbar slot `--hotbar`'s or the first stocked
+## one, so the frame shows what a held CTRL gives: the crosshair gone and a
+## pointer's hover on the strip. The OS pointer itself is never in a capture.
+var _ctrl := false
 ## `--at-capacity` fills every raw to its warehouse ceiling, so the market's
 ## crates and the STOCK plate photograph the full state rather than the
 ## roomy one.
@@ -890,6 +895,7 @@ func _initialize() -> void:
 	_dock_lamp_dark = _string_arg(args, "--dock-lamp") == "dark"
 	_hotbar_key = _string_arg(args, "--hotbar")
 	_stock = args.has("--stock")
+	_ctrl = args.has("--ctrl")
 	_at_capacity = args.has("--at-capacity")
 	_legend_collapsed = args.has("--legend-collapsed")
 	_ghost_kind = _string_arg(args, "--ghost")
@@ -2462,6 +2468,21 @@ func _stock_the_hotbar() -> void:
 	_main._update_larder()
 
 
+## `--ctrl`: CTRL pressed for real, then the hover a freed pointer would give
+## the hotbar slot in hand (or slot 0 when nothing is).
+func _hold_ctrl_over_hotbar() -> void:
+	if not _in_first_person() and _frames == 2:
+		printerr("SCREENSHOT_NOTE: --ctrl only means something with --first-person")
+	var event := InputEventKey.new()
+	event.keycode = KEY_CTRL
+	event.pressed = true
+	event.ctrl_pressed = true
+	_main._input(event)
+	var index: int = maxi(_main._hotbar_selected_index(), 0)
+	if index < _main._hotbar_slots.size():
+		_main._on_hotbar_slot_hovered(index)
+
+
 func _hotbar_key_code() -> int:
 	if _hotbar_key == "0":
 		return KEY_0
@@ -2770,6 +2791,11 @@ func _process(delta: float) -> bool:
 		_main._set_legend_collapsed(true)
 	if _frames == 2 and _hotbar_key != "":
 		_select_hotbar_key()
+	# Every frame from the second, not once: a review render's window never
+	# has focus, and main forgets CTRL on a focus-out (`_notification`), which
+	# an off-screen window can be sent at any point before the shutter.
+	if _frames >= 2 and _ctrl:
+		_hold_ctrl_over_hotbar()
 	# After --stock, so a stocked larder photographs FILL enabled and an
 	# empty one photographs it blocked with its reason.
 	if _frames == 2 and _config:
