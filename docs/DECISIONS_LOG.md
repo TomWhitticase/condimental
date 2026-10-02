@@ -18,6 +18,19 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-02 **Mustard is yellow and white, not yellow and black.** The
+  owner's ruling. The mustard bottle (`item_bottle_mustard`) is a
+  `mustard_gold` body with a WHITE label band and cap — both
+  `label_mustard`, now #F4F1E8, a brighter white than `cap_white` — where
+  they were a near-black olive ink (#3B3A14). The bottle's top must still
+  clear the body by 26/255 of luma as one neck-and-cap mark
+  (`a_bottle_s_cap_contrasts_with_the_neck_and_the_body`); a white that
+  bright does it from above (about 224 against 192.7). Mustard's accents
+  stay white: brighter than the body by 26 and near-neutral
+  (`the_mustard_bottle_is_yellow_and_white`). Do not darken them back for
+  legibility; brighten the white or move the neck instead.
+  `mustard_gold` itself is unchanged, and so is the mustard case (gold
+  print on cardboard). Full record in `docs/DECISIONS.md`.
 - 2026-10-02 **The game's typeface is Chakra Petch SemiBold.** It is set
   once, as `project.godot`'s `gui/theme/custom_font`, so every Label,
   Button and LabelSettings uses it and no GDScript names a font. The owner
