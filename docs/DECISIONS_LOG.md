@@ -29,10 +29,11 @@ See [WORKFLOW.md](WORKFLOW.md).
   it from placement. On the wire `recipe`/`machine_recipe` are `null` for an
   undecided machine, the layout gains `machine: true` (so `recipe != null`
   no longer means "is a machine"), and the stall is the new `undecided`
-  kind — or `no_supply_pipe` with an empty item when a pipe-fed kind (all
-  its recipes drink a fluid) has no draw pipe, so a lone bottler says
-  "no supply pipe" instead of waiting forever. Godot draws it as handling any sauce: "Mixer · any sauce", "waiting
-  for ingredients", product mesh left on its neutral `fluid_pale`. No save
+  kind — or `no_supply_pipe` with an empty item when it has no draw pipe
+  and every recipe of its kind needs a fluid (today the mixer, vat and
+  bottler), so it says "no supply pipe" instead of waiting forever. Godot
+  draws it as handling any sauce: "Mixer · any sauce", "waiting for
+  ingredients", product mesh left on its neutral `fluid_pale`. No save
   format change: an undecided machine writes `recipe: None`, and an old save
   mid-craft with no recipe loads on the kind's first recipe. Owner's
   request. Full record in `docs/DECISIONS.md`.

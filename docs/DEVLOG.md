@@ -269,9 +269,10 @@ machine's zero-for-everything tie kept it there. A machine is now
 *undecided* (`recipe: null`) until something it is handed picks a recipe,
 and any amount counts, so one tomato makes a tomato crusher. Godot titles an
 undecided machine "Mixer · any sauce", says "waiting for ingredients" (or
-plain "no supply pipe" for a lone bottler or vat that has no pipe to be fed
-by), and leaves its product mesh on the neutral pale. The layout gained a `machine`
-flag, because a null recipe no longer means "not a machine". No save format
+plain "no supply pipe" when it has no pipe and every recipe of its kind
+needs a fluid — today the mixer, vat and bottler — since it could never be
+fed), and leaves its product mesh on the neutral pale. The layout gained a
+`machine` flag, because a null recipe no longer means "not a machine". No save format
 change; an old save caught mid-craft finishes on the recipe it was really
 running. Rule in `DECISIONS_LOG.md`.
 

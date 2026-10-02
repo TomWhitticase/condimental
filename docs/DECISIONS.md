@@ -69,9 +69,10 @@ matches what code comments and data files cite.
   a faulted run on the draw side still reports
   `ambiguous_pipe`/`unnameable_pipe` (issue #54's rule), and a machine with
   **no draw pipe at all** on a kind every one of whose recipes drinks a fluid
-  (the bottler, the vat) reports `no_supply_pipe` — it could never be fed,
-  so "waiting for ingredients" would be true forever and point at nothing
-  (the review of PR #232). Godot reads an empty `no_supply_pipe` as plain
+  (today the mixer, the vat and the bottler) reports `no_supply_pipe` — it
+  could never be fed, so "waiting for ingredients" would be true forever
+  and point at nothing (the review of PR #232). A plumbed one on a sound,
+  empty run is merely waiting and reads `undecided`. Godot reads an empty `no_supply_pipe` as plain
   "no supply pipe".
 
   **Rejected: naming the wait off a named-but-empty run.** The review

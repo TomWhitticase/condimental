@@ -17,9 +17,11 @@
 #   2. PANEL: the configuration panel's title says the same.
 #   3. TINT: the product mesh (vat, bottler, packer) carries no override, so
 #      it shows the voxel's own neutral pale.
-#   4. A LONE bottler — no pipe, so it can never be fed — says plain "no
-#      supply pipe" rather than "waiting for ingredients" forever, and names
-#      no sauce (the review of PR #232).
+#   4. A LONE bottler — no pipe, and every bottler recipe needs a fluid, so
+#      it can never be fed — says plain "no supply pipe" rather than
+#      "waiting for ingredients" forever, and names no sauce (the review of
+#      PR #232). The rule covers every such kind (today the mixer, vat and
+#      bottler); `sim_core/tests/undecided.rs` checks all three.
 #   5. And the decision still lands: fed, the vat names its recipe in the
 #      hover and its product mesh takes a tint.
 #

@@ -1252,7 +1252,8 @@ impl MachineLoadSnapshot {
 /// the missing one. An undecided machine still reports two pipe-side kinds,
 /// also with an EMPTY `item`: a faulted draw run, and `no_supply_pipe` when
 /// it has no draw pipe at all and every recipe of its kind drinks a fluid
-/// (a lone bottler or vat could never be fed, so it names the fix).
+/// (today the mixer, the vat and the bottler — a lone one could never be
+/// fed, so it names the fix).
 ///
 /// The last two are issue #54's, and they replace a *wrong* answer rather
 /// than filling a silence: a machine on a run the naming pass could not

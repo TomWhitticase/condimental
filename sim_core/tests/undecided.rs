@@ -301,11 +301,11 @@ fn a_kind_with_one_recipe_holds_it_from_placement() {
     );
 }
 
-/// The review's case: a lone undecided bottler or vat — every recipe of
-/// its kind drinks a fluid — has no pipe, so it can NEVER be fed and never
-/// decide. "Waiting for ingredients" would be true forever and point at
-/// nothing; it says the fix instead, with no sauce named. Plumbed onto a
-/// run (even one nothing has filled), it goes back to waiting.
+/// The review's case: a lone undecided machine of a kind whose every
+/// recipe needs a fluid (today the mixer, the vat and the bottler) has no
+/// pipe, so it can NEVER be fed and never decide. "Waiting for ingredients"
+/// would be true forever and point at nothing; it says the fix instead, with
+/// no sauce named. Plumbed, it is waiting — the next test.
 #[test]
 fn an_undecided_machine_with_no_pipe_names_the_missing_pipe() {
     let recipes = shipped();
@@ -318,17 +318,20 @@ fn an_undecided_machine_with_no_pipe_names_the_missing_pipe() {
         })
         .collect();
     assert!(
-        pipe_only.iter().any(|k| k == "bottler") && pipe_only.iter().any(|k| k == "cooking_vat"),
-        "the shipped bottler and vat are fed by pipe alone: {pipe_only:?}"
+        ["mixer", "cooking_vat", "bottler"]
+            .iter()
+            .all(|kind| pipe_only.iter().any(|k| k == kind)),
+        "the shipped mixer, vat and bottler are fed by pipe alone: {pipe_only:?}"
     );
     let mut world = funded(recipes);
     place(&mut world, "bottler", (0, 0), None);
     place(&mut world, "cooking_vat", (5, 0), None);
     place(&mut world, "packer", (10, 0), None);
+    place(&mut world, "mixer", (15, 0), None);
     for _ in 0..50 {
         world.tick();
     }
-    for tile in [(0, 0), (5, 0)] {
+    for tile in [(0, 0), (5, 0), (15, 0)] {
         assert_eq!(
             stall_at(&world, tile),
             Some((StallKind::NoSupplyPipe, String::new())),
@@ -340,12 +343,49 @@ fn an_undecided_machine_with_no_pipe_names_the_missing_pipe() {
         Some((StallKind::Undecided, String::new())),
         "a packer is belt-fed, so it has no pipe to miss"
     );
-    // A pipe laid against the bottler: it can be fed now, so it waits.
-    place(&mut world, "pipe", (-1, 0), None);
-    world.tick();
-    assert_ne!(
-        stall_at(&world, (0, 0)).map(|(kind, _)| kind),
-        Some(StallKind::NoSupplyPipe),
-        "plumbed in, the bottler no longer reports a missing pipe"
+}
+
+/// The other side of the same rule: a pipe-fed machine that IS plumbed —
+/// onto a sound run, named for one fluid, that nothing has filled yet — can
+/// be fed, so it is merely waiting: `undecided`, not "no supply pipe" and
+/// not a pipe fault. A mixer on a tank's vinegar run is the shipped shape
+/// (every mixer recipe drinks a fluid, so a lone mixer would say "no supply
+/// pipe"); the tank is never filled, so nothing reaches it and it stays
+/// undecided.
+#[test]
+fn a_plumbed_unfed_pipe_only_machine_is_waiting_not_missing_a_pipe() {
+    let recipes = shipped();
+    assert!(
+        recipes
+            .for_machine("mixer")
+            .all(|r| !r.fluid_inputs.is_empty()),
+        "the shipped mixer is fed by pipe on every recipe"
+    );
+    let mut world = funded(recipes);
+    place(&mut world, "mixer", (5, 0), None); // 1x2: (5, 0) and (5, 1)
+    place(&mut world, "fluid_tank", (4, 2), None);
+    place(&mut world, "pipe", (5, 2), None);
+    for _ in 0..20 {
+        world.tick();
+    }
+    let run = world
+        .fluid_snapshots()
+        .into_iter()
+        .find(|run| run.segments.iter().any(|s| s.tile == (5, 2)))
+        .expect("the pipe at (5, 2) is a run");
+    assert_eq!(
+        (run.fluid.as_deref(), run.total_volume),
+        (Some("vinegar"), 0.0),
+        "the fixture's premise: a sound run, named, and empty"
+    );
+    assert!(
+        run.taps.iter().any(|tap| tap.machine_tile == (5, 0)),
+        "and the mixer draws from it"
+    );
+    assert_eq!(recipe_everywhere(&world, (5, 0)), [None, None, None]);
+    assert_eq!(
+        stall_at(&world, (5, 0)),
+        Some((StallKind::Undecided, String::new())),
+        "plumbed but unfed: waiting for ingredients, not a missing pipe"
     );
 }
