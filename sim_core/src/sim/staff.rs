@@ -420,8 +420,9 @@ pub struct CategoryPool {
     /// The ESTABLISHMENT: every head the placed machinery that is SWITCHED
     /// ON needs to be fully crewed, whether or not any of it is running
     /// this tick. Summed from the placements by
-    /// `World::recompute_establishment`, so it moves only when a machine is
-    /// placed, removed, rotated or mothballed — never with production flow.
+    /// `World::recompute_establishment`, so it moves only when the player
+    /// changes the factory or a save is loaded (`set_required` lists the
+    /// changes) — never with production flow.
     /// This is the number "do I need to hire?" is answered from; `demand`
     /// remains the honest per-tick activity figure beside it.
     pub required: u32,
@@ -675,11 +676,12 @@ impl StaffPools {
     /// when the player changes the factory — `Place`, `Remove`, `Rotate`,
     /// `SetMothballed`, a splitter's mode or a tank's fluid — or a save is
     /// loaded, so this figure is **stable during play**: it cannot move
-    /// because a belt ran dry or a vat finished a batch. That stability is the whole point. `demand` (what was asked
-    /// for this tick) breathes with production flow, which made
-    /// "do I need to hire?" unanswerable from the HUD — the number that
-    /// prompted a hire had already gone by the time the player acted
-    /// (docs/DECISIONS.md, the 2026-09-16 establishment record).
+    /// because a belt ran dry or a vat finished a batch. That stability is
+    /// the whole point. `demand` (what was asked for this tick) breathes
+    /// with production flow, which made "do I need to hire?" unanswerable
+    /// from the HUD — the number that prompted a hire had already gone by
+    /// the time the player acted (docs/DECISIONS.md, the 2026-09-16
+    /// establishment record).
     ///
     /// Each entry carries three things the HUD must not re-derive: the
     /// heads the RUNNING machinery needs, the heads the MOTHBALLED
