@@ -459,6 +459,30 @@ static func build_splitter_line(sim) -> void:
 	place(sim, "belt", Vector2i(7, 0), "east")
 
 
+## ITEMS TURNING ON A SPLITTER (2026-10-02): one east-facing `three_way`
+## splitter at the origin, fed by a hopper through one belt, with a six-tile
+## run off every exit — straight (1, 0) east, left (0, -1) south, right
+## (0, 1) north. The runs are long enough that the line is still flowing when
+## a populated shot's shutter fires, so the splitter is caught with items on
+## it heading out of all three faces: the frame that shows an item rounding
+## the splitter toward a side exit rather than carrying straight on across it.
+const SPLITTER_TURNS_ORIGIN := Vector2i(0, 0)
+
+
+static func build_splitter_turns(sim) -> void:
+	var at := SPLITTER_TURNS_ORIGIN
+	place(sim, "hopper", at + Vector2i(-2, 0), "east", "tomato")
+	place(sim, "belt", at + Vector2i(-1, 0), "east")
+	place(sim, "splitter", at, "east")
+	for i in range(1, 7):
+		place(sim, "belt", at + Vector2i(i, 0), "east")
+		place(sim, "belt", at + Vector2i(0, -i), "south")
+		place(sim, "belt", at + Vector2i(0, i), "north")
+	sim.issue_command_json(JSON.stringify({
+		"type": "set_splitter_mode", "tile": [at.x, at.y], "mode": "three_way",
+	}))
+
+
 ## THE FOUR SPLIT MODES (2026-09-29), side by side: four copies of one
 ## small fork — a hopper, a feed belt, an east-facing splitter — each set to
 ## a different mode, left to right `left`, `right`, `t_junction`,

@@ -1074,7 +1074,7 @@ pub struct BeltSnapshot {
 ///   "footprint": { "width_tiles": 1, "height_tiles": 1 },
 ///   "items": [["tomato", 0.44]], "moved_ticks": 418,
 ///   "outputs": [[7, 0], [6, -1], null], "sides": ["straight", "left"],
-///   "mode": "left", "next_output": "straight" }
+///   "mode": "left", "next_output": "straight", "exits": ["east"] }
 /// ```
 ///
 /// A splitter is drawn like a belt tile that has something on its end, and
@@ -1116,6 +1116,16 @@ pub struct SplitterSnapshot {
     pub sides: Vec<Side>,
     pub mode: SplitMode,
     pub next_output: Side,
+    /// The direction each entry of `items` is drawn leaving by, in the same
+    /// order (front first) — [`Splitter::planned_exits`] over the sides that
+    /// would take an item right now, or, when none would, the sides that are
+    /// connected at all. A world direction, not a [`Side`], so the renderer
+    /// turns an item toward its exit without restating
+    /// [`Side::direction_from`]: equal to `direction` is straight through,
+    /// anything else is a quarter-turn arc out of that face, the way an item
+    /// rounds a belt corner. Presentation only; the hand-off at the tile's
+    /// end still decides.
+    pub exits: Vec<Direction>,
 }
 
 /// One machine, for rendering.
@@ -6304,21 +6314,85 @@ impl World {
             .ecs
             .get::<&Splitter>(splitter)
             .expect("a splitter placement carries a Splitter");
+        let items: Vec<(ItemId, f64)> = segment
+            .snapshot_positions()
+            .into_iter()
+            .map(|(item, pos)| (item, pos.to_num::<f64>()))
+            .collect();
+        let exits = body
+            .planned_exits(self.splitter_open_sides(splitter, &items), items.len())
+            .into_iter()
+            .map(|side| side.direction_from(placement.direction))
+            .collect();
         SplitterSnapshot {
             tile: self.position_of(splitter),
             kind: placement.kind,
             direction: placement.direction,
             footprint: placement.footprint,
-            items: segment
-                .snapshot_positions()
-                .into_iter()
-                .map(|(item, pos)| (item, pos.to_num::<f64>()))
-                .collect(),
+            items,
             moved_ticks: segment.moved_ticks(),
             outputs: self.splitter_output_tiles(splitter),
             sides: body.mode().sides().to_vec(),
             mode: body.mode(),
             next_output: body.due(),
+            exits,
+        }
+    }
+
+    /// Which of a splitter's sides its items are planned to leave by
+    /// ([`SplitterSnapshot::exits`]): the connected sides that would take
+    /// the front item right now, by the same tests the hand-offs in
+    /// [`Self::try_handoff_from_belt_like`] apply — or, when none would, every
+    /// connected side, since the rotation over those is the order product
+    /// will go in once one clears. Read-only.
+    fn splitter_open_sides(&self, splitter: Entity, items: &[(ItemId, f64)]) -> [bool; 3] {
+        let outputs = self
+            .topology
+            .splitter_outputs
+            .iter()
+            .find(|&&(entity, _)| entity == splitter)
+            .map_or([None; 3], |&(_, outputs)| outputs);
+        let connected = outputs.map(|target| target.is_some());
+        let Some((front, _)) = items.first() else {
+            return connected;
+        };
+        let taking = outputs.map(|target| target.is_some_and(|t| self.would_take(t, front)));
+        if taking.contains(&true) {
+            taking
+        } else {
+            connected
+        }
+    }
+
+    /// Whether `target` is taking product off the end of a belt-like
+    /// carrier — the refusal tests of the transfers
+    /// [`Self::try_handoff_from_belt_like`] dispatches to, without the move.
+    ///
+    /// One deliberate difference, for a conveyor: its start being crowded
+    /// counts as refusing only while the conveyor is also STANDING (it did
+    /// not advance this tick — `BeltSegment::moved_ticks`). A running belt
+    /// that has just been handed an item is crowded for the dozen ticks the
+    /// item takes to clear `min_spacing`, and will have cleared it by the
+    /// time the next item reaches the splitter's end; counting that as a
+    /// refusal would swing every item behind it onto another path and back.
+    /// A standing one is backed up, which the hand-off will pass every time.
+    fn would_take(&self, target: Entity, item: &ItemId) -> bool {
+        match self.body_kind(target) {
+            Some(BodyKind::Belt) | Some(BodyKind::Splitter) | Some(BodyKind::Crossing) => {
+                self.ecs.get::<&BeltSegment>(target).is_ok_and(|segment| {
+                    segment.room_at_start() >= segment.min_spacing
+                        || segment.moved_ticks() >= self.tick_count
+                })
+            }
+            Some(BodyKind::Machine) => self
+                .ecs
+                .get::<&Machine>(target)
+                .is_ok_and(|body| body.input.has_room_for(item, 1)),
+            Some(BodyKind::Dock) => self
+                .ecs
+                .get::<&Dock>(target)
+                .is_ok_and(|body| !body.mothballed() && body.has_room_for(item)),
+            _ => false,
         }
     }
 
