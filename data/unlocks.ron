@@ -278,8 +278,9 @@
         // the 64 000 ticks measured; it was 1.0 and 88 000 ticks while a case
         // was one bottle, and the whole of that change follows the BBQ
         // bottler's 8-bottle, 200-tick shape, measured in PR #225's review —
-        // see the note on `bottled_ketchup` in `data/recipes.ron`), so it is the branch's throughput against the cadences
-        // the orders keep, not a shortage of demand. Whoever wants
+        // see the note on `bottled_ketchup` in `data/recipes.ron`), so it is
+        // the branch's throughput against the cadences the orders keep, not
+        // a shortage of demand. Whoever wants
         // mustard sooner has three content-side levers and no Rust to write:
         // a smaller `boxes` here, more BBQ demand in `data/contracts.ron`, or
         // a faster BBQ recipe.

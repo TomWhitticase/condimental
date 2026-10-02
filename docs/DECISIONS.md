@@ -132,8 +132,9 @@ matches what code comments and data files cite.
   bottle in 200 ticks, also gives 155 000. So the whole shift is the BBQ
   bottler's, and it needs both changes together. The mechanism is not
   instrumented. The split test's ±0.1 band around 1.5 passes both before
-  and after. GAMEPLAY.md §2, `data/unlocks.ron`,
-  `measure_gate_ticks.gd` and `test_layouts.gd` carry the new figure.
+  and after. GAMEPLAY.md §2, `data/unlocks.ron`, `measure_gate_ticks.gd`,
+  `test_layouts.gd` and `sim_core/tests/unlocks.rs` carry the new figure
+  (the last one was missed in #219 and corrected in #225).
 
   **Tests.** Three test files each had their own `raw_content`, which assumed
   one output per craft; with 8 bottles from one craft, the mass-conservation
