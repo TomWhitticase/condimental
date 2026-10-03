@@ -91,12 +91,11 @@
 # tier of the contracts board, mixed orders and all.
 #
 # `--mustard` builds the MUSTARD LINE (test_layouts.gd's
-# `build_mustard_line`: the third sauce, a whole SECOND line from raw rather
+# `build_mustard_line`: the second sauce, a whole SECOND line from raw rather
 # than a branch, funded, crewed and run until cases are shipping). Implies
-# `--populate`. It is the one fixture whose middle is entirely WET — the
-# crusher mills seed with vinegar and discharges a fluid, so `mustard_mash`
-# and `mustard_mix` are only ever seen in a pipe — which makes it the only
-# frame that can show whether mustard's three stages are three colours.
+# `--populate`. Mustard is ground and mixed, never cooked (2026-10-03): seed
+# to ground mustard on a belt, then a mixer drinking vinegar beside turmeric,
+# and no vat on the line at all.
 # Parsed after `--bbq`, so `--cookbook-page mustard --mustard` is the book
 # open on the new sauce over the line that made it.
 #

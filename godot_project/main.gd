@@ -1403,6 +1403,9 @@ var _tank_fluids: Array = [] # fluid ids a tank may be declared to hold
 ## is the simulation's (`try_set_hopper_item`/`try_set_tank_fluid`), not this
 ## table's: this is the label on the door, not the lock.
 var _ingredient_gates: Dictionary = {}
+## The same, for the recipes a machine's MAKES picker lists (2026-10-03).
+## A table of its own so a recipe id can never be read as a raw's.
+var _recipe_gates: Dictionary = {}
 ## The ghost's product body — a `hopper_fill` slab tinted with the chosen
 ## item, so the ghost previews WHAT the hopper will hold as well as where it
 ## goes. Colour alone would not be enough (UI_UX.md §7); the prompt names the
@@ -8216,7 +8219,7 @@ func _owned_ingredient_counts() -> Dictionary:
 func _refresh_hopper_items() -> void:
 	var snapshot := _ingredients_snapshot()
 	var items: Array = snapshot.get("hopper_items", [])
-	_hopper_items = _record_choices(items)
+	_hopper_items = _record_choices(items, _ingredient_gates)
 
 
 ## `_refresh_hopper_items` for tanks. Separate call rather than one that
@@ -8224,30 +8227,31 @@ func _refresh_hopper_items() -> void:
 func _refresh_tank_fluids() -> void:
 	var snapshot := _ingredients_snapshot()
 	var fluids: Array = snapshot.get("tank_fluids", [])
-	_tank_fluids = _record_choices(fluids)
+	_tank_fluids = _record_choices(fluids, _ingredient_gates)
 
 
 ## Splits one wire list of contents choices into the id list the rest of the
 ## scene has always used, and the gate table beside it.
 ##
-## Both callers write the same table, which is why this merges rather than
-## replaces: solids and fluids are disjoint lists, and an id whose gate has
-## since opened has to leave the table, not linger in it. Each list therefore
-## states the truth about its own ids and says nothing about the other's.
-func _record_choices(choices: Array) -> Array:
+## `gates` is the table the list's locks go into: `_ingredient_gates` for the
+## hopper's and tank's lists, which share it — solids and fluids are disjoint
+## lists, so this merges rather than replaces, and an id whose gate has since
+## opened leaves the table — and `_recipe_gates` for a machine's recipes, kept
+## apart so a recipe id is never read as a raw's (2026-10-03).
+func _record_choices(choices: Array, gates: Dictionary) -> Array:
 	var ids: Array = []
 	for choice in choices:
 		var id := String(choice.get("id", ""))
 		ids.append(id)
 		if bool(choice.get("locked", false)):
-			_ingredient_gates[id] = {
+			gates[id] = {
 				"name": String(choice.get("unlock_name", "")),
 				"item": String(choice.get("unlock_item", "")),
 				"required": int(choice.get("unlock_boxes", 0)),
 				"sold": int(choice.get("unlock_sold", 0)),
 			}
 		else:
-			_ingredient_gates.erase(id)
+			gates.erase(id)
 	return ids
 
 
@@ -8274,7 +8278,22 @@ func _selected_hopper_item() -> String:
 ## choice. The simulation is the one that decides — this only reads back the
 ## verdict it already put on the wire.
 func _choice_locked(item) -> bool:
-	return _ingredient_gates.has(String(item))
+	return _choice_gates().has(String(item))
+
+
+## The gate table for whatever the open picker lists: a machine's recipes
+## have their own, every other picker reads the ingredients'.
+func _choice_gates() -> Dictionary:
+	if _machine_recipes_shown():
+		return _recipe_gates
+	return _ingredient_gates
+
+
+## Whether the configuration panel is open on a machine whose MAKES picker
+## lists recipes. Read off the panel's own state, not re-asked of the wire.
+func _machine_recipes_shown() -> bool:
+	return _config_open and _config_kind != HOPPER_KIND and _config_kind != FLUID_TANK_KIND \
+		and _config_kind != WAREHOUSE_RACK_KIND and _config_kind != SPLITTER_KIND
 
 
 ## "tomato_paste" -> "Tomato Paste". Item ids are content, exactly as kind ids
@@ -13746,7 +13765,7 @@ func _machine_recipes(kind: String) -> Array:
 	if kind == "" or sim == null:
 		return []
 	var parsed = JSON.parse_string(sim.machine_recipes_json(kind))
-	return _record_choices(parsed) if parsed is Array else []
+	return _record_choices(parsed, _recipe_gates) if parsed is Array else []
 
 
 func _build_config_picker_slot(index: int, item_id: String) -> void:
@@ -14338,7 +14357,7 @@ func _with_gate_note(note: String, choices: Array, condensed := false) -> String
 	var by_gate := {}
 	var locked := 0
 	for item in choices:
-		var gate: Dictionary = _ingredient_gates.get(String(item), {})
+		var gate: Dictionary = _choice_gates().get(String(item), {})
 		if gate.is_empty():
 			continue
 		locked += 1
@@ -14373,7 +14392,7 @@ func _gate_line(names: PackedStringArray, parts: PackedStringArray) -> String:
 ## words survive the gate lines folding to one (issue #206). "" for a choice
 ## no gate holds.
 func _gate_line_for(item: String) -> String:
-	var gate: Dictionary = _ingredient_gates.get(item, {})
+	var gate: Dictionary = _choice_gates().get(item, {})
 	if gate.is_empty():
 		return ""
 	return _gate_line(PackedStringArray([_item_display_name(item)]), PackedStringArray([

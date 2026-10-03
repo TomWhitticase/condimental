@@ -7319,17 +7319,6 @@ impl World {
         self.footprint_for(kind)
     }
 
-    /// Every solid item id this world's recipes mention, consumed or
-    /// produced, sorted and deduplicated. There is no `items.ron`, so this
-    /// is the closest thing to an item registry the crate has — and it is
-    /// what [`super::save`] checks a loaded belt, buffer, dock or delivery
-    /// pool against, since an item id that no recipe names any more is a
-    /// content change the save cannot survive.
-    /// Every recipe id a machine of `kind` can run, in `data/recipes.ron`
-    /// order — the list a machine's picker offers (`SimBridge::machine_recipes_json`),
-    /// the list `PlayerCommand::SetMachineRecipe` chooses from, and
-    /// what [`super::save`] checks a saved in-flight craft against. Empty
-    /// for a kind no recipe names, which is a kind that cannot be placed.
     /// [`Self::recipes_for_kind`] as a machine's picker draws it: each recipe
     /// with its lock, in the same shape the CONTENTS pickers' choices take
     /// ([`super::ingredients::ContentsChoice`]), so one padlock path in Godot
@@ -7351,6 +7340,11 @@ impl World {
             .collect()
     }
 
+    /// Every recipe id a machine of `kind` can run, in `data/recipes.ron`
+    /// order — the list a machine's picker offers (`SimBridge::machine_recipes_json`),
+    /// the list `PlayerCommand::SetMachineRecipe` chooses from, and
+    /// what [`super::save`] checks a saved in-flight craft against. Empty
+    /// for a kind no recipe names, which is a kind that cannot be placed.
     pub fn recipes_for_kind(&self, kind: &str) -> Vec<String> {
         self.recipes
             .for_machine(kind)
@@ -7358,6 +7352,12 @@ impl World {
             .collect()
     }
 
+    /// Every solid item id this world's recipes mention, consumed or
+    /// produced, sorted and deduplicated. There is no `items.ron`, so this
+    /// is the closest thing to an item registry the crate has — and it is
+    /// what [`super::save`] checks a loaded belt, buffer, dock or delivery
+    /// pool against, since an item id that no recipe names any more is a
+    /// content change the save cannot survive.
     pub(super) fn recipe_item_ids(&self) -> Vec<String> {
         let mut ids: Vec<String> = self
             .recipes
