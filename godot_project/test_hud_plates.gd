@@ -494,6 +494,36 @@ func _run_checks() -> void:
 		if crew.position.x < float(window.x) * 0.5:
 			_fail("the CREW plate is not on the right-hand half of the %s window (%s)" % [str(window), str(crew)])
 			return
+		# The BALANCE plate: on screen, level with the contracts plate, and
+		# clear of it and of the CREW plate. Clear of the unfolded legend too,
+		# but that is a WIDTH question a headless run cannot answer — its font
+		# metrics put the legend at 772px where a real window draws 684px
+		# (godot_project/CLAUDE.md) — so the 1280x720 render is the acceptance
+		# for that gap, about 29px.
+		var money: Rect2 = main._money_rect()
+		if money.size.x <= 0.0:
+			_fail("the BALANCE plate has no rect at %s" % str(window))
+			return
+		if money.position.x < 0.0 or money.end.x > float(window.x) + 0.5:
+			_fail("the BALANCE plate runs off the %s window (%s)" % [str(window), str(money)])
+			return
+		if absf(money.position.y - main._contract_panel.get_global_rect().position.y) > 0.5:
+			_fail("the BALANCE plate is not level with the contracts plate at %s" % str(window))
+			return
+		# The market, the configuration panel and its clearance check all step
+		# around `_corner_plate_rects`; the BALANCE plate has to be in it.
+		if not main._corner_plate_rects().has(money):
+			_fail("the BALANCE plate is missing from _corner_plate_rects at %s, so the market and configuration panels can land on it" % str(window))
+			return
+		for other in [
+			["the contracts plate", main._contract_panel.get_global_rect()],
+			["the CREW plate", crew],
+		]:
+			if money.intersects(other[1]):
+				_fail("the BALANCE plate lands on %s at %s (balance %s, other %s)" % [
+					String(other[0]), str(window), str(money), str(other[1])
+				])
+				return
 		for other in [
 			["the contracts clipboard", main._contract_panel.get_global_rect(), main._contract_panel.visible],
 			["the stock plate", main._stock_rect(), true],
@@ -726,6 +756,7 @@ func _run_checks() -> void:
 	# way — CREW was added to the column and left out of `_panel_position_near`,
 	# and a machine hovered beside it covered the whole plate.
 	for plate in [
+		["the BALANCE plate", main._money_rect()],
 		["the stock plate", main._stock_rect()],
 		["the CREW plate", main._crew_rect()],
 	]:
@@ -733,12 +764,18 @@ func _run_checks() -> void:
 		if plate_rect.size.y <= 0.0:
 			_fail("%s has no rect to avoid — the fixture is wrong" % plate[0])
 			return
-		var pos: Vector2 = main._panel_position_near(probe, plate_rect.position + plate_rect.size * 0.5)
-		if Rect2(pos, probe_size).intersects(plate_rect):
-			_fail("a panel near the cursor lands on %s (%s over %s)" % [
-				plate[0], str(Rect2(pos, probe_size)), str(plate_rect)
-			])
-			return
+		# The centre AND a point just inside the top-left corner: the panel
+		# drops down-right of the cursor by HOVER_TOOLTIP_OFFSET, which is
+		# exactly half the BALANCE plate's height, so from that plate's centre
+		# the first candidate only TOUCHES its bottom edge and the check could
+		# never see the plate left off the avoid list.
+		for anchor_at in [plate_rect.position + plate_rect.size * 0.5, plate_rect.position + Vector2(6, 6)]:
+			var pos: Vector2 = main._panel_position_near(probe, anchor_at)
+			if Rect2(pos, probe_size).intersects(plate_rect):
+				_fail("a panel near the cursor lands on %s (%s over %s)" % [
+					plate[0], str(Rect2(pos, probe_size)), str(plate_rect)
+				])
+				return
 	probe.queue_free()
 
 	# --- First person parks a world panel, it does not follow (issue #105) -
@@ -780,6 +817,7 @@ func _run_checks() -> void:
 			# The right-hand column is never the answer: it is a plate at
 			# every resolution, and the corner is on the other side.
 			for plate in [
+				["the BALANCE plate", main._money_rect()],
 				["the clipboard", main._contract_panel.get_global_rect()],
 				["the stock plate", main._stock_rect()],
 				["the CREW plate", main._crew_rect()],
@@ -1215,6 +1253,7 @@ func _check_config_case(window: Vector2i, tile: Vector2i, what: String, across: 
 		_fail("%s is off the side of the window (%s)" % [where, str(rect)])
 		return false
 	var plates := [
+		["the BALANCE plate", main._money_rect()],
 		["the contracts clipboard", main._contract_panel_rect()],
 		["the STOCK plate", main._stock_rect()],
 		["the CREW plate", main._crew_rect()],

@@ -45,13 +45,24 @@ See [WORKFLOW.md](WORKFLOW.md).
   The unlock order is ketchup → mustard (100 boxes of ketchup) → BBQ (100
   boxes of mustard); a contract naming mustard and BBQ waits on BBQ's gate.
   Save format v8; `scripts/migrate-save-v7-to-v8.py` converts v7 files.
+
+- 2026-10-02 **The balance is its own plate; the contracts plate lists
+  soonest due first.** `_build_money_panel` puts the one money figure (and
+  its `+N`/`-N` flyout) on a BALANCE plate level with the contracts plate
+  and one `CONTRACT_PANEL_MARGIN` to its left (`_position_money_panel`); it
+  is on `_hud_avoid_rects` and every plate list a cursor or configuration
+  panel avoids. The contracts plate's heading carries `C: board`. The
+  plate's rows are `_contracts_by_due(contracts)`: by `next_delivery_tick`,
+  ties in wire order. The C board's dockets keep the wire's priority order.
   Full record in `docs/DECISIONS.md`.
 
 - 2026-10-02 **The contracts readout is a plate, not a clipboard.** The
   always-visible contract readout (`_build_contract_panel`) is a dark plate
   at the top of the right-hand column, at STOCK's width and margin
   (`STOCK_PANEL_MIN_WIDTH`, `CONTRACT_PANEL_MARGIN = STOCK_PANEL_MARGIN`).
-  It shows the balance on its heading line and one compact row per signed
+  It shows the balance on its heading line (**superseded the same day:** the
+  balance is its own plate and the heading reads `C: board`, see the entry
+  above) and one compact row per signed
   contract (`_build_contract_row`, `_contract_row_state`): icon, name, time
   left, the countdown bar and a glyph-and-word status from
   `_contract_risk_for`. Docks appear only as `⚠ DOCKS FULL`, wages only
@@ -998,7 +1009,8 @@ See [WORKFLOW.md](WORKFLOW.md).
   what buys the cut back onto a boundary at 1280x720 with every offer signed,
   the case issue #17 had left ragged. `_update_staff_alert` no longer touches
   the hint. **Superseded 2026-10-02:** the contracts plate has no board-hint
-  line (the legend and the empty plate name C); the list's floor is its first
+  line; its heading names C (`C: board`), as do the legend and the empty
+  plate; the list's floor is its first
   WHOLE row (`_contract_list_hard`).
 
 - 2026-09-20 **The bank at the moment of building decides whether the BBQ

@@ -564,8 +564,14 @@ func _run_checks(main) -> void:
 	if not _card_ids(main).has(first_offer):
 		_fail("the clipboard should show a docket for '%s' on the same frame it was signed" % first_offer)
 		return
-	if _card_ids(main) != _active_ids(main):
-		_fail("dockets %s must be exactly the active contracts %s, in order" % [str(_card_ids(main)), str(_active_ids(main))])
+	# The plate lists the same contracts, soonest due first
+	# (test_contract_panel.gd owns that order), so compare as sets here.
+	var plate_ids: Array = _card_ids(main)
+	var active_ids: Array = _active_ids(main)
+	plate_ids.sort()
+	active_ids.sort()
+	if plate_ids != active_ids:
+		_fail("the plate's rows %s must be exactly the active contracts %s" % [str(_card_ids(main)), str(_active_ids(main))])
 		return
 	var signed_row := _row_for(main, first_offer)
 	if not signed_row["sign_button"].disabled or String(signed_row["sign_button"].text) != "SIGNED":
