@@ -99,13 +99,33 @@ func _initialize() -> void:
 		])
 		return
 
+	# --- Soonest due first (the owner's 2026-10-02 call) -------------------
+	# The rows are ordered by `next_delivery_tick`, ties in the wire's own
+	# priority order — NOT the wire's order itself, which the C board keeps.
+	var due_order: Array = contracts.duplicate()
+	var keyed: Array = []
 	for i in range(contracts.size()):
+		keyed.append([int(contracts[i]["next_delivery_tick"]), i])
+	keyed.sort()
+	due_order.clear()
+	for pair in keyed:
+		due_order.append(contracts[pair[1]])
+	var distinct_due: Dictionary = {}
+	for c in contracts:
+		distinct_due[int(c["next_delivery_tick"])] = true
+	if distinct_due.size() < 2:
+		_fail("every signed contract is due on the same tick — this fixture cannot tell due order from any other")
+		return
+	if due_order == contracts:
+		_fail("the wire already lists these soonest-due first — this fixture cannot tell the plate's order from the wire's")
+		return
+	for i in range(due_order.size()):
 		var row: Dictionary = main._contract_cards[i]
-		var contract: Dictionary = contracts[i]
+		var contract: Dictionary = due_order[i]
 		var contract_id: String = String(contract["id"])
 		if String(row["id"]) != contract_id:
-			_fail("row %d is for '%s' but the snapshot's contract %d is '%s' — order must match, it is the scarcity priority" % [
-				i, String(row["id"]), i, contract_id
+			_fail("row %d is for '%s' but the %s soonest-due contract is '%s' — the plate lists soonest due first" % [
+				i, String(row["id"]), str(i + 1), contract_id
 			])
 			return
 		var panel: PanelContainer = row["panel"]
@@ -138,9 +158,24 @@ func _initialize() -> void:
 			return
 
 	# --- Money once -------------------------------------------------------
-	var money_labels := _count_money_labels(contract_panel, main._contract_money_label.text)
+	# On its own BALANCE plate since 2026-10-02, so the contracts plate's
+	# heading can carry its key like STOCK's and CREW's.
+	if main._money_panel == null or main._money_panel.get_parent() != hud:
+		_fail("the balance should be its own plate, a direct child of the HUD")
+		return
+	if not main._contract_money_label.is_ancestor_of(main._contract_money_change) or not main._money_panel.is_ancestor_of(main._contract_money_label):
+		_fail("the balance figure and its flyout should be on the BALANCE plate")
+		return
+	var money_labels := _count_money_labels(hud, main._contract_money_label.text)
 	if money_labels != 1:
-		_fail("expected exactly one money readout on the plate, found %d — money is a single shared counter (GAMEPLAY.md §1)" % money_labels)
+		_fail("expected exactly one money readout on the HUD, found %d — money is a single shared counter (GAMEPLAY.md §1)" % money_labels)
+		return
+	if _count_money_labels(contract_panel, main._contract_money_label.text) != 0:
+		_fail("the contracts plate should no longer carry the balance")
+		return
+	var board_hint: Label = contract_panel.find_child("BoardHint", true, false)
+	if board_hint == null or not board_hint.text.begins_with("C:"):
+		_fail("the contracts plate's heading should name its key, like STOCK's 'M: market' and CREW's 'H: hire'")
 		return
 	if String(main._contract_money_label.text) != "%d" % int(float(econ.get("money", 0.0))):
 		_fail("the balance should read the wire's money, got '%s'" % main._contract_money_label.text)
@@ -396,7 +431,7 @@ func _initialize() -> void:
 		_fail("unchecking a box must restore the unchecked style and hide its tick")
 		return
 
-	print("CONTRACT_PANEL_OK: ContractPanel is a column-width plate with %d row(s) — one per contract in priority order, each a name, a glyph-and-word status from the docket's own risk level, a countdown in seconds and a draining bar; one shared balance that flashes what it just did; full docks said in words; and the board's dockets keep per-contract checkboxes" % contracts.size())
+	print("CONTRACT_PANEL_OK: ContractPanel is a column-width plate with %d row(s) — one per contract, soonest due first, each a name, a glyph-and-word status from the docket's own risk level, a countdown in seconds and a draining bar; one shared balance that flashes what it just did; full docks said in words; and the board's dockets keep per-contract checkboxes" % contracts.size())
 	quit(0)
 
 

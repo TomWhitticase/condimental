@@ -1511,6 +1511,8 @@ var _legend_yielded := false
 # it (the owner's 2026-10-02 call; it was a cream paper clipboard of full
 # dockets until then).
 var _contract_panel: PanelContainer
+## The BALANCE plate beside the contracts plate (`_build_money_panel`).
+var _money_panel: PanelContainer
 var _contract_money_label: Label
 ## The money figure's own flyout: what the balance just DID, held briefly and
 ## faded, in the manner of the hotbar's name flyout. See
@@ -1754,6 +1756,11 @@ const CONTRACT_PANEL_MARGIN := STOCK_PANEL_MARGIN
 const CONTRACT_PLATE_ACCENT := Color(0.55, 0.80, 0.42, 0.95)
 ## The balance figure's ink: the plate's brightest text, a warm white.
 const CONTRACT_MONEY_COLOR := Color(0.98, 0.95, 0.86)
+## The balance figure's floor width: five digits at its size, so the plate
+## does not twitch at every power of ten a working factory crosses. Narrow on
+## purpose: at 1280x720 the plate has the gap between the unfolded legend and
+## the contracts plate, about 174px, and nothing more (`test_hud_plates.gd`).
+const MONEY_FIGURE_MIN_WIDTH := 56.0 * UI_SCALE
 ## The width a pinned, wrapping line on the plate gets: the plate's inside.
 const CONTRACT_PLATE_TEXT_WIDTH := STOCK_PANEL_MIN_WIDTH - 20.0 * UI_SCALE
 ## A contract row's ground: a step up from the plate, so the rows read as
@@ -6281,10 +6288,10 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_plate_hint_settings.outline_size = base_settings.outline_size
 	_contract_plate_hint_settings.outline_color = base_settings.outline_color
 
-	# Heading and balance share one line: this column's scarce axis is
-	# height, and every line the chrome spends is a contract row the plate
-	# cannot show. The key to the board is the legend's (`C: contracts`) and
-	# the empty plate's own sentence.
+	# Heading and the key that opens the board share one line, the same
+	# economy STOCK's and CREW's head rows make: this column's scarce axis is
+	# height. The balance is its own plate beside this one
+	# (`_build_money_panel`), so the heading has the room for the key.
 	var head_row := HBoxContainer.new()
 	head_row.name = "ContractHeadRow"
 	head_row.add_theme_constant_override("separation", _ui_i(12))
@@ -6298,46 +6305,14 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	head_row.add_child(title)
 
-	# The balance, the largest type on the plate. Money is shown ONCE, here,
-	# and never per row: GAMEPLAY.md §1 allows exactly one currency, and
-	# sim_core keeps exactly one counter.
-	var money_settings := LabelSettings.new()
-	money_settings.font_size = _ui_font(3)
-	money_settings.font_color = CONTRACT_MONEY_COLOR
-	money_settings.outline_size = base_settings.outline_size
-	money_settings.outline_color = base_settings.outline_color
+	var hint := Label.new()
+	hint.name = "BoardHint"
+	hint.label_settings = _contract_plate_hint_settings
+	hint.text = "C: board"
+	hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	head_row.add_child(hint)
 
-	_contract_money_label = Label.new()
-	_contract_money_label.name = "Money"
-	_contract_money_label.label_settings = money_settings
-	_contract_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_contract_money_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	head_row.add_child(_contract_money_label)
-
-	# What the balance just did, beside the balance itself: `+240` in green for
-	# money in, `-70` in red for money out. A contract settles on its own clock
-	# while the player is looking at their factory, and this is that event,
-	# drawn where the figure it changed lives.
-	#
-	# A CHILD of the money label, parked to its LEFT on the heading's slack
-	# (`_update_money_flyout`) rather than under it: under it is the first
-	# contract row, and a reserved line would be blank nearly all the time.
-	_contract_gain_settings = LabelSettings.new()
-	_contract_gain_settings.font_size = _ui_font(-1)
-	_contract_gain_settings.font_color = METER_FILL_LEVEL
-	_contract_gain_settings.outline_size = base_settings.outline_size
-	_contract_gain_settings.outline_color = base_settings.outline_color
-	_contract_spend_settings = _contract_gain_settings.duplicate()
-	_contract_spend_settings.font_color = METER_FILL_WARN
-
-	_contract_money_change = Label.new()
-	_contract_money_change.name = "MoneyChange"
-	_contract_money_change.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_contract_money_change.label_settings = _contract_gain_settings
-	_contract_money_change.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_contract_money_change.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_contract_money_change.modulate = Color(1, 1, 1, 0)
-	_contract_money_label.add_child(_contract_money_change)
+	_build_money_panel(hud, base_settings)
 
 	# The rows. They scroll past the height `_update_contract_panel` gives
 	# them, which with a row per order takes a long board to reach.
@@ -6442,6 +6417,90 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	hud.add_child(_contract_notice)
 
 	_position_contract_panel()
+
+
+## The BALANCE plate: the one money figure, on its own small plate at the
+## top edge, just left of the contracts plate and level with it. GAMEPLAY.md
+## §1 allows exactly one currency and sim_core keeps exactly one counter, so
+## this is the only place the HUD prints it outside a modal.
+##
+## It was the contracts plate's heading until 2026-10-02 (the owner: "Move the
+## money display outside of the contracts overlay so that we can put C to open
+## like how the other overlays have it"). Beside that plate rather than above
+## it, because the right-hand column's height is what three plates already
+## share at 1280x720, while the top edge left of the column is empty.
+##
+## A readout with no controls, so `MOUSE_FILTER_IGNORE` throughout, like STOCK
+## and CREW; and on `_hud_avoid_rects`, so a cursor panel never lands on it.
+func _build_money_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	var plate := StyleBoxFlat.new()
+	plate.bg_color = Color(0.06, 0.06, 0.07, 0.93)
+	plate.border_color = CONTRACT_PLATE_ACCENT
+	plate.border_width_top = _ui_i(3)
+	plate.set_content_margin_all(_ui_px(10.0))
+	plate.content_margin_top = _ui_px(6.0)
+	plate.content_margin_bottom = _ui_px(6.0)
+
+	_money_panel = PanelContainer.new()
+	_money_panel.name = "MoneyPanel"
+	_money_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_money_panel.add_theme_stylebox_override("panel", plate)
+	hud.add_child(_money_panel)
+
+	var row := HBoxContainer.new()
+	row.name = "MoneyRow"
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", _ui_i(8))
+	_money_panel.add_child(row)
+
+	# The coin the payout burst throws, so the figure says what it counts
+	# without a word.
+	var icon := TextureRect.new()
+	icon.name = "MoneyIcon"
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.custom_minimum_size = CREW_ICON_SIZE
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture = _icon_for_asset(COIN_ASSET)
+	row.add_child(icon)
+
+	var money_settings := LabelSettings.new()
+	money_settings.font_size = _ui_font(3)
+	money_settings.font_color = CONTRACT_MONEY_COLOR
+	money_settings.outline_size = base_settings.outline_size
+	money_settings.outline_color = base_settings.outline_color
+
+	_contract_money_label = Label.new()
+	_contract_money_label.name = "Money"
+	_contract_money_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_contract_money_label.label_settings = money_settings
+	_contract_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_contract_money_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	# A floor of five digits (`MONEY_FIGURE_MIN_WIDTH`).
+	_contract_money_label.custom_minimum_size.x = MONEY_FIGURE_MIN_WIDTH
+	row.add_child(_contract_money_label)
+
+	# What the balance just did: `+240` in green for money in, `-70` in red for
+	# money out. A contract settles on its own clock while the player is
+	# looking at their factory, and this is that event, drawn where the figure
+	# it changed lives. A CHILD of the money label, hung just UNDER the plate
+	# (`_update_money_flyout`): a reserved line would be blank nearly always.
+	_contract_gain_settings = LabelSettings.new()
+	_contract_gain_settings.font_size = _ui_font(-1)
+	_contract_gain_settings.font_color = METER_FILL_LEVEL
+	_contract_gain_settings.outline_size = base_settings.outline_size
+	_contract_gain_settings.outline_color = base_settings.outline_color
+	_contract_spend_settings = _contract_gain_settings.duplicate()
+	_contract_spend_settings.font_color = METER_FILL_WARN
+
+	_contract_money_change = Label.new()
+	_contract_money_change.name = "MoneyChange"
+	_contract_money_change.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_contract_money_change.label_settings = _contract_gain_settings
+	_contract_money_change.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_contract_money_change.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_contract_money_change.modulate = Color(1, 1, 1, 0)
+	_contract_money_label.add_child(_contract_money_change)
 
 
 ## The paper docket's inks and styles: the C board's YOUR CONTRACTS column
@@ -8458,7 +8517,7 @@ func _position_market_panel() -> void:
 		panel_size.x,
 		panel_size.y
 	)
-	for plate in [_contract_panel_rect(), _stock_rect(), _crew_rect()]:
+	for plate in _corner_plate_rects():
 		if plate.size.x > 0.0 and plate.size.y > 0.0:
 			rect = _pushed_clear_of(rect, plate, bounds.x, lower_bound)
 	_market_panel.position = rect.position
@@ -14663,7 +14722,7 @@ func _position_config_panel() -> void:
 	# a test against its old `y` had decided the clipboard was nowhere near it.
 	pos.y = clampf(pos.y, 8.0, maxf(8.0, 8.0 + _config_panel_available_height(bounds) - size.y))
 	var right_bound := bounds.x
-	for plate in [_contract_panel_rect(), _stock_rect(), _crew_rect()]:
+	for plate in _corner_plate_rects():
 		if plate.size.y <= 0.0:
 			continue
 		if pos.y < plate.end.y and pos.y + size.y > plate.position.y:
@@ -14741,9 +14800,7 @@ func _config_pos_is_clear(pos: Vector2, size: Vector2, bounds: Vector2) -> bool:
 	if pos.y + size.y > bounds.y - _hotbar_reserved_height():
 		return false
 	var rect := Rect2(pos, size)
-	for plate in [
-		_contract_panel_rect(), _stock_rect(), _crew_rect(), _legend_rect()
-	]:
+	for plate in _corner_plate_rects() + [_legend_rect()]:
 		if plate.size.y > 0.0 and rect.intersects(plate):
 			return false
 	return true
@@ -19652,7 +19709,7 @@ func _panel_draw_size(panel: Control) -> Vector2:
 ## fixed corner — so the two cannot come to disagree about what a plate is.
 ##
 ## Each plate reports its own CURRENT rect through a helper (`_legend_rect`,
-## `_stock_rect`, `_crew_rect`) rather than being measured here, so a
+## `_money_rect`, `_stock_rect`, `_crew_rect`) rather than being measured here, so a
 ## collapsed legend is avoided at the size it actually is — its stub — and not
 ## at the five-line size it had when the game started.
 func _hud_avoid_rects() -> Array[Rect2]:
@@ -19666,6 +19723,9 @@ func _hud_avoid_rects() -> Array[Rect2]:
 	# panel's own avoidance, which makes the same call).
 	if _contract_panel != null and _contract_panel.visible and _contract_panel.size.y > 0.0:
 		avoid.append(_contract_panel.get_global_rect())
+	var money := _money_rect()
+	if money.size.y > 0.0:
+		avoid.append(money)
 	var stock := _stock_rect()
 	if stock.size.y > 0.0:
 		avoid.append(stock)
@@ -19854,16 +19914,21 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 	var contracts: Array = econ.get("contracts", [])
 	_announce_contract_changes(contracts, econ.get("board", []))
 	_announce_unlocks(econ.get("unlocks", []))
-	if not _contract_cards_match(contracts):
-		_rebuild_contract_cards(contracts)
+	# The PLATE lists soonest-due first (the owner's 2026-10-02 call); the C
+	# board's dockets keep the sim's priority order, which is the order the
+	# docks' stock is allocated in. Sorting is presentation — the wire's
+	# `next_delivery_tick` decides it, Godot only orders the rows.
+	var rows: Array = _contracts_by_due(contracts)
+	if not _contract_cards_match(rows):
+		_rebuild_contract_cards(rows)
 	# Nothing running is a real state (the contract-board epic): say so, and
 	# hide the empty list rather than leaving a zero-height scroller.
 	_contract_empty_label.visible = contracts.is_empty()
 	_contract_cards_scroll.visible = not contracts.is_empty()
 
 	var current_tick: int = sim.current_tick()
-	for i in range(min(contracts.size(), _contract_cards.size())):
-		_update_contract_row(_contract_cards[i], contracts[i], current_tick)
+	for i in range(min(rows.size(), _contract_cards.size())):
+		_update_contract_row(_contract_cards[i], rows[i], current_tick)
 
 	# A payout, detected from the snapshot this function already had to parse
 	# (see the payout-feedback section's header for why a `deliveries_made`
@@ -19957,6 +20022,49 @@ func _position_contract_panel() -> void:
 		maxf(0.0, vp.get_visible_rect().size.x - width - CONTRACT_PANEL_MARGIN),
 		CONTRACT_PANEL_MARGIN
 	)
+	_position_money_panel()
+
+
+## The BALANCE plate: level with the contracts plate's top edge and one
+## column margin to its left, so the two read as a pair along the top.
+func _position_money_panel() -> void:
+	if _money_panel == null or _contract_panel == null:
+		return
+	var size := _money_panel.get_combined_minimum_size()
+	_money_panel.size = size
+	_money_panel.position = Vector2(
+		maxf(0.0, _contract_panel.position.x - size.x - CONTRACT_PANEL_MARGIN),
+		_contract_panel.position.y
+	)
+
+
+## Every fixed plate in the top-right corner and down the right-hand column,
+## each at its CURRENT rect: the one list the market, the configuration panel
+## and its clearance check step around, so a plate added to that corner is
+## added to all three at once (`test_hud_plates.gd` asserts its members).
+func _corner_plate_rects() -> Array:
+	return [_money_rect(), _contract_panel_rect(), _stock_rect(), _crew_rect()]
+
+
+## The BALANCE plate's rect on screen, for the panels that must not land on
+## it (`_hud_avoid_rects`). Empty while the plate is hidden or unbuilt.
+func _money_rect() -> Rect2:
+	return _plate_rect(_money_panel)
+
+
+## `contracts` ordered soonest-due first: by `next_delivery_tick`, ties kept
+## in the wire's own (priority) order so two orders due together never swap
+## places from one frame to the next. A row moves when its contract settles
+## and its clock restarts, which rebuilds the rows once (`_contract_cards_match`).
+func _contracts_by_due(contracts: Array) -> Array:
+	var keyed: Array = []
+	for i in range(contracts.size()):
+		keyed.append([int(contracts[i].get("next_delivery_tick", 0)), i])
+	keyed.sort()
+	var out: Array = []
+	for pair in keyed:
+		out.append(contracts[pair[1]])
+	return out
 
 
 ## True when the built dockets already correspond, in order, to the reported
@@ -20002,23 +20110,23 @@ func _flash_money_change(money: float) -> void:
 	_contract_money_change_until_msec = _hud_now_msec() + MONEY_FLYOUT_HOLD_MSEC
 
 
-## Holds the money flyout at full ink, then fades it, and keeps it sitting
-## just left of the figure it belongs to. The position is re-applied every
+## Holds the money flyout at full ink, then fades it, and keeps it hanging
+## just under the figure it belongs to. The position is re-applied every
 ## frame because the money label's own size only settles once it has real
 ## text in it.
 ##
-## It FLOATS over the heading's slack rather than taking a row of its
-## own: a reserved row would be empty for all but a second or two at a time.
+## It FLOATS under the plate rather than taking a row of its own: a reserved
+## row would be empty for all but a second or two at a time.
 func _update_money_flyout() -> void:
 	if _contract_money_change == null:
 		return
-	# Hung off the figure's LEFT edge on the caption's slack, vertically
-	# centred on it, so it can never sit on the first contract row.
+	# Hung just UNDER the plate, right-aligned to the figure it belongs to:
+	# the plate's bottom edge is its own content margin below the label.
 	var flyout_size := _contract_money_change.get_minimum_size()
 	_contract_money_change.size = flyout_size
 	_contract_money_change.position = Vector2(
-		-flyout_size.x - _ui_px(8.0),
-		(_contract_money_label.size.y - flyout_size.y) * 0.5
+		_contract_money_label.size.x - flyout_size.x,
+		_contract_money_label.size.y + _ui_px(12.0)
 	)
 	var remaining := _contract_money_change_until_msec - _hud_now_msec()
 	if remaining >= 0:

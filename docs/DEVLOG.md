@@ -259,6 +259,14 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-02 — the balance gets its own plate, and contracts sort by due
+
+The owner asked for the contract rows to be ordered by how close each is to
+time up, and for the money out of the contracts plate so it could name its
+key like the others. The plate now lists soonest-due first and its heading
+reads `C: board`. The balance is a small plate of its own, the coin and the
+figure, level with it on the top edge. The C board keeps priority order.
+
 ### 2026-10-02 — the contracts plate
 
 The owner found the top-right contracts clipboard ugly, out of line with

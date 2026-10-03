@@ -25,6 +25,33 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-02: **The balance is its own plate; the contracts plate lists
+  soonest due first.** (Owner, verbatim: "i want the contracts in the
+  overlay menu to be ordered by how close they are to times up. Move the
+  money display outside of the contracts overlay so that we can put C to
+  open like how the other overlays have it".)
+
+  **Where the balance went.** Three places were weighed. Above the contracts
+  plate in the right-hand column costs about 55px of a column that three
+  plates already share at 1280x720, where the contracts list is down to one
+  row. Top-centre lands on the unfolded legend at 1280 wide, because the
+  legend is 684px of a 1280px window. Left of the contracts plate, level with
+  its top, uses the edge nothing else is on. The only constraint is the
+  ~174px gap to the unfolded legend at 1280x720, which is why the figure's
+  floor is five digits (`MONEY_FIGURE_MIN_WIDTH`) and the coin is CREW-icon
+  sized. The render shows 29px of clearance. A headless run cannot check
+  that gap (it measures the legend at 772px), so `test_hud_plates.gd` pins
+  the plate against the contracts and CREW plates and the render is the
+  acceptance for the legend.
+
+  **Why due order on the plate only.** The wire's order is the sim's
+  allocation priority: the order the docks' stock is credited to orders. On
+  the board, where orders are compared and signed, that order is the right
+  one to read. On the plate, the question is "which order needs me next",
+  and the order whose window closes soonest answers it. Ties keep wire order
+  so two orders on one clock never swap from frame to frame. A row moves when
+  its contract settles and its clock restarts. The rows are rebuilt then,
+  once, behind the existing id-order guard.
 - 2026-10-02: **The contracts readout is a plate, not a clipboard.**
   (Owner, verbatim: "Make the contracts menu (the one in the top right of
   main gameplay screen) look much better: it looks bad and doesnt line up
