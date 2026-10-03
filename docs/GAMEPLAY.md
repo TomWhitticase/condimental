@@ -45,8 +45,8 @@ Concrete example tiers, in the order the user's original pitch laid them out. Ex
 |---|---|---|---|---|
 | 1 | Tomato sauce | Tomatoes, salt | Basic cooker/kettle | Baseline: one process step, no special handling |
 | 2 | Ketchup | + vinegar, sugar, spices | Reduction/thickening step, bottling & sealing | First multi-step recipe: cook down, blend, bottle |
-| 3 | BBQ sauce — **shipped 2026-09-18**, and it needed **no new machine** | + spice mix, molasses, liquid smoke, and *finished ketchup* | None: a second recipe on the mixer and the cooking vat the ketchup line already owns | A 600-tick cook — the longest process in the game by 2.5x — bought the "low and slow" identity with a number instead of a machine. It is gated instead by output sold — a hundred boxes of ketchup (§9's progression-gates bullet) — which is this table's first gate that is neither of the two kinds below |
-| 3 (a second one) | Mustard — **shipped 2026-09-26**, and it needed **no new machine** either | + mustard seed, turmeric. **Not** vinegar: the ketchup mixer drinks that from tick 0, so the gate cannot hold it back (`data/unlocks.ron`) | None: the same crusher, mixer, cooking vat, bottler and packer. The novelty is a *wet mill*: `mustard_mash` takes 4 seed **and 2 vinegar** and sends a fluid mash out, where the crusher's only other recipe (`tomato_paste`) is solid in, solid out. That is placement, not new capital: `ketchup_mix` already drinks raw `vinegar` on the mixer, and a second mixer recipe drinking any raw fluid leaves a pipe run the narrowing pass cannot name — the shipped ketchup line would stall on `AmbiguousPipe` — so the crusher, which drank nothing, is where a raw fluid could still enter (`data/recipes.ron`) | A second tier that buys no capital, so like BBQ the only thing making it arrive later is a **progression gate**: 100 boxes of BBQ sold. Its cook sits between the two it follows (360 ticks against ketchup's 240 and BBQ's 600). Measured from a new game, the gate opens at tick 125 000 — ~69 min at 30 ticks/sec, 73 000 ticks after the BBQ gate at 52 000 (131 000 before the 2026-10-02 contract board doubled) — on a line that never runs dry, so that is a floor (`godot_project/measure_gate_ticks.gd`) |
+| 2b | Mustard — **shipped 2026-09-26, reshaped 2026-10-03**, and it needed **no new machine** | + mustard seed, turmeric. **Not** vinegar: the ketchup mixer drinks that from tick 0, so the gate cannot hold it back (`data/unlocks.ron`) | None: crusher, mixer, bottler, packer — and **no cook**, because mustard is ground and mixed, not boiled. The crusher grinds seed to `ground_mustard` on a belt; the mixer takes it with turmeric and vinegar and makes finished mustard. Two mixer recipes drinking one bought fluid is possible because the player chooses each machine's recipe (§9) | The second sauce since 2026-10-03: a whole second line from raw, the same shape as the first, gated by **100 boxes of ketchup sold**. Measured from a new game it opens at tick 52 000 (`godot_project/measure_gate_ticks.gd`, a floor) |
+| 3 | BBQ sauce — **shipped 2026-09-18**, and it needed **no new machine** | + spice mix, molasses, liquid smoke, and *finished ketchup* | None: a second recipe on the mixer and the cooking vat the ketchup line already owns | A 600-tick cook — the longest process in the game by 2.5x — bought the "low and slow" identity with a number instead of a machine. The third sauce since 2026-10-03, gated by **100 boxes of mustard sold** (it was 100 of ketchup while BBQ came second): a sauce made of your own sauce, splitting the run that ships it, is the harder lesson and lands on a factory already running two lines. Measured from a new game it opens at tick 79 000 (the old third tier arrived at 125 000) |
 | 4 | Mayonnaise / aioli | Eggs, oil, acid | **Emulsifier** machine | An emulsion is a process the mixer cannot do, so the capital purchase is the gate. **No spoilage and no cold chain** — the game does not model either (decided 2026-10-02, §11). Once mayo exists it is the base its own variants and derived sauces draw on (§3) |
 | 5 | Hot sauce | Chilies, vinegar (high concentration) | **Acid-handling equipment** (acid-resistant tanks/piping) + fermentation vessel for mash-based variants | High-acid ingredients corrode standard equipment; this tier is gated by a *material/durability* requirement, not just a recipe unlock |
 | 6 | Elaborate/aged sauces (fermented hot sauce, barrel-aged BBQ, whole-grain mustard, etc.) | Combines multiple tier 2–5 ingredient classes | Multiple equipment lines feeding one recipe, plus multi-stage `TimedProcess` chains (mash → ferment → strain → blend → age → bottle) lasting far longer than any earlier tier | The payoff tier: production chains that span the whole factory, not one station |
@@ -260,15 +260,13 @@ implementation history (epics, tickets, balancing passes) behind each one.
   across it). Removing takes the whole tile and refunds both a belt and a
   pipe; rotating turns both. No other pair stacks. (Full record:
   `docs/DECISIONS.md`, 2026-10-01.)
-- **A machine kind may name several recipes, and what is plumbed into a
-  placed machine decides which one it runs** — first fully-satisfied wins,
-  `recipes.ron` file order is the tiebreak, and there is **no player-facing
-  recipe picker**. A mixer on a vinegar pipe beside a sugar hopper blends
-  ketchup mix; one on a ketchup pipe beside spice and molasses hoppers blends
-  BBQ mix. The layout is the choice. (Full record: `docs/DECISIONS.md`,
-  2026-09-21.) **Until something is fed in, a machine is undecided** and
-  shows itself as handling any sauce — file order never makes an empty
-  machine a ketchup machine (`docs/DECISIONS.md`, 2026-10-02).
+- **A machine kind may name several recipes, and the player chooses which
+  one each machine runs** (2026-10-03, superseding "the layout is the
+  choice") — at placement or from the MAKES picker in the machine's panel,
+  like a hopper's contents. A machine with no recipe chosen makes nothing
+  and says so. Two recipes on one kind may share inputs, even a bought fluid:
+  the ketchup and mustard mixers both drink vinegar. (Full record:
+  `docs/DECISIONS.md`, 2026-10-03.)
 - **Progression gates are content too** — `data/unlocks.ron` (schema 1). A
   gate names a product, a number of boxes of it that must be SOLD (delivered
   into a satisfied contract window), and two lists: ingredients held back from

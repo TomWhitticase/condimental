@@ -231,7 +231,8 @@ diff and the reasoning, however additive the change looks.
 
 ## 7. Deliberately not in this plan
 
-- **A player-facing recipe picker.** Inputs select the recipe (§3.2). A
+- *(Superseded 2026-10-03: there is a picker now — the player chooses each
+  machine's recipe; `docs/DECISIONS.md`.)* **A player-facing recipe picker.** Inputs select the recipe (§3.2). A
   machine-selection UI is a different game's affordance and nothing here
   needs it.
 - **Amending live contracts on unlock** (§4).

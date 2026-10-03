@@ -196,14 +196,18 @@
         // `godot_project/measure_gate_ticks.gd` (fully staffed, raws topped
         // up and money no object — a floor, not a typical run):
         //
-        //   MEASUREMENT PENDING
+        //   100th box of boxed_ketchup at tick 52 000 (the mustard gate), the
+        //   mustard line built beside the ketchup line and settled by tick
+        //   67 000, 23 of the board's 36 orders signed, and the 100th box of
+        //   boxed_mustard at tick 79 000 — 43.9 minutes at 30 ticks/sec, and
+        //   27 000 ticks (15 min) after the mustard gate opened
         //
         // Under the old order the second gate (then mustard's, opened by 100
         // boxes of BBQ) landed at tick 125 000, over an hour in, because the
         // BBQ branch's 600-tick cook put only about 1.6 boxes per 1 000 ticks
         // into paid windows. The mustard line has no cook and ships a case
         // per 200 ticks, which is why this order reaches the third sauce
-        // sooner. Whoever wants it sooner still has three content-side levers
+        // 46 000 ticks — about 26 minutes — sooner. Whoever wants it sooner still has three content-side levers
         // and no Rust to write: a smaller `boxes` here, more mustard demand in
         // `data/contracts.ron`, or a faster mustard recipe.
         //

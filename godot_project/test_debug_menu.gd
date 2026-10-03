@@ -239,7 +239,7 @@ func _initialize() -> void:
 	if not text.contains("revision %d" % int(main.sim.revision())):
 		_fail("the readout does not show the current revision:\n%s" % text)
 		return
-	if not text.contains("money %.0f" % _money(main)):
+	if not text.contains("money %s" % main.Money.amount(_money(main))):
 		_fail("the readout does not show the simulation's own balance:\n%s" % text)
 		return
 	# One `user://` line for both files, so what it must name is the directory

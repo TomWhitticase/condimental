@@ -142,7 +142,7 @@ func _initialize() -> void:
 	if money_labels != 1:
 		_fail("expected exactly one money readout on the plate, found %d — money is a single shared counter (GAMEPLAY.md §1)" % money_labels)
 		return
-	if String(main._contract_money_label.text) != "%d" % int(float(econ.get("money", 0.0))):
+	if String(main._contract_money_label.text) != main.Money.amount(int(float(econ.get("money", 0.0)))):
 		_fail("the balance should read the wire's money, got '%s'" % main._contract_money_label.text)
 		return
 

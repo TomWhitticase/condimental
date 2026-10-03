@@ -49,6 +49,13 @@ below is history and should only ever be appended to.)*
   **a hundred boxes of ketchup have been sold** (the trigger was ten lifetime
   delivery windows until 2026-09-26), so a new game's market and board show
   only what a one-sauce factory can use. See the log entries below.
+- **Three sauces, in the order ketchup, mustard, BBQ (2026-10-03), and the
+  player chooses what each machine makes.** Click a machine and its panel's
+  MAKES picker sets its recipe; a machine with none chosen makes nothing.
+  Mustard is ground and mixed, never cooked (crusher → mixer → bottler →
+  packer), opens after 100 boxes of ketchup, and BBQ after 100 boxes of
+  mustard. Saves are v8; `scripts/migrate-save-v7-to-v8.py` converts older
+  ones. See the log entry below.
 - **The game explains itself (2026-09-25).** **B** opens THE COOKBOOK: a
   sauce tree with a node per family in a column that says how far from raw it
   is, an arrow wherever one sauce is an ingredient in another, and a page
@@ -258,6 +265,29 @@ below is history and should only ever be appended to.)*
 ---
 
 ## Log
+
+### 2026-10-03 — Machines run the recipe you choose, and mustard comes second
+
+The owner asked for three things in one conversation: swap the order so
+mustard comes before BBQ, stop cooking mustard (it is ground and mixed in
+real life), and put mustard's vinegar in at the mixer rather than the
+crusher. The last was blocked by issue #184 — the pipe resolver could not
+tell a ketchup mixer from a mustard mixer on one vinegar run, because a
+machine picked its own recipe from its inputs. The owner's answer was to
+let the player choose, and that is what landed: every machine with more
+than one recipe has a MAKES picker in its click panel, runs that recipe and
+nothing else, and makes nothing until one is chosen. The resolver reads the
+choice, so the one-raw-fluid-per-machine rule and its workaround are gone.
+
+Mustard is now crusher (seed to ground mustard on a belt) → mixer (with
+turmeric and vinegar) → bottler → packer: cheaper to build than the
+ketchup line and quicker to run. The unlock order is ketchup → mustard →
+BBQ; measured from a new game, BBQ now opens at tick 79 000 where the old
+third tier opened at 125 000. Saves moved to v8, and
+`scripts/migrate-save-v7-to-v8.py` keeps every machine on the recipe it was
+running, re-points the old mustard machines, empties the pipes, and keeps
+BBQ open on a save that had already earned it. Full record:
+`docs/DECISIONS.md`, 2026-10-03.
 
 ### 2026-10-02 — the contracts plate
 

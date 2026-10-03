@@ -758,10 +758,15 @@ func _run_checks() -> void:
 		_fail("clicking the mixer did not open a machine panel")
 		return
 	# A machine has nothing to fill and nothing to keep filled, so those
-	# rows are hidden rather than left disabled forever.
+	# rows are hidden rather than left disabled forever. Its picker is the
+	# MAKES one (2026-10-03) — a mixer has several recipes to choose from —
+	# not a hopper's CONTENTS.
 	if main._config_fill_row.visible or main._config_auto_button.visible \
-			or main._config_auto_note.visible or main._config_picker_box.visible:
+			or main._config_auto_note.visible:
 		_fail("a machine's panel still shows the hopper/tank rows")
+		return
+	if not main._config_picker_box.visible or main._config_picker_heading.text != "MAKES":
+		_fail("a mixer's panel should carry its MAKES picker, got heading '%s'" % main._config_picker_heading.text)
 		return
 	if not main._config_machine_box.visible:
 		_fail("a machine's panel hides the mothball switch")

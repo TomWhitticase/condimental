@@ -34,9 +34,8 @@
 #     review made and issue #108 recorded: a guard that can only be given
 #     more entries has not been fixed. Add a fourth sauce and this test asks
 #     about its ids without being edited,
-#   * AND THE MIXER AGREES WITH ITS OWN PIPE: `PRODUCT_TINTS["mustard"]`
-#     equals `FLUID_TINTS["mustard"]`, one sauce and one colour, the rule
-#     `test_bbq_branch.gd` pins for the other two sauces.
+#   * AND THE BOTTLER AGREES WITH ITS PIPE: `PRODUCT_TINTS["bottled_mustard"]`
+#     equals `FLUID_TINTS["mustard"]`, one sauce and one colour.
 #
 # The one-frame-before-checking dance is inherited from test_hover.gd — see
 # that file's header.
@@ -287,15 +286,22 @@ func _run_checks() -> void:
 			)
 			return
 
-	# --- 5. the mixer and the pipe it fills are one colour ----------------
+	# --- 5. the sauce in the pipe and in the bottler are one colour -------
+	# The mixer shows no product (no `machine_product` mesh); the bottler is
+	# the first machine on the line that does, and it holds the sauce the
+	# mixer's pipe carries.
 	if fluids_in_order.is_empty():
 		_fail("the mustard page names no piped stage; the finished sauce leaves the mixer down a pipe")
 		return
 	var mixed := String(fluids_in_order[fluids_in_order.size() - 1])
-	if main.PRODUCT_TINTS.get(mixed, main.PRODUCT_TINT_FALLBACK) != main.FLUID_TINTS[mixed]:
+	var bottled := ""
+	for step in steps:
+		if String(step.get("machine", "")) == "bottler":
+			bottled = String(step.get("recipe", ""))
+	if main.PRODUCT_TINTS.get(bottled, main.PRODUCT_TINT_FALLBACK) != main.FLUID_TINTS[mixed]:
 		_fail(
-			"the mixer draws '%s' as %s while the pipe it fills draws it as %s — one sauce, one colour"
-			% [mixed, str(main.PRODUCT_TINTS.get(mixed, main.PRODUCT_TINT_FALLBACK)), str(main.FLUID_TINTS[mixed])]
+			"the bottler draws '%s' as %s while the pipe feeding it carries '%s' as %s — one sauce, one colour"
+			% [bottled, str(main.PRODUCT_TINTS.get(bottled, main.PRODUCT_TINT_FALLBACK)), mixed, str(main.FLUID_TINTS[mixed])]
 		)
 		return
 
@@ -311,8 +317,8 @@ func _run_checks() -> void:
 		]
 		+ "on the sauce's own cookbook page (%d steps, %d inputs) resolves to a model or a tint of "
 		% [steps.size(), inputs.size()]
-		+ "its own and none to a fallback, with the mixer drawing '%s' the same colour as the pipe it fills"
-		% mixed
+		+ "its own and none to a fallback, with the bottler drawing '%s' the same colour as the pipe feeding it"
+		% bottled
 	)
 	quit(0)
 

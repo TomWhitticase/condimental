@@ -267,11 +267,11 @@ func _run_checks() -> void:
 
 	# --- 1e. the HIRE/FIRE buttons say what a click does and costs, and a
 	# disabled HIRE says WHY in words (the staffing ticket, requirement 3) ----
-	if main._staff_hire_button_text({"wage": 2}) != "HIRE +1 · 2/period":
+	if main._staff_hire_button_text({"wage": 2}) != "HIRE +1 · £2/period":
 		_fail("HIRE names the per-period cost of the head it adds, got '%s'" % main._staff_hire_button_text({"wage": 2}))
 	if main._staff_hire_button_text({"wage": 0}) != "HIRE +1":
 		_fail("a volunteer category's HIRE quotes no cost, got '%s'" % main._staff_hire_button_text({"wage": 0}))
-	if main._staff_row_state({"id": "manufacturing", "wage": 2})["hire_text"] != "HIRE +1 · 2/period":
+	if main._staff_row_state({"id": "manufacturing", "wage": 2})["hire_text"] != "HIRE +1 · £2/period":
 		_fail("the row state carries the button's own text")
 	if main._staff_row_state({"id": "manufacturing"})["fire_text"] != "FIRE −1":
 		_fail("FIRE says it removes one head")
@@ -406,8 +406,8 @@ func _run_checks() -> void:
 	if main._staff_bill(snapshot) != 4 * 2 + 2 * 3 + 1 * 2:
 		_fail("the bill is every head at its category's wage, got %d" % main._staff_bill(snapshot))
 	var footer: String = main._staff_footer_text(snapshot, 1700)
-	if footer.find("wages 16 / period") < 0:
-		_fail("the footer says 'wages 16 / period', got:\n%s" % footer)
+	if footer.find("wages £16 / period") < 0:
+		_fail("the footer says 'wages £16 / period', got:\n%s" % footer)
 	var expected_wait: String = main._format_remaining(300)
 	if footer.find("next payday in %s" % expected_wait) < 0:
 		_fail("the footer says 'next payday in %s' (300 ticks at TICK_HZ), got:\n%s" % [expected_wait, footer])
@@ -428,11 +428,11 @@ func _run_checks() -> void:
 
 	# --- 2a. the BEFORE-payday warning and the covered-payday balance,
 	# pure (ticket 4) ----------------------------------------------------------
-	if main._staff_footer_text(snapshot, 1700).find("balance after payday: 484") < 0:
+	if main._staff_footer_text(snapshot, 1700).find("balance after payday: £484") < 0:
 		_fail("a covered payday's footer says the balance it would leave (500 - 16 = 484), got:\n%s" % main._staff_footer_text(snapshot, 1700))
-	if main._staff_shortfall_text(6, 3) != "▲ next payday short by 6 — 3 heads go unpaid":
+	if main._staff_shortfall_text(6, 3) != "▲ next payday short by £6 — 3 heads go unpaid":
 		_fail("the ticket's own example wording, got '%s'" % main._staff_shortfall_text(6, 3))
-	if main._staff_shortfall_text(2, 1) != "▲ next payday short by 2 — 1 head goes unpaid":
+	if main._staff_shortfall_text(2, 1) != "▲ next payday short by £2 — 1 head goes unpaid":
 		_fail("one head is singular ('head goes'), got '%s'" % main._staff_shortfall_text(2, 1))
 	var broke_snapshot: Dictionary = snapshot.duplicate(true)
 	broke_snapshot["money"] = 8.0
@@ -440,7 +440,7 @@ func _run_checks() -> void:
 	if main._staff_shortfall(broke_snapshot, 8.0) != 6:
 		_fail("the wire's own shortfall wins, got %d" % main._staff_shortfall(broke_snapshot, 8.0))
 	var broke_footer: String = main._staff_footer_text(broke_snapshot, 1700)
-	if broke_footer.find("▲ next payday short by 6") < 0:
+	if broke_footer.find("▲ next payday short by £6") < 0:
 		_fail("an uncovered payday's footer leads with the BEFORE warning, got:\n%s" % broke_footer)
 	if broke_footer.find("balance after payday") >= 0:
 		_fail("a short footer does not also claim a balance after payday, got:\n%s" % broke_footer)
@@ -481,14 +481,14 @@ func _run_checks() -> void:
 	var broke: Dictionary = main._contract_wages_state(snapshot, 1700, 10.0)
 	if not bool(broke["short"]):
 		_fail("10 cannot cover a bill of 16, so the line warns")
-	if String(broke["text"]).find("short 6") < 0:
+	if String(broke["text"]).find("short £6") < 0:
 		_fail("the warning names the shortfall, got '%s'" % broke["text"])
 	if String(broke["text"]).find("⚠") < 0 or String(broke["text"]).find("leave") < 0:
 		_fail("the warning carries a glyph and says what happens, got '%s'" % broke["text"])
 
 	# A part unit cannot pay a whole head: 15.9 against 16 is short by one.
 	var part: Dictionary = main._contract_wages_state(snapshot, 1700, 15.9)
-	if not bool(part["short"]) or String(part["text"]).find("short 1") < 0:
+	if not bool(part["short"]) or String(part["text"]).find("short £1") < 0:
 		_fail("a fractional balance floors, so 15.9 against 16 is short 1, got '%s'" % part["text"])
 
 	# The wire's own figures win over Godot's sum. Since ticket 1's notice pay
@@ -501,15 +501,15 @@ func _run_checks() -> void:
 	if main._staff_next_bill(notice) != 20:
 		_fail("the bill is the wire's next_bill, got %d" % main._staff_next_bill(notice))
 	var owed: Dictionary = main._contract_wages_state(notice, 1700, 16.0)
-	if String(owed["text"]).find("wages 20") < 0:
+	if String(owed["text"]).find("wages £20") < 0:
 		_fail("notice pay is billed, so the line reads 'wages 20', got '%s'" % owed["text"])
-	if not bool(owed["short"]) or String(owed["text"]).find("short 4") < 0:
+	if not bool(owed["short"]) or String(owed["text"]).find("short £4") < 0:
 		_fail("the wire's shortfall is quoted verbatim, got '%s'" % owed["text"])
-	if main._staff_footer_text(notice, 1700).find("wages 20 / period") < 0:
+	if main._staff_footer_text(notice, 1700).find("wages £20 / period") < 0:
 		_fail("the H panel footer quotes the same bill as the clipboard warning")
 	# And so does the plate, which is the readout the warning replaced.
 	var plate_footer := String(main._crew_plate_state(notice, 1700)["payday_text"])
-	if plate_footer.find("wages 20") < 0:
+	if plate_footer.find("wages £20") < 0:
 		_fail("the CREW plate quotes the wire's bill, got '%s'" % plate_footer)
 	if plate_footer.find("payday in %s" % expected_wait) < 0:
 		_fail("the CREW plate counts down in seconds, got '%s'" % plate_footer)
@@ -610,7 +610,7 @@ func _run_checks() -> void:
 			_fail("row %s's FIRE button must be %s" % [id, "enabled" if state["fire_enabled"] else "disabled"])
 		if row["hire_button"].disabled == bool(state["hire_enabled"]):
 			_fail("row %s's HIRE button must be %s (the establishment alone gates it)" % [id, "enabled" if state["hire_enabled"] else "disabled"])
-	if main._staff_money_label.text != "Money: %.0f" % float(live.get("money", 0.0)):
+	if main._staff_money_label.text != "Money: £%.0f" % float(live.get("money", 0.0)):
 		_fail("the panel's balance is the snapshot's money, got '%s'" % main._staff_money_label.text)
 	if main._staff_footer_label.text != main._staff_footer_text(main._staff_snapshot, main.sim.current_tick()):
 		_fail("the footer is drawn from the last poll and the current tick")
@@ -628,7 +628,7 @@ func _run_checks() -> void:
 		_fail("the underfunded line is short by exactly 6, got %d" % main._staff_shortfall(main._staff_snapshot, float(main._staff_snapshot.get("money", 0.0))))
 	if main._staff_unpaid_count_if_payday_now(main._staff_snapshot) != 3:
 		_fail("the cascade leaves exactly 3 heads unpaid, got %d" % main._staff_unpaid_count_if_payday_now(main._staff_snapshot))
-	if main._staff_footer_label.text.find("▲ next payday short by 6 — 3 heads go unpaid") < 0:
+	if main._staff_footer_label.text.find("▲ next payday short by £6 — 3 heads go unpaid") < 0:
 		_fail("the panel's footer carries the ticket's own wording, got:\n%s" % main._staff_footer_label.text)
 	# A payday it cannot pay WARNS and leaves the button alone (2026-09-26):
 	# the row says why in words, and `_staff_hire` puts the confirmation up.
@@ -916,15 +916,15 @@ func _run_checks() -> void:
 		var label: Label = slot["crew_label"]
 		if slot["kind"] == "crusher":
 			saw_machine = true
-			if label.text != "crew: 1 manufacturing\n2 / period":
+			if label.text != "crew: 1 manufacturing\n£2 / period":
 				_fail("the crusher's card says 'crew: 1 manufacturing\n2 / period' under the price, got '%s'" % label.text)
 		if slot["kind"] == "belt":
 			saw_belt = true
 			if label.text != "":
 				_fail("a belt's card shows no crew line")
-		if slot["kind"] == "cooking_vat" and label.text != "crew: 2 manufacturing\n4 / period":
+		if slot["kind"] == "cooking_vat" and label.text != "crew: 2 manufacturing\n£4 / period":
 			_fail("the vat's card says 'crew: 2 manufacturing\n4 / period', got '%s'" % label.text)
-		if slot["kind"] == "dock" and label.text != "crew: 1 logistics\n2 / period":
+		if slot["kind"] == "dock" and label.text != "crew: 1 logistics\n£2 / period":
 			_fail("the dock's card says 'crew: 1 logistics\n2 / period', got '%s'" % label.text)
 	if not saw_machine or not saw_belt:
 		_fail("the build menu lists a crusher and a belt")

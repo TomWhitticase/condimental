@@ -15,39 +15,16 @@
 #
 # WHAT IT MEASURES. A line that never runs dry, never mis-builds and never goes
 # broke — restocked and refunded every poll — so both numbers are a FLOOR, not
-# a typical playthrough.
+# a typical playthrough. Since 2026-10-03 the order is ketchup, mustard, BBQ:
+# the ketchup line (`build_reference_line`) runs alone until a hundred boxes
+# of ketchup open MUSTARD; the mustard line (`build_mustard_line`, on its own
+# rows, gate earned rather than patched) is then built beside it, every order
+# the board will take is signed, and the factory runs until a hundred boxes
+# of mustard open BBQ.
 #
-# WHAT IT PRINTED on 2026-10-02, at `data/unlocks.ron`'s shipped 100/100,
-# with a case of eight bottles and the doubled 36-offer contract board (the
-# run before the board doubled, 15 of 17 offers signed and 13 active, printed
-# 131000 / 72.8 min / 64 000 / 79 000; the 2026-09-29 run, at one bottle a
-# case, printed 155000 / 86.1 min / 88 000 / 103 000):
-#
-#   BBQ fixture handed back at tick 67000, 142 boxes of ketchup sold — the tick
-#     `build_bbq_running_line` RETURNS at, not the tick the gate opened: it
-#     spots the open gate on a 250-tick poll at about tick 52 000, then builds
-#     the BBQ branch and runs `BBQ_SETTLE_TICKS` (15 000) more before handing
-#     back, and the ketchup line keeps selling throughout
-#   active contracts after signing 34 of 36 offers: 25
-#   MUSTARD gate crossed at tick 125000 — 69.4 minutes at 30 ticks/s,
-#     58 000 ticks after the line above; the BBQ gate itself opened at tick
-#     52 000, so 73 000 ticks (~41 min) of the run follow it
-#
-# It printed 141000 until 2026-09-29 (PR #209), when `build_bbq_running_line`
-# stopped signing `smokehouse_trial`: the hand-off now carries only 8 boxes
-# of BBQ sold, so this number moves with what that fixture signs during its
-# settle.
-#
-# IT PRINTED 181000 UNTIL 2026-09-27, and that number is in no file any more:
-# the signing step read `available_contracts`/`active_contracts`, which are not
-# the wire's keys, so `.get(…, [])` handed it an empty array, nothing was
-# signed and only the two orders `build_bbq_running_line` signs for itself were
-# ever asking for BBQ. It reported "active contracts after signing: 0" while
-# two were running (then `smokehouse_trial` and `grill_pub`), which is what gave the
-# mistake away. Hence the two
-# refusals below: a measuring tool that skips a step silently is worse than no
-# tool.
-#
+# The history of what it printed under the old order (ketchup, BBQ, mustard)
+# is in `data/unlocks.ron`'s notes and in this file's git history; the
+# current numbers are in `data/unlocks.ron`, beside the gates they measure.
 extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
@@ -57,81 +34,75 @@ func _init() -> void:
 	get_root().add_child(main)
 	await process_frame
 	var sim = main.sim
-
 	var t0 := Time.get_ticks_msec()
-	Layouts.build_bbq_running_line(sim)
+
+	# 1. The ketchup line alone, kept fed, crewed and funded.
+	Layouts.build_reference_line(sim)
+	Layouts.fund(sim, 200000)
+	Layouts.stock_larder(sim, Layouts.LARDER_STOCK)
+	for tile in [Vector2i(-1, 0), Vector2i(4, 1)]:
+		sim.issue_command_json(JSON.stringify({
+			"type": "set_hopper_auto_fill", "tile": [tile.x, tile.y], "enabled": true,
+		}))
+	sim.issue_command_json(JSON.stringify({
+		"type": "set_tank_auto_fill", "tile": [5, 2], "enabled": true,
+	}))
+	Layouts.hire_until_staffed(sim)
+	var first := _run_until_open(sim, "mustard_sauce", 300000)
+	if first < 0:
+		print("MEASURE_FAIL: the ketchup line never opened the mustard gate")
+		quit(1)
+		return
+	print("MUSTARD gate opened at tick %d (%.1f min at 30 ticks/s; wall %.1fs)" % [
+		first, first / 30.0 / 60.0, (Time.get_ticks_msec() - t0) / 1000.0])
+
+	# 2. The mustard line beside it, its gate EARNED (open_gates = false).
+	Layouts.build_mustard_line(sim, false)
 	if Layouts.fixture_failure() != "":
 		print("MEASURE_FAIL: %s" % Layouts.fixture_failure())
 		quit(1)
 		return
-	var economy = JSON.parse_string(sim.economy_snapshot_json())
-	# NOT the tick the gate opened: the fixture spots it on a 250-tick poll and
-	# then builds the BBQ branch and settles `BBQ_SETTLE_TICKS` more, so this is
-	# the hand-off and the `sold` count below is already past 100.
-	print("BBQ fixture handed back at tick %d, %d ticks after its gate opened (wall %.1fs)" % [
-		int(sim.current_tick()), Layouts.BBQ_SETTLE_TICKS, (Time.get_ticks_msec() - t0) / 1000.0])
-	for gate in economy.get("unlocks", []):
-		print("  gate %s: item=%s sold=%d required=%d open=%s" % [
-			gate.get("id", "?"), gate.get("item", "?"),
-			int(gate.get("sold", 0)), int(gate.get("required", 0)), str(gate.get("open", false))])
+	var handed := int(sim.current_tick())
+	print("mustard line built and settled, handed back at tick %d" % handed)
 
-	# Sign everything the board will now take, so the whole of the authored BBQ
-	# demand is actually running — not just the two orders the BBQ fixture
-	# signs for itself. The keys are `board` (every offer) and `contracts`
-	# (the active ones), which is what `main.gd` reads; an earlier cut of this
-	# tool asked for `available_contracts`/`active_contracts`, got the `.get`
-	# default `[]` for both, signed nothing and reported "0 active" while two
-	# orders were running. A silently-skipped step in a measuring tool is worse
-	# than no tool, so this one REFUSES rather than measuring the wrong world.
+	# 3. Sign everything the board will now take. The keys are `board` and
+	# `contracts`; a tool that asked for the wrong keys once signed nothing
+	# and measured the wrong world, so this one REFUSES an empty answer.
 	Layouts.fund(sim, 200000)
 	var board: Array = JSON.parse_string(sim.economy_snapshot_json()).get("board", [])
 	if board.is_empty():
 		print("MEASURE_FAIL: the board is empty, so `board` is not the wire's key for it any more")
 		quit(1)
 		return
-	var asked := 0
 	for offer in board:
-		if bool(offer.get("active", false)):
-			continue
-		asked += 1
-		sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": offer.get("id", "")}))
+		if not bool(offer.get("active", false)):
+			sim.issue_command_json(JSON.stringify({"type": "sign_contract", "id": offer.get("id", "")}))
 	var signed: Array = JSON.parse_string(sim.economy_snapshot_json()).get("contracts", [])
-	var names: Array[String] = []
-	for contract in signed:
-		names.append(String(contract.get("id", "?")))
-	print("active contracts after signing %d of %d offers: %d (%s)" % [
-		asked, board.size(), signed.size(), ", ".join(names)])
+	print("active contracts: %d of %d offers" % [signed.size(), board.size()])
 	if signed.is_empty():
-		print("MEASURE_FAIL: nothing is signed, so nothing orders BBQ and the second gate cannot open")
+		print("MEASURE_FAIL: nothing is signed, so nothing orders mustard and the BBQ gate cannot open")
 		quit(1)
 		return
 
-	var start_tick := int(sim.current_tick())
-	var ceiling := 600000
-	var crossed := -1
-	while true:
-		Layouts.restock(sim)
-		Layouts.fund(sim, 200000)
-		for _i in range(2000):
-			sim.tick()
-		var snap = JSON.parse_string(sim.economy_snapshot_json())
-		var tick := int(sim.current_tick())
-		var bbq_sold := 0
-		var mustard_open := false
-		for gate in snap.get("unlocks", []):
-			if String(gate.get("item", "")) == "boxed_bbq":
-				bbq_sold = int(gate.get("sold", 0))
-				mustard_open = bool(gate.get("open", false))
-		if tick % 20000 < 2000:
-			print("  tick %d: boxed_bbq sold %d" % [tick, bbq_sold])
-		if mustard_open:
-			crossed = tick
-			break
-		if tick - start_tick > ceiling:
-			print("MEASURE: ceiling %d ticks reached, boxed_bbq sold %d" % [ceiling, bbq_sold])
-			break
-	if crossed >= 0:
-		print("MUSTARD gate crossed at tick %d (%.1f min at 30 ticks/s); %d ticks after this measurement started at the fixture's hand-off" % [
-			crossed, crossed / 30.0 / 60.0, crossed - start_tick])
+	var second := _run_until_open(sim, "bbq_sauce", 600000)
+	if second < 0:
+		print("MEASURE: the BBQ gate did not open within the ceiling")
+	else:
+		print("BBQ gate opened at tick %d (%.1f min at 30 ticks/s); %d ticks after the mustard gate, %d after the mustard line's hand-off" % [
+			second, second / 30.0 / 60.0, second - first, second - handed])
 	print("MEASURE_DONE")
 	quit(0)
+
+
+## Ticks the factory (restocked and refunded every poll) until gate `id` is
+## open, and returns the tick it was seen open, or -1 past `ceiling`.
+func _run_until_open(sim, id: String, ceiling: int) -> int:
+	var start := int(sim.current_tick())
+	while int(sim.current_tick()) - start < ceiling:
+		if Layouts.unlock_open(sim, id):
+			return int(sim.current_tick())
+		Layouts.restock(sim)
+		Layouts.fund(sim, 200000)
+		for _i in range(250):
+			sim.tick()
+	return -1

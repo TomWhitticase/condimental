@@ -276,7 +276,7 @@ func _run_checks(main) -> void:
 		if terms.contains("tick"):
 			_fail("row '%s' terms '%s' speak in ticks — a player-facing clock is seconds" % [board[i]["id"], terms])
 			return
-		if not String(main._board_rows[i]["payout_label"].text).contains("+%d" % int(board[i]["payout"])):
+		if not String(main._board_rows[i]["payout_label"].text).contains(main.Money.change(float(board[i]["payout"]))):
 			_fail("row '%s' does not state its payout, got '%s'" % [board[i]["id"], main._board_rows[i]["payout_label"].text])
 			return
 
@@ -316,7 +316,7 @@ func _run_checks(main) -> void:
 		if row["sign_button"].disabled:
 			_fail("offer '%s' should be signable with the starting balance" % id)
 			return
-		if String(row["sign_button"].text) != "SIGN · %d" % offer_price:
+		if String(row["sign_button"].text) != "SIGN · £%d" % offer_price:
 			_fail("offer '%s' button should name the price, got '%s'" % [id, row["sign_button"].text])
 			return
 		if row["lock_row"].visible or row["badge_lock"].visible:

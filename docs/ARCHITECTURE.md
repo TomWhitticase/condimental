@@ -178,15 +178,14 @@ fluid type; flow equalizes between adjacent segments each tick. Never
 simulate droplets.
 
 A run's fluid type is **derived, not declared**: `World::resolve_network_fluids`
-narrows the candidates seeded by every recipe of every machine kind touching
-the run, and a run nothing narrows to one fluid is a fault the machines on it
-stall with. It narrows on **fluids alone** — the solid side of a recipe is
-invisible to it — which constrains content: *at most one raw fluid may enter a
-machine kind, and at most one recipe on that kind may drink it* (2026-09-26,
-`docs/DECISIONS_LOG.md`). A sauce whose fluid wants into a kind that already
-drinks one takes it as a derived fluid made a stage earlier, the way mustard's
-vinegar enters at the crusher. `data/recipes.ron`'s header states the rule and
-`recipe.rs`'s `at_most_one_raw_fluid_enters_any_machine_kind` enforces it.
+narrows the candidates seeded by the recipe the player CHOSE for each machine
+touching the run (2026-10-03 — a machine runs only its chosen recipe), plus
+what a tank declares; a run nothing narrows to one fluid is a fault the
+machines on it stall with. Because each machine speaks for one recipe, two
+recipes on one machine kind may drink the same raw fluid — the ketchup and
+mustard mixers both drink vinegar — which the earlier rule, when a machine
+picked its own recipe and claimed for every recipe of its kind, forbade
+(`docs/DECISIONS_LOG.md`, 2026-09-26 and 2026-10-03).
 
 ### 3.5 Long-running / timed processes
 

@@ -418,9 +418,10 @@ func _run_checks() -> void:
 	# exists because a machine can be bigger than one tile.
 	var far_corner := Vector2i(1, 1)
 	var far_text: String = vat_scene._hover_text_at_tile(far_corner)
-	# An unfed vat is undecided, so it is identified by its KIND ("Cooking
-	# Vat · any sauce"), not by the first vat recipe in the file.
-	if not far_text.begins_with(vat_scene._kind_display_name("cooking_vat")):
+	# `build_multi_tile` places the vat set to cook ketchup, as a player sets
+	# every machine (2026-10-03), so the far corner names that recipe — the
+	# same sentence the origin tile gives.
+	if not far_text.begins_with(vat_scene._item_display_name("ketchup")):
 		_fail("the vat's far corner %s should identify the vat, got: %s" % [str(far_corner), far_text])
 		return
 	if vat_scene._hover_text_at_tile(Vector2i(1, 2)) != "":

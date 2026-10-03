@@ -25,6 +25,96 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-03: **The player chooses each machine's recipe; mustard is ground
+  and mixed, and comes second.**
+  (Owner, in three steps on 2026-10-02/03: "i feel like its probably better
+  if we went ketchup -> Mustard -> bbq sauce"; "irl mustard doesn't really
+  require cooking ... the crusher should jsut be for crushing, vinegar should
+  go in in the mixing stage"; and, asked how that could work given issue
+  #184, "when we place a mixer (and any other machine) it doesnt make
+  anything until we explicitly set it to (like how the hopper works) we
+  click on it and choose the recipe. would that solve our issues?" — then
+  "get this work done, then get it merged to main (ensure we migrate old
+  saves to new format)".)
+
+  **What it overturns, and why that is not a reversal of taste.** The
+  2026-09-21 record said a placed machine runs whichever recipe its inputs
+  satisfy and "there is never a picker", because the plumbing already
+  decides. That premise held while no two recipes on one kind shared an
+  input. It stopped holding the moment a sauce wanted a fluid a kind already
+  drank: the pipe resolver names a run from the recipes of the machines on
+  it, and a machine that picks its own recipe could be running either, so a
+  vinegar run between a ketchup mixer and a mustard mixer could never be
+  narrowed (issue #184). The 2026-09-26 workaround — at most one raw fluid
+  per kind, mustard's vinegar moved to a WET crusher — bought one more
+  sauce at the cost of content shaped to dodge the engine, which is exactly
+  what the owner's second message objected to. With the recipe chosen, the
+  resolver has a fact to read and nothing to guess, so both the workaround
+  and the self-picking machine go.
+
+  **Options weighed.**
+  (1) Teach the resolver about the solid side of a recipe (#184's own
+  proposal): keeps "the layout is the choice", but a run between two
+  machines that could each run several recipes still has to guess which they
+  will run, and the stall readouts stay guesses too. Large, and still
+  heuristic.
+  (2) A separate mustard acid, or a new machine kind: invents content for no
+  reason a player could see — the owner's objection, verbatim.
+  (3) The player sets the recipe (chosen). Factorio's assembler model;
+  matches how a hopper's contents already work here; makes every downstream
+  question (what a run carries, what a machine takes off a belt, what its
+  stall is) a read rather than a derivation.
+
+  **The mechanics, as built.** `Machine::recipe` is the choice; `Machine::tick`
+  runs it and never changes it, and with none it records a starved tick.
+  `Machine::takes` makes a machine accept off a belt only what its recipe
+  consumes, so a mis-set machine backs its belt up visibly instead of filling
+  its buffer with stock it will never use. `PlayerCommand::Place` gained an
+  optional `recipe` (refused if the kind cannot run it); a kind with one
+  recipe is placed holding it. `PlayerCommand::SetMachineRecipe` is the
+  picker: it abandons the craft in progress, drops inputs the new recipe does
+  not take, recomputes the topology and EMPTIES any run whose name changed —
+  `try_set_tank_fluid`'s lesson, since volumes carry across a rebuild by
+  tile and would otherwise be relabelled. In `resolve_network_fluids` a
+  machine claims only for its chosen recipe, and a machine with none claims
+  nothing (a run only unset machines touch reads `unplumbed`, not a fault).
+  Two consequences had to be put back by hand, because the old
+  every-recipe-of-the-kind claims had been providing them by accident:
+  `feasible_namings` offers EVERY matching of a recipe's fluid inputs to
+  runs, so two undeclared raw runs into one two-fluid machine stay ambiguous
+  (issue #43 — only the player knows which drum is which); and a run two
+  tanks declare differently is not narrowed, so it stays ambiguous rather
+  than being named for one tank while the other pours into it.
+
+  **Mustard.** Crusher: 4 seed → `ground_mustard`, a belt solid in a pail of
+  its own (`item_ground_mustard`, matte gold — it is flour). Mixer:
+  ground mustard + turmeric + 2 vinegar → `mustard`, a fluid, straight to
+  the bottler. No vat. Same raws at the same counts, so a case still costs
+  17 in raws; the line is 743 to build (959 with the vat it no longer has)
+  and ships a case per 200 ticks, the bottler being its slowest stage.
+  `mustard_mash` and `mustard_mix` are gone.
+
+  **The order.** Ketchup, then mustard (100 boxes of ketchup), then BBQ (100
+  boxes of mustard). A second identical-shaped line is the easier lesson; a
+  sauce made of your own sauce, which splits the run that ships it, is the
+  harder one and lands better on a factory that already runs two lines.
+  Contracts naming both mustard and BBQ moved to the BBQ gate: an order is
+  released by the later of the gates its sauces sit behind. Measured from a
+  new game (`measure_gate_ticks.gd`): mustard at tick 52 000, BBQ at 79 000;
+  the old third tier arrived at 125 000.
+
+  **Saves.** `SavedMachine::recipe` kept its shape and changed its meaning,
+  so the format is v8 and v7 is refused naming
+  `scripts/migrate-save-v7-to-v8.py`. The script keeps every machine on the
+  recipe it held, moves the three retired mustard recipes to their
+  replacements (the vat to none), abandons their crafts, empties every pipe,
+  drops the two retired fluids from the production ledger, and — the one
+  judgement call — raises `boxed_mustard` sold to 100 on a save that had
+  already opened BBQ, so the reorder does not take a tier away from a player
+  who earned it. Pinned to a real v7 save written by the last v7 build
+  (`sim_core/tests/fixtures/save_v7_two_lines.ron`) by
+  `tests/save_migration.rs` and `scripts/test_migrate_save_v7_to_v8.py`.
+
 - 2026-10-02: **The contracts readout is a plate, not a clipboard.**
   (Owner, verbatim: "Make the contracts menu (the one in the top right of
   main gameplay screen) look much better: it looks bad and doesnt line up

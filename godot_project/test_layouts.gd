@@ -872,10 +872,18 @@ const MIXED_BELT := Vector2i(23, 0)
 ## single box, and every test of it passed, because nothing asserts that a
 ## fixture's factory actually ran.
 ##
-## So: the ketchup line runs on its own until the gate opens, and only then
-## is the branch placed, stocked, crewed and its contracts signed. That is
-## the sequence a player lives through, and it is the reason this fixture no
-## longer needs to re-sign the corner_shop order after the settle — see below.
+## So: the ketchup line runs on its own until the FIRST gate opens, and only
+## then is the branch placed, stocked, crewed and its contracts signed.
+##
+## **Since 2026-10-03 the first gate is mustard's, and BBQ waits on a hundred
+## boxes of MUSTARD** (`data/unlocks.ron`). This fixture's subject is the BBQ
+## branch, not a mustard line, so once the first gate has been EARNED by the
+## ketchup line it crosses the rest by patching the boxes-sold ledger
+## (`open_every_gate`) — the same door `build_mustard_line` uses for its own
+## gate, for the same reason. What stays earned is the part issue #55 is
+## about: the ketchup line has run, sold and banked for as long as a player's
+## does before a second sauce can be built at all. `measure_gate_ticks.gd`
+## is what earns BOTH gates, and says how long that takes.
 ##
 ## **NO RE-SIGN, AND WHY THAT IS NOW HONEST** (issue #55). This fixture used
 ## to sign three contracts again after the settle, because building the
@@ -929,20 +937,25 @@ static func build_bbq_running_line(sim) -> void:
 		for _i in range(BBQ_GATE_POLL_TICKS):
 			sim.tick()
 		waited += BBQ_GATE_POLL_TICKS
-	# The ceiling is a failure, not a fallback. Building on past it buys the
-	# three BBQ raws from a market that still has them locked, so
-	# `stock_larder` silently buys nothing and the branch is a complete line
-	# that never makes a box — which is the exact bug this fixture was
-	# rebuilt to stop photographing. Say so loudly, and stop: the rest of this
-	# function would build the dead branch the marker exists to prevent.
+	# The ceiling is a failure, not a fallback: a ketchup line that cannot
+	# earn the first gate is not the factory this fixture photographs. Say so
+	# loudly, and stop.
 	if fixture_failure() != "":
 		return
 	if not any_unlock_open(sim):
 		fail_fixture(
 			"BBQ_FIXTURE_FAIL",
 			"no unlock open after %d ticks (ceiling %d) — " % [waited, BBQ_GATE_TICK_CEILING]
-			+ "the BBQ raws are still locked, so the branch would never run"
+			+ "the ketchup line never earned the first gate"
 		)
+		return
+	# The BBQ gate, crossed by patch (see this function's doc). Without it
+	# `stock_larder` buys none of the three BBQ raws — a locked one is absent
+	# from the market — and the branch would be a complete line that never
+	# makes a box, the exact bug this fixture was rebuilt to stop
+	# photographing; `open_every_gate` latches BBQ_FIXTURE_FAIL if it cannot.
+	open_every_gate(sim, "BBQ_FIXTURE_FAIL")
+	if fixture_failure() != "":
 		return
 
 	# 3. Build the branch the moment it is unlocked. `build_bbq_branch`
@@ -1071,7 +1084,8 @@ static func unlock_open(sim, id: String) -> bool:
 ## `data/recipes.ron` makes about the tier: a second line, start to finish,
 ## on nothing but content.
 ##
-## THE SHAPE — four stages, and no cook, since mustard is ground and mixed:
+## THE SHAPE — four stages on rows 5-7, and no cook, since mustard is
+## ground and mixed:
 ##
 ##   seed hopper -> belt -> CRUSHER -> belt (ground mustard) -> MIXER
 ##                          turmeric hopper -> belt ---------> (row 1)
@@ -1095,13 +1109,16 @@ static func unlock_open(sim, id: String) -> bool:
 ## gates through. What stays real is every placement: nothing here is
 ## conjured into the world, it is bought and placed over the wire exactly as
 ## a player would.
-static func build_mustard_line(sim) -> void:
+static func build_mustard_line(sim, open_gates := true) -> void:
 	# The raws and the contracts are behind `mustard_sauce`; open it before
 	# buying anything, or `stock_larder` silently skips both of mustard's
 	# ingredients and this becomes a complete line that never makes a case.
-	open_every_gate(sim, "MUSTARD_FIXTURE_FAIL")
-	if fixture_failure() != "":
-		return
+	# A caller that has EARNED the gate (`measure_gate_ticks.gd`) passes
+	# `open_gates = false`, and the check below still refuses a shut one.
+	if open_gates:
+		open_every_gate(sim, "MUSTARD_FIXTURE_FAIL")
+		if fixture_failure() != "":
+			return
 	if not unlock_open(sim, MUSTARD_UNLOCK):
 		fail_fixture(
 			"MUSTARD_FIXTURE_FAIL",
@@ -1115,29 +1132,29 @@ static func build_mustard_line(sim) -> void:
 	# on a belt to the mixer's row-0 tile.
 	place(sim, "hopper", MUSTARD_SEED_HOPPER, "east", "mustard_seed")
 	for x in [0, 1, 2, 3]:
-		place(sim, "belt", Vector2i(x, 0), "east")
+		place(sim, "belt", Vector2i(x, MUSTARD_ROW), "east")
 	place(sim, "crusher", MUSTARD_CRUSHER, "east", "", "ground_mustard")
 	for x in [5, 6, 7, 8]:
-		place(sim, "belt", Vector2i(x, 0), "east")
+		place(sim, "belt", Vector2i(x, MUSTARD_ROW), "east")
 
 	# Stage 2, the mixer: turmeric along row 1, vinegar down from row 2.
 	place(sim, "hopper", MUSTARD_TURMERIC_HOPPER, "east", "turmeric")
 	for x in [5, 6, 7, 8]:
-		place(sim, "belt", Vector2i(x, 1), "east")
+		place(sim, "belt", Vector2i(x, MUSTARD_ROW + 1), "east")
 	place(sim, "fluid_tank", MUSTARD_VINEGAR_TANK, "east")
 	for x in [8, 9]:
-		place(sim, "pipe", Vector2i(x, 2), "east")
-	place(sim, "mixer", MUSTARD_MIXER, "east", "", "mustard")  # 1x2: also covers y=1
+		place(sim, "pipe", Vector2i(x, MUSTARD_ROW + 2), "east")
+	place(sim, "mixer", MUSTARD_MIXER, "east", "", "mustard")  # 1x2: also covers the turmeric row
 
 	# Stage 3, back to solids: bottles, cases, dock.
 	for x in [10, 11]:
-		place(sim, "pipe", Vector2i(x, 0), "east")
+		place(sim, "pipe", Vector2i(x, MUSTARD_ROW), "east")
 	place(sim, "bottler", MUSTARD_BOTTLER, "east", "", "bottled_mustard")
 	for x in [13, 14, 15, 16]:
-		place(sim, "belt", Vector2i(x, 0), "east")
+		place(sim, "belt", Vector2i(x, MUSTARD_ROW), "east")
 	place(sim, "packer", MUSTARD_PACKER, "east", "", "boxed_mustard")
 	for x in [18, 19, 20, 21]:
-		place(sim, "belt", Vector2i(x, 0), "east")
+		place(sim, "belt", Vector2i(x, MUSTARD_ROW), "east")
 	place(sim, "dock", MUSTARD_DOCK, "east")
 
 	# And make it RUN: stock, auto-fill, crew, orders.
@@ -1165,16 +1182,22 @@ static func build_mustard_line(sim) -> void:
 ## The unlock that holds mustard back (`data/unlocks.ron`).
 const MUSTARD_UNLOCK := "mustard_sauce"
 
+## The row the mustard line's machines stand on. Five, as in the Rust
+## fixture (`sim::reference::MUSTARD_ROW_Y`): two clear rows south of the
+## deepest thing on the ketchup line, so the two lines can stand side by
+## side (`measure_gate_ticks.gd` builds both) without any run touching.
+const MUSTARD_ROW := 5
+
 ## The tiles any check or shot of the mustard line names, so that a test
 ## asserting where something is does not restate the layout above.
-const MUSTARD_SEED_HOPPER := Vector2i(-1, 0)
-const MUSTARD_TURMERIC_HOPPER := Vector2i(4, 1)
-const MUSTARD_VINEGAR_TANK := Vector2i(7, 2)
-const MUSTARD_CRUSHER := Vector2i(4, 0)
-const MUSTARD_MIXER := Vector2i(9, 0)
-const MUSTARD_BOTTLER := Vector2i(12, 0)
-const MUSTARD_PACKER := Vector2i(17, 0)
-const MUSTARD_DOCK := Vector2i(22, 0)
+const MUSTARD_SEED_HOPPER := Vector2i(-1, 5)
+const MUSTARD_TURMERIC_HOPPER := Vector2i(4, 6)
+const MUSTARD_VINEGAR_TANK := Vector2i(7, 7)
+const MUSTARD_CRUSHER := Vector2i(4, 5)
+const MUSTARD_MIXER := Vector2i(9, 5)
+const MUSTARD_BOTTLER := Vector2i(12, 5)
+const MUSTARD_PACKER := Vector2i(17, 5)
+const MUSTARD_DOCK := Vector2i(22, 5)
 
 ## One tile of each of the two runs the line stands up, with the fluid the
 ## simulation must name it: the vinegar into the mixer, and the finished
@@ -1182,8 +1205,8 @@ const MUSTARD_DOCK := Vector2i(22, 0)
 ## mustard", because what is worth pinning is that the vinegar is on the
 ## mixer's supply side and the mustard on its outlet side.
 const MUSTARD_RUNS := [
-	[Vector2i(8, 2), "vinegar"],
-	[Vector2i(10, 0), "mustard"],
+	[Vector2i(8, 7), "vinegar"],
+	[Vector2i(10, 5), "mustard"],
 ]
 
 ## The two single-sauce mustard orders on the board (`data/contracts.ron`):
@@ -1285,6 +1308,9 @@ static func split_dock_lamps_found(sim) -> bool:
 ## flagged and its neighbours, equally empty, not.
 static func build_stalled_pipe_run(sim) -> void:
 	build_bbq_branch(sim)
+	# Liquid smoke is behind the BBQ gate, and a tank cannot be declared to a
+	# locked fluid; a player who has built this branch has opened it.
+	open_every_gate(sim, "STALLED_RUN_FIXTURE_FAIL")
 	fund(sim, 5000)
 	sim.issue_command_json(JSON.stringify({
 		"type": "set_tank_fluid", "tile": [STALLED_TANK.x, STALLED_TANK.y], "fluid": "liquid_smoke",

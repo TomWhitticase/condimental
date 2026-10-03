@@ -101,6 +101,8 @@ const SettingsPanelScript = preload("res://settings_panel.gd")
 ## THE COOKBOOK's screen, hosted twice from here (the B modal and the pause
 ## menu) exactly as the settings rows are — see `cookbook_panel.gd`.
 const CookbookPanelScript = preload("res://cookbook_panel.gd")
+## How money is written — the `£` and nothing else (2026-10-03).
+const Money = preload("res://money_text.gd")
 
 # --- Scale ---------------------------------------------------------------
 # UI_UX.md §2 fixes one world tile at 32x32x32 voxels. The .vox importer's
@@ -6730,7 +6732,7 @@ func _build_contract_card(contract: Dictionary, box: VBoxContainer, status_width
 	# (GAMEPLAY.md §6), so it belongs on the docket, not in a tooltip.
 	var payout_label := Label.new()
 	payout_label.label_settings = _contract_name_settings
-	payout_label.text = "+%d" % int(contract.get("payout", 0))
+	payout_label.text = Money.change(float(contract.get("payout", 0)))
 	# The figure kept beside the text, because the PAID stamp overwrites the
 	# text for a beat when this contract settles and has to put it back
 	# afterwards without re-reading a snapshot.
@@ -7879,7 +7881,7 @@ func _update_shop_menu() -> void:
 		return
 	var snapshot: Dictionary = JSON.parse_string(sim.shop_snapshot_json())
 	var entries: Array = snapshot.get("entries", [])
-	_shop_money_label.text = "Money: %.0f" % float(snapshot.get("money", 0.0))
+	_shop_money_label.text = "Money: %s" % Money.amount(float(snapshot.get("money", 0.0)))
 	_position_shop_menu()
 
 	# Built once per redraw, not per slot: the last staff poll's wage per
@@ -7900,7 +7902,7 @@ func _update_shop_menu() -> void:
 		# UI_UX.md §7's never-colour-alone rule: the price gains a "✗" mark,
 		# the icon dims, and the whole slot is disabled (which also recolours
 		# its border/background via the disabled stylebox).
-		slot["price_label"].text = ("Cost %.0f" % price) if affordable else ("Cost %.0f  ✗" % price)
+		slot["price_label"].text = ("Cost %s" % Money.amount(price)) if affordable else ("Cost %s  ✗" % Money.amount(price))
 		slot["crew_label"].text = _crew_cost_text(entry.get("crew", []), wages_by_category)
 		slot["price_label"].label_settings.font_color = (
 			Color(0.92, 0.93, 0.94) if affordable else Color(0.55, 0.50, 0.48)
@@ -8585,7 +8587,7 @@ func _update_ingredient_market() -> void:
 	var entries: Array = snapshot.get("entries", [])
 	if not _market_slots_match(entries):
 		_rebuild_market_slots(entries)
-	_market_money_label.text = "Money: %.0f" % float(snapshot.get("money", 0.0))
+	_market_money_label.text = "Money: %s" % Money.amount(float(snapshot.get("money", 0.0)))
 	_update_market_storage()
 	_position_market_panel()
 
@@ -8623,7 +8625,7 @@ func _update_ingredient_market() -> void:
 		if room <= 0:
 			slot["price_label"].text = "AT CAPACITY  ✗"
 		else:
-			slot["price_label"].text = "Buy %d  ·  %.0f" % [crate_units, crate_price]
+			slot["price_label"].text = "Buy %d  ·  %s" % [crate_units, Money.amount(crate_price)]
 			if not affordable:
 				slot["price_label"].text += "  ✗"
 		slot["price_label"].label_settings.font_color = (
@@ -8673,8 +8675,8 @@ func _update_ingredient_market() -> void:
 		# always-on STOCK plate carries the count and a FULL chip; the pair of
 		# numbers lives here, on the panel whose one verb the ceiling stops.
 		slot["owned_label"].text = (
-			("In stock %d\n%.0f each" % [owned, unit_price]) if capacity <= 0
-			else ("In stock %d / %d\n%.0f each" % [owned, capacity, unit_price])
+			("In stock %d\n%s each" % [owned, Money.amount(unit_price)]) if capacity <= 0
+			else ("In stock %d / %d\n%s each" % [owned, capacity, Money.amount(unit_price)])
 		)
 
 
@@ -9351,7 +9353,7 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 	payout_label.name = "OfferPayout"
 	payout_label.label_settings = _contract_gain_settings
 	payout_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	payout_label.text = "+%d" % int(offer.get("payout", 0))
+	payout_label.text = Money.change(float(offer.get("payout", 0)))
 	badge_col.add_child(payout_label)
 	var badge_icon := TextureRect.new()
 	badge_icon.custom_minimum_size = _ui_v(BOARD_BADGE_SIZE)
@@ -9701,7 +9703,7 @@ func _update_contract_board(econ: Dictionary = {}) -> void:
 	_rebuild_board_sauce_chips(board)
 	if not _board_rows_match(board):
 		_rebuild_board_rows(board)
-	_board_money_label.text = "Money: %.0f" % float(econ.get("money", 0.0))
+	_board_money_label.text = "Money: %s" % Money.amount(float(econ.get("money", 0.0)))
 
 	# The left column: what is running, the clipboard's dockets at board size.
 	var contracts: Array = econ.get("contracts", [])
@@ -9760,12 +9762,12 @@ func _update_contract_board(econ: Dictionary = {}) -> void:
 			status.text = ("✔ running" + lost_note) if lost > 0 else "✔ running, on the left"
 			row["panel"].add_theme_stylebox_override("panel", _contract_card_style_ready)
 		elif not affordable:
-			button.text = "✗ SIGN · %d" % price
+			button.text = "✗ SIGN · %s" % Money.amount(price)
 			button.disabled = true
 			status.text = ("✗ can't afford" + lost_note) if lost > 0 else "✗ can't afford it"
 			row["panel"].add_theme_stylebox_override("panel", _contract_card_style)
 		else:
-			button.text = "SIGN · %d" % price
+			button.text = "SIGN · %s" % Money.amount(price)
 			button.disabled = false
 			if lost > 0:
 				# One line, the count folded into the word it counts: the
@@ -10504,7 +10506,7 @@ func _staff_row_state(category: Dictionary) -> Dictionary:
 		state_text = "✔ CREWED"
 	return {
 		"hired_text": "hired %d" % headcount,
-		"wage_text": "wage %d / head / period" % wage,
+		"wage_text": "wage %s / head / period" % Money.amount(wage),
 		"meter": {
 			"fraction": minf(float(headcount) / float(required), 1.0) if required > 0 else 0.0,
 			"color": METER_FILL_WARN if short > 0 else METER_FILL_LEVEL,
@@ -10579,7 +10581,7 @@ func _staff_hire_button_text(category: Dictionary) -> String:
 	var wage := int(category.get("wage", 0))
 	if wage <= 0:
 		return "HIRE +1"
-	return "HIRE +1 · %d/period" % wage
+	return "HIRE +1 · %s/period" % Money.amount(wage)
 
 
 ## WHAT a hire would cost the next payday, in words rather than in grey.
@@ -10601,7 +10603,9 @@ func _staff_hire_blocked_text(category: Dictionary, snapshot: Dictionary) -> Str
 	var wage := int(category.get("wage", 0))
 	var bill := _staff_next_bill(snapshot)
 	var money := int(floor(float(snapshot.get("money", 0.0))))
-	return "▲ next payday would go short — %d in hand, %d due, %d / period" % [money, bill, wage]
+	return "▲ next payday would go short — %s in hand, %s due, %s / period" % [
+		Money.amount(money), Money.amount(bill), Money.amount(wage),
+	]
 
 
 ## What hiring this category's shortfall would actually unblock, named from
@@ -10857,7 +10861,7 @@ func _staff_unpaid_count_if_payday_now(snapshot: Dictionary) -> int:
 ## exactly one head would go unpaid.
 func _staff_shortfall_text(shortfall: int, unpaid_count: int) -> String:
 	var head_word := "head goes" if unpaid_count == 1 else "heads go"
-	return "▲ next payday short by %d — %d %s unpaid" % [shortfall, unpaid_count, head_word]
+	return "▲ next payday short by %s — %d %s unpaid" % [Money.amount(shortfall), unpaid_count, head_word]
 
 
 ## The footer's lines, pure given the snapshot and the tick: the bill per
@@ -10872,15 +10876,15 @@ func _staff_footer_text(snapshot: Dictionary, current_tick: int) -> String:
 	var bill := _staff_next_bill(snapshot)
 	# The wire's `next_bill`, so this and the clipboard's wages line can never
 	# quote different numbers at the player for the same payday.
-	lines.append("wages %d / period  ·  next payday in %s" % [
-		bill, _format_remaining(remaining),
+	lines.append("wages %s / period  ·  next payday in %s" % [
+		Money.amount(bill), _format_remaining(remaining),
 	])
 	var money := float(snapshot.get("money", 0.0))
 	var shortfall := _staff_shortfall(snapshot, money)
 	if shortfall > 0:
 		lines.append(_staff_shortfall_text(shortfall, _staff_unpaid_count_if_payday_now(snapshot)))
 	else:
-		lines.append("balance after payday: %d" % (int(floor(money)) - bill))
+		lines.append("balance after payday: %s" % Money.amount(int(floor(money)) - bill))
 	var unpaid_last := int(snapshot.get("unpaid_last_payday", 0))
 	if unpaid_last > 0:
 		lines.append("✗ %d idled unpaid last payday" % unpaid_last)
@@ -10969,7 +10973,9 @@ func _contract_wages_state(snapshot: Dictionary, current_tick: int, money: float
 	var shortfall := _staff_shortfall(snapshot, money)
 	if shortfall > 0:
 		return {
-			"text": "⚠ wages %d due in %s — short %d, unpaid heads leave" % [bill, due, shortfall],
+			"text": "⚠ wages %s due in %s — short %s, unpaid heads leave" % [
+				Money.amount(bill), due, Money.amount(shortfall),
+			],
 			"short": true,
 		}
 	# Calm: silence. The CREW plate has the bill and the countdown, always up.
@@ -10985,7 +10991,7 @@ func _update_staff_panel() -> void:
 	var categories: Array = _staff_snapshot.get("categories", [])
 	if not _staff_rows_match(categories):
 		_rebuild_staff_rows(categories)
-	_staff_money_label.text = "Money: %.0f" % float(_staff_snapshot.get("money", 0.0))
+	_staff_money_label.text = "Money: %s" % Money.amount(float(_staff_snapshot.get("money", 0.0)))
 
 	# The verdict first, so the panel answers "am I short" before any row is
 	# read (the staffing ticket's requirement 2).
@@ -11999,7 +12005,7 @@ func _crew_cost_text(crew, wages_by_category: Dictionary) -> String:
 		if not wages_by_category.has(category):
 			return text
 		cost += int(entry.get("count", 0)) * int(wages_by_category[category])
-	return "%s\n%d / period" % [text, cost]
+	return "%s\n%s / period" % [text, Money.amount(cost)]
 
 
 ## The pure half of a docket's status (the contract-board epic): how far
@@ -12367,7 +12373,7 @@ func _crew_plate_state(snapshot: Dictionary, current_tick: int) -> Dictionary:
 		"rows": rows,
 		# Named, not bare: "payday in 18s · 10" left the 10 to be guessed at,
 		# and the two figures on this line are in different units.
-		"payday_text": "payday in %s  ·  wages %d" % [_format_remaining(remaining), bill],
+		"payday_text": "payday in %s  ·  wages %s" % [_format_remaining(remaining), Money.amount(bill)],
 		"afford_text": afford_text,
 		"afford_warn": shortfall > 0,
 	}
@@ -15535,9 +15541,9 @@ func _fill_hotbar_tooltip(index: int, owned: int, price: float) -> void:
 	var select_line := ("press %s to select" % key) if key != "" else "click to select"
 	if key != "" and _fp_ctrl_cursor():
 		select_line = "click or press %s to select" % key
-	_hotbar_tooltip_body.text = "%s    ·    %.0f each\n%s    ·    buy in the build menu (E)" % [
+	_hotbar_tooltip_body.text = "%s    ·    %s each\n%s    ·    buy in the build menu (E)" % [
 		("carrying %d" % owned) if owned > 0 else "carrying none",
-		price,
+		Money.amount(price),
 		select_line,
 	]
 
@@ -16367,10 +16373,10 @@ func _placement_prompt_text() -> String:
 func _auto_buy_hint_text() -> String:
 	var price := _price_of(_build_kind)
 	if not _auto_buy_held():
-		return "SHIFT: buy a replacement as you place  (%.0f each)" % price
+		return "SHIFT: buy a replacement as you place  (%s each)" % Money.amount(price)
 	if not _can_afford(_build_kind):
-		return "⚠ SHIFT: cannot afford another  (%.0f)  ·  placing from stock" % price
-	return "⟳ SHIFT: buying a replacement each click  (-%.0f)" % price
+		return "⚠ SHIFT: cannot afford another  (%s)  ·  placing from stock" % Money.amount(price)
+	return "⟳ SHIFT: buying a replacement each click  (%s)" % Money.change(-price)
 
 
 ## The prompt's plate: the scene's near-black HUD panel with its rule
@@ -16684,14 +16690,14 @@ func _fill_payday_confirm(preview: Dictionary) -> void:
 	var subject := String(preview.get("subject", ""))
 	var cost := float(preview.get("cost", 0.0))
 	if cost > 0.0:
-		_payday_confirm_subject.text = "%s — %d" % [_spend_display_name(subject), roundi(cost)]
+		_payday_confirm_subject.text = "%s — %s" % [_spend_display_name(subject), Money.amount(cost)]
 	else:
 		# The hire: it takes nothing out of the balance and adds to every
 		# payday from here on, so quoting a cost of 0 would be a lie of
 		# omission about the one spend whose price is recurring.
-		_payday_confirm_subject.text = "%s — no cost today, %d every payday" % [
+		_payday_confirm_subject.text = "%s — no cost today, %s every payday" % [
 			_spend_display_name(subject),
-			int(preview.get("bill_after", 0)) - int(preview.get("next_bill", 0)),
+			Money.amount(int(preview.get("bill_after", 0)) - int(preview.get("next_bill", 0))),
 		]
 	for child in _payday_confirm_figures.get_children():
 		child.queue_free()
@@ -16699,9 +16705,9 @@ func _fill_payday_confirm(preview: Dictionary) -> void:
 	# snapshot's own payday clock rather than counted here.
 	var due_in := _payday_seconds_away()
 	for row in [
-		["balance after this", "%d" % roundi(float(preview.get("money_after", 0.0)))],
-		["next payday needs", "%d" % int(preview.get("bill_after", 0))],
-		["short by", "%d" % int(preview.get("shortfall_after", 0))],
+		["balance after this", Money.amount(float(preview.get("money_after", 0.0)))],
+		["next payday needs", Money.amount(int(preview.get("bill_after", 0)))],
+		["short by", Money.amount(int(preview.get("shortfall_after", 0)))],
 		["payday in", "%s" % ("%ds" % due_in if due_in >= 0 else "—")],
 	]:
 		_payday_confirm_figures.add_child(_payday_confirm_row(String(row[0]), String(row[1])))
@@ -17508,7 +17514,7 @@ func _update_debug_readout() -> void:
 			int(round(Engine.get_frames_per_second())),
 		],
 		# The same "%.0f" shape every other plate in this HUD shows money in.
-		"money %.0f" % money,
+		"money %s" % Money.amount(money),
 		# One directory rather than two absolute paths: `saves/` and
 		# `settings.cfg` are both `user://`, and the two full paths side by
 		# side made this panel wider than the factory behind it.
@@ -17522,8 +17528,8 @@ func _update_debug_readout() -> void:
 ## unambiguous because the label beside them says GIVE MONEY.
 func _debug_money_caption(amount: int) -> String:
 	if amount >= 1000 and amount % 1000 == 0:
-		return "%dk" % (amount / 1000)
-	return "%d" % amount
+		return "%s%dk" % [Money.SYMBOL, amount / 1000]
+	return Money.amount(amount)
 
 
 ## The directory `user://` resolves to on this machine, with the home
@@ -19851,7 +19857,7 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 	if econ.is_empty():
 		econ = _read_economy()
 	var money := float(econ.get("money", 0.0))
-	_contract_money_label.text = "%d" % int(money)
+	_contract_money_label.text = Money.amount(int(money))
 	_flash_money_change(money)
 	_update_money_flyout()
 	_contract_dock_full_label.visible = bool(econ.get("delivery_full", false))
@@ -20003,7 +20009,7 @@ func _flash_money_change(money: float) -> void:
 	var whole := int(round(delta))
 	if whole == 0:
 		return
-	_contract_money_change.text = "+%d" % whole if whole > 0 else "%d" % whole
+	_contract_money_change.text = Money.change(whole)
 	_contract_money_change.label_settings = \
 		_contract_gain_settings if whole > 0 else _contract_spend_settings
 	_contract_money_change_until_msec = _hud_now_msec() + MONEY_FLYOUT_HOLD_MSEC
@@ -20159,7 +20165,7 @@ func _update_contract_card(card: Dictionary, contract: Dictionary, current_tick:
 	var status: Label = card["status_label"]
 	match level:
 		"ready":
-			status.text = "✔ READY — pays +%d at the next check" % int(contract.get("payout", 0))
+			status.text = "✔ READY — pays %s at the next check" % Money.change(float(contract.get("payout", 0)))
 			status.label_settings = _contract_ready_settings
 		"last_chance":
 			status.text = "⚠ LAST CHANCE — %d short; miss this check and it is LOST" % short
@@ -20720,7 +20726,7 @@ func _fire_payout(amount: int, paid_ids: Array, current_tick: int, dock_keys: Ar
 	_money_punch_tick = current_tick
 	_payout_flyout_tick = current_tick
 	if _payout_flyout != null:
-		_payout_flyout.text = "+%d" % amount
+		_payout_flyout.text = Money.change(amount)
 	for id in paid_ids:
 		_payout_stamp_ticks[String(id)] = current_tick
 	_burst_coins(amount, current_tick, dock_keys)
@@ -20992,7 +20998,7 @@ func _update_payout_stamps(current_tick: int) -> void:
 				label.text = "PAID"
 				label.modulate = MONEY_PUNCH_COLOR
 		elif label.text == "PAID":
-			label.text = "+%d" % int(label.get_meta("payout", 0))
+			label.text = Money.change(float(label.get_meta("payout", 0)))
 			label.modulate = Color(1, 1, 1, 1)
 
 

@@ -502,9 +502,10 @@ func _run_checks() -> void:
 		return
 	for tile in [MIXER, MIXER_FAR]:
 		var hover: String = line._hover_text_at_tile(tile)
-		# Unfed, the mixer is undecided and titled by its kind (2026-10-02);
-		# what is under test is that BOTH tiles resolve to the one machine.
-		if not hover.begins_with(line._kind_display_name("mixer")):
+		# The fixture sets the mixer to blend ketchup mix (2026-10-03), so it
+		# is titled by that recipe; what is under test is that BOTH tiles
+		# resolve to the one machine.
+		if not hover.begins_with(line._item_display_name("ketchup_mix")):
 			_fail("hover at %s should resolve the mixer by name, got '%s'" % [str(tile), hover])
 			return
 
