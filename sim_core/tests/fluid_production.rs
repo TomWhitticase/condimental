@@ -49,6 +49,7 @@ fn build(world: &mut World, kind: &str, tile: (i32, i32), direction: Direction) 
         tile,
         direction,
         item,
+        recipe: None,
     });
     assert!(
         world.query_tile(tile).is_some(),

@@ -58,6 +58,7 @@ fn build(world: &mut World, kind: &str, tile: (i32, i32), direction: Direction) 
         tile,
         direction,
         item: (kind == "hopper").then(|| "tomato".to_string()),
+        recipe: None,
     });
     assert!(
         world.query_tile(tile).is_some(),
@@ -558,16 +559,13 @@ fn a_tank_connects_to_the_pipe_off_its_outlet_on_every_facing() {
 fn a_machine_tap_and_a_machine_producer_are_reported_on_the_tapped_tile() {
     let mut world = funded();
     build(&mut world, "mixer", (5, 0), East); // covers (5,0) and (5,1)
-    // The tank at the head of the touching run is REQUIRED since the BBQ
-    // epic, and it is required for a reason worth stating. A `mixer` now has
-    // two recipes — ketchup mix draws vinegar, BBQ mix draws finished
-    // ketchup — so a bare pipe touching a bare mixer could be carrying
-    // either, and `resolve_network_fluids` leaves a run it cannot narrow to
-    // ONE possibility unnamed (never a panic; the machines on it simply
-    // stall). A tank-fed run is intersected with the RAW fluids, and
-    // ketchup is not raw, so the tank is what collapses the pair to vinegar.
-    // That is the real disambiguator in a real factory too: what you plumb
-    // into a machine is what decides what it makes.
+    world.issue_command(PlayerCommand::SetMachineRecipe {
+        tile: (5, 0),
+        recipe: Some("ketchup_mix".to_string()),
+    });
+    // The mixer is set to blend ketchup mix, so its recipe names the run it
+    // draws vinegar from and the run it fills — a run's fluid comes from the
+    // recipe the player chose for each machine on it (2026-10-03).
     build(&mut world, "fluid_tank", (4, 2), East);
     build(&mut world, "pipe", (5, 2), East); // touches the north tile: the vinegar tap
     build(&mut world, "pipe", (6, 0), East); // off the outlet face: the product run
@@ -598,28 +596,17 @@ fn a_machine_tap_and_a_machine_producer_are_reported_on_the_tapped_tile() {
     assert_eq!(mix.producers[0].segment_index, 0);
 
     // A machine with no fluid in ANY of its recipes connects to nothing,
-    // however close the pipe is. That example used to be the crusher; since
-    // mustard is milled wet (`mustard_mash` draws vinegar and pipes mash out)
-    // the crusher both taps and produces, so the machine that touches no
-    // fluid at all is the packer, which only ever puts bottles into boxes.
-    let mut world = funded();
-    build(&mut world, "packer", (0, 0), East);
-    build(&mut world, "pipe", (1, 0), East);
-    build(&mut world, "pipe", (0, 1), East);
-    assert_eq!(pipe(&world, (1, 0)), pipe_links(vec![]));
-    assert_eq!(pipe(&world, (0, 1)), pipe_links(vec![]));
-
-    // And the crusher, which does connect now, reports both ports the same
-    // way the mixer does: the touching tile is a tap, the tile off the
-    // outlet face is a producer. This is the whole visible consequence of
-    // moving mustard's vinegar upstream — a kind that was solids-only grew a
-    // pipe port.
-    let mut world = funded();
-    build(&mut world, "crusher", (0, 0), East);
-    build(&mut world, "pipe", (1, 0), East);
-    build(&mut world, "pipe", (0, 1), East);
-    assert_eq!(pipe(&world, (1, 0)), pipe_links(vec![conn(West, Machine)]));
-    assert_eq!(pipe(&world, (0, 1)), pipe_links(vec![conn(South, Machine)]));
+    // however close the pipe is: the packer, which only ever puts bottles
+    // into boxes, and the crusher again since 2026-10-03, when mustard
+    // stopped being milled wet (its vinegar goes in at the mixer now).
+    for kind in ["packer", "crusher"] {
+        let mut world = funded();
+        build(&mut world, kind, (0, 0), East);
+        build(&mut world, "pipe", (1, 0), East);
+        build(&mut world, "pipe", (0, 1), East);
+        assert_eq!(pipe(&world, (1, 0)), pipe_links(vec![]), "{kind}");
+        assert_eq!(pipe(&world, (0, 1)), pipe_links(vec![]), "{kind}");
+    }
 }
 
 /// The 2x2 vat, tapped on a far corner of its footprint and facing south,
@@ -899,8 +886,9 @@ fn every_link_in_the_reference_chain_is_mirrored_by_its_neighbour() {
 /// The documented JSON shape, exactly: `links` last, present on a belt and
 /// a pipe, **absent** (not null) on a hopper, a machine and a tank, and
 /// inside it the documented keys in the documented order. `machine` is
-/// present on the machine alone, and the never-fed crusher's `recipe` is
-/// `null` — undecided, not its kind's first recipe (2026-10-02).
+/// present on the machine alone, and the crusher's `recipe` is `null` — it
+/// was placed with none chosen, and a machine never picks one for itself.
+/// The pipe beside it does not link to it: no crusher recipe takes a fluid.
 #[test]
 fn world_layout_json_matches_the_documented_shape_byte_for_byte() {
     let mut world = funded();
@@ -922,7 +910,7 @@ fn world_layout_json_matches_the_documented_shape_byte_for_byte() {
         ",",
         r#"{"kind":"fluid_tank","tile":[0,1],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[0,1]],"recipe":null,"crewed":true}"#,
         ",",
-        r#"{"kind":"pipe","tile":[1,1],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[1,1]],"recipe":null,"crewed":true,"links":{"connections":[{"to":"east","kind":"pipe"},{"to":"south","kind":"machine"},{"to":"west","kind":"tank"}]}}"#,
+        r#"{"kind":"pipe","tile":[1,1],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[1,1]],"recipe":null,"crewed":true,"links":{"connections":[{"to":"east","kind":"pipe"},{"to":"west","kind":"tank"}]}}"#,
         ",",
         r#"{"kind":"pipe","tile":[2,1],"direction":"east","footprint":{"width_tiles":1,"height_tiles":1},"occupies":[[2,1]],"recipe":null,"crewed":true,"links":{"connections":[{"to":"west","kind":"pipe"}]}}"#,
         "]",

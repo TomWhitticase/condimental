@@ -258,55 +258,6 @@ fn the_contract_pool_covers_every_sauce_and_every_gate_stage() {
     );
 }
 
-/// **THE MUSTARD COOK AND THE MUSTARD MIXED ORDER ARE ONE DECISION**, and
-/// this is the assertion that keeps them one. `data/recipes.ron` cooks
-/// mustard for 360 ticks against ketchup's 240 so that a factory with one
-/// finished line of each settles at three cases of ketchup to two of
-/// mustard, and `deli_chain` asks for exactly that mix. Stated as ids and
-/// numbers: the order asks for the same number of **vat-ticks** from each
-/// line, 3 x 240 = 2 x 360 = 720, so the obvious two-line factory serves it
-/// without tuning. Change either number and this fails.
-///
-/// `grill_pub`'s 3 + 2 is the same shape for a different reason and is
-/// deliberately not checked here: BBQ's vat drinks the ketchup vat's output,
-/// so its ratio comes from the draw rate rather than from two independent
-/// cooks, and `tests/bbq_branch.rs` measures it on a running factory. Two
-/// independent lines can be multiplied out on paper; a branch cannot.
-#[test]
-fn the_mustard_mixed_order_asks_for_the_same_vat_ticks_from_each_line() {
-    let recipes = recipes();
-    let ketchup_cook = recipes.get("ketchup").expect("the shipped cook").time_ticks;
-    let mustard_cook = recipes.get("mustard").expect("the shipped cook").time_ticks;
-
-    let board = ContractRegistry::bundled();
-    let mixed = board
-        .get("deli_chain")
-        .expect("the mustard tier's mixed order");
-    let cases = |id: &str| -> u64 {
-        mixed
-            .mix
-            .iter()
-            .find(|(item, _)| item == id)
-            .map(|(_, count)| u64::from(*count))
-            .unwrap_or_else(|| panic!("{} asks for no {id}", mixed.id))
-    };
-    // No literal (240, 360) above this: a cook change has to reach THIS
-    // assertion and print this sentence, rather than trip a bare
-    // `left == right` on the pair and say nothing about why it matters.
-    assert_eq!(
-        cases("boxed_ketchup") * ketchup_cook,
-        cases("boxed_mustard") * mustard_cook,
-        "{} asks for {} ketchup and {} mustard, which is not what a {}-tick vat and a \
-         {}-tick vat make in the same window — the cook in data/recipes.ron and this mix \
-         move together or not at all",
-        mixed.id,
-        cases("boxed_ketchup"),
-        cases("boxed_mustard"),
-        ketchup_cook,
-        mustard_cook
-    );
-}
-
 /// Every payout in the mustard tier is derived from what a case costs to
 /// make, and the rate per case rises with what the order commits the player
 /// to — the ordering the shipped board already has, asserted rather than

@@ -475,6 +475,13 @@ pub fn build(input: &CookbookInput<'_>) -> CookbookSnapshot {
     let mut edges: Vec<SauceEdge> = Vec::new();
     let mut sauces: Vec<SaucePage> = Vec::new();
     let mut used_in: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    // Where a sauce's root first appears on the contract board.
+    let board_rank = |id: &str| {
+        roots
+            .iter()
+            .find(|&&(_, _, root)| root == id)
+            .map_or(usize::MAX, |&(_, position, _)| position)
+    };
 
     for (family, (root, mine)) in families.iter().enumerate() {
         let member: BTreeSet<usize> = mine.iter().copied().collect();
@@ -617,21 +624,32 @@ pub fn build(input: &CookbookInput<'_>) -> CookbookSnapshot {
         });
     }
 
-    sauces.sort_by_key(|sauce| sauce.tier);
+    // Tier first, then the board's order — which is the order the sauces
+    // unlock in (`data/contracts.ron` lists each tier's orders after the one
+    // before it). Not recipe depth: since 2026-10-03 mustard's line, with no
+    // cook, is shallower than ketchup's, and the book should still open on
+    // the sauce a player makes first. A raw's "used in" list follows suit.
+    sauces.sort_by_key(|sauce| (sauce.tier, board_rank(&sauce.id)));
+    for sauces_using in used_in.values_mut() {
+        sauces_using.sort_by_key(|id| board_rank(id));
+    }
     edges.sort_by(|a, b| (&a.from, &a.to, &a.via).cmp(&(&b.from, &b.to, &b.via)));
     edges.dedup_by(|a, b| (&a.from, &a.to, &a.via) == (&b.from, &b.to, &b.via));
 
     // --- machines ---------------------------------------------------------
-    // Ordered by how far down a chain the kind first appears, so the list
-    // reads as the line does — hopper and crusher at the top, dock at the
-    // bottom — and a kind no recipe runs on sorts after the ones that do.
-    // Derived, because `MachineRegistry::kinds` has no file order to give.
-    let mut first_use: BTreeMap<&str, usize> = BTreeMap::new();
+    // Ordered by where the kind first appears in the first sauce on the
+    // board that uses it, so the list reads as that line does — crusher at
+    // the top, packer at the bottom — and a kind no recipe runs on sorts
+    // after the ones that do. (Plain recipe depth stopped reading as a line
+    // on 2026-10-03: mustard has no cook, so its bottler sits at the depth
+    // ketchup's vat does.) Derived, because `MachineRegistry::kinds` has no
+    // file order to give.
+    let mut first_use: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
     for (index, recipe) in ordered.iter().enumerate() {
-        let entry = first_use
-            .entry(recipe.machine.as_str())
-            .or_insert(depth[index]);
-        *entry = (*entry).min(depth[index]);
+        let position = owner[index].map_or(usize::MAX, |family| roots[family].1);
+        let key = (position, depth[index]);
+        let entry = first_use.entry(recipe.machine.as_str()).or_insert(key);
+        *entry = (*entry).min(key);
     }
     let mut machines: Vec<MachinePage> = Vec::new();
     let mut kinds = input.machines.kinds();
@@ -640,7 +658,7 @@ pub fn build(input: &CookbookInput<'_>) -> CookbookSnapshot {
             first_use
                 .get(kind.id.as_str())
                 .copied()
-                .unwrap_or(usize::MAX),
+                .unwrap_or((usize::MAX, usize::MAX)),
             kind.id.clone(),
         )
     });

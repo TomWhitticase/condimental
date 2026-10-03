@@ -203,6 +203,7 @@ fn add_rack(world: &mut World) -> bool {
             tile: (x, RACK_ROW_Y),
             direction: Direction::East,
             item: None,
+            recipe: None,
         });
         if world.placement_count() > before {
             return true;

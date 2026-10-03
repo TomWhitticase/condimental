@@ -360,69 +360,18 @@ const FLUID_TINTS := {
 	"liquid_smoke": Color(0.439, 0.392, 0.188),
 	# --- Mustard's three, and the first branch that BRIGHTENS -------------
 	#
-	# Mustard is the first sauce whose whole middle is fluid: the crusher
-	# mills the seed wet, so there is no pail stage and these three are the
-	# only place the player ever sees the product between the tote and the
-	# bottle. Getting them wrong is not a missing pail, it is a missing
-	# sauce.
+	# Mustard, the one fluid of the second sauce: mixed, never cooked, so the
+	# finished sauce is the only mustard that stands in a pipe (2026-10-03;
+	# it used to be milled wet and cooked, which put a mash and a mix in
+	# pipes too, on a value ladder below this).
 	#
-	# **All three are `mustard_gold` #DCC63C scaled in VALUE, which is what
-	# `palette.ron` asked for.** That file gives mustard no `liquid_*` entry
-	# of its own — deliberately, since nothing carries mustard in an open
-	# pail — and says in as many words that the tint here "should be derived
-	# from this number (0.863, 0.776, 0.235)". One hue for the branch, three
-	# values along it, so the run reads as one substance at three stages
-	# rather than as three substances.
-	#
-	# **It brightens where ketchup and BBQ darken, and that is the recipe
-	# rather than a whim.** Both older sauces cook down: `ketchup_mix` 0.322
-	# -> `ketchup` 0.239, `bbq_mix` 0.292 -> `bbq` 0.200. Mustard's pigment
-	# does not arrive until the MIXER, where turmeric goes in — the mash is
-	# milled seed and vinegar and nothing else — so the colour develops
-	# along the line instead of reducing. `seed_tan`'s note in `palette.ron`
-	# records the same expectation from the art side.
-	#
-	# **The three multipliers are x0.76, x0.94 and x1.15 of that gold, and
-	# they were MEASURED rather than reasoned.** Evenly spaced tints are not
-	# evenly spaced pixels. Rendering one pipe body at seven points along
-	# this hue, same camera, same 32x16 mask, gives a badly compressive
-	# curve — tint luma 116 -> 178 on the frame, 135 -> 195, 154 -> 208,
-	# 173 -> 219, 193 -> 226, 212 -> 233, 223 -> 237 — so a ladder that is
-	# even in this file bunches at the top of the frame. The first cut here
-	# was three even 25.6/255 steps in tint space and photographed as
-	# +15.3 then **+10.4**, the second of them inside the 10.7-11.8 noise
-	# band issue #113 measured for reading one fluid twice. Even in tint
-	# space is not even, and this table's job is the frame.
-	#
-	# **What actually pins the span is how crowded the frame already is.**
-	# Measured on the fluid gallery, the six older fluids sit at `bbq` 97.6,
-	# `ketchup` 125.2, `bbq_mix` 128.3, `ketchup_mix` 141.0, `liquid_smoke`
-	# 159.6 and `vinegar` 178.2 out of 255. That leaves exactly one free
-	# band, 178 to the ~237 ceiling of this hue, and mustard needs three
-	# values inside it. Dropping the mash below `vinegar` to open the top
-	# was tried and is worse: it lands 6.5/255 from it, and `vinegar` is not
-	# some other sauce's fluid but the one in the pipe on the OTHER side of
-	# the same crusher, since a mustard crusher drinks vinegar and fills
-	# mash. Below `vinegar` the next gap is `liquid_smoke`, the same olive
-	# hue, which is worse still.
-	#
-	# **So: 203.6, 221.8, 235.9 on the frame — +18.2 then +14.1, clearing
-	# `vinegar` by 25.4.** Every step is well outside the noise band, the
-	# margin to the neighbouring fluid is at the ~26/255 "reads reliably"
-	# anchor, and mustard's own tightest pair is wider than two pairs the
-	# game already ships (`ketchup` <-> `bbq_mix` measure 3.1/255 apart, and
-	# `ketchup_mix` <-> `bbq_mix` 12.7). That last number is the honest
-	# frame for this one: the span is narrow because the palette is full,
-	# and a fourth sauce will have to take value off the older two rather
-	# than find more room at the top.
-	"mustard_mash": Color(0.656, 0.590, 0.179),
-	"mustard_mix": Color(0.811, 0.729, 0.221),
-	# `mustard_gold` #DCC63C taken up to x1.15, one notch under where red
-	# clips. `palette.ron` asks for a tint "derived from this number" rather
-	# than for the number, and the derivation is the value scaling above;
-	# the cooked sauce takes the top of the band because it is the one stage
-	# a player watches for, and because the compression curve means the last
-	# step is the one with least room to give.
+	# `mustard_gold` #DCC63C taken up to x1.15 in VALUE, one notch under
+	# where red clips. `palette.ron` gives mustard no `liquid_*` entry of its
+	# own — nothing carries mustard in an open pail — and asks for a tint
+	# "derived from this number" rather than for the number. The top of the
+	# band because the fluid gallery measured the other six at `bbq` 97.6 up
+	# to `vinegar` 178.2 out of 255, leaving 178 to the ~237 ceiling of this
+	# hue free; this lands at 235.9 on the frame, 57.7 clear of `vinegar`.
 	"mustard": Color(0.992, 0.892, 0.270),
 }
 const FLUID_TINT_FALLBACK := Color(0.60, 0.79, 0.86)
@@ -463,21 +412,18 @@ const PRODUCT_TINTS := {
 	"boxed_ketchup": Color(0.745, 0.086, 0.055),
 	"bottled_bbq": Color(0.306, 0.141, 0.098),
 	"boxed_bbq": Color(0.306, 0.141, 0.098),
-	# Mustard's three, and the proof of the paragraph above: the third sauce
-	# cost this file three rows and nothing else — no asset, no kind, no
-	# branch. Three and not five because only the vat, the bottler and the
-	# packer carry a `machine_product` mesh; the crusher and the mixer show
-	# no product, which is why `ketchup_mix` and `bbq_mix` have no row here
-	# either and `mustard_mash`/`mustard_mix` need none.
+	# Mustard's two, and the proof of the paragraph above: a sauce costs
+	# this file a row per product-showing machine it runs on and nothing
+	# else. Only the vat, the bottler and the packer carry a
+	# `machine_product` mesh; mustard is never cooked (2026-10-03), so it
+	# runs on the last two only — the mixer shows no product, which is why
+	# `ketchup_mix`, `bbq_mix` and `mustard` have no row here.
 	#
-	# **All three are the same number, and mustard is the only sauce where
-	# that is right.** Ketchup's vat takes `liquid_ketchup` #C4190E while
-	# its bottler takes `ketchup_red` #BE160E, because the palette gives
-	# that substance two entries — one for the pail, one for the bottle.
-	# Mustard has no `liquid_*` entry at all (nothing carries it in a pail),
-	# so the cook in the vat, the sauce behind the bottler's glass and the
-	# print on the packer's case are one colour by construction.
-	"mustard": Color(0.992, 0.892, 0.270),
+	# **Both are `FLUID_TINTS["mustard"]`.** Ketchup's bottler takes
+	# `ketchup_red` rather than its pipe's `liquid_ketchup`, because the
+	# palette gives that substance two entries. Mustard has no `liquid_*`
+	# entry at all, so the sauce in the pipe, behind the bottler's glass and
+	# printed on the case are one colour by construction.
 	"bottled_mustard": Color(0.992, 0.892, 0.270),
 	"boxed_mustard": Color(0.992, 0.892, 0.270),
 }
@@ -488,11 +434,17 @@ const PRODUCT_TINTS := {
 ## replaced could not do (UI_UX.md §2b point 12: every content-id lookup
 ## gets a documented fallback).
 const PRODUCT_TINT_FALLBACK := Color(1, 1, 1)
-## What an UNDECIDED machine is said to be making — one placed but not yet
-## handed anything that names its sauce (`MachineSnapshot.recipe` is null).
-## Its product mesh is left untinted for the same reason: until it is fed it
-## is not any one sauce's machine (owner's request, 2026-10-02).
-const MACHINE_UNDECIDED_TEXT := "any sauce"
+## What a machine with NO RECIPE CHOSEN is said to be making — one placed
+## and not yet told what to make (`MachineSnapshot.recipe` is null). It makes
+## nothing until the player picks a recipe in its panel (2026-10-03), so the
+## words say what to do; its product mesh is left untinted because it is not
+## any one sauce's machine.
+const MACHINE_UNDECIDED_TEXT := "nothing — click to choose"
+## The machine panel's picker note: what picking does, and what a switch costs
+## (`PlayerCommand::SetMachineRecipe` — the craft in progress and any
+## ingredient the new recipe does not take are thrown away, and a pipe run the
+## switch renames is emptied).
+const MACHINE_PICKER_NOTE := "Choose what it makes. Switching abandons the batch in progress and discards ingredients the new recipe does not use."
 
 ## --- The belt family (the pipes & conveyors overhaul, ticket 5) -----------
 ##
@@ -1129,13 +1081,11 @@ const ITEM_MODELS := {
 	# and a drum of syrup as two identical pipe nozzles.
 	"spice_mix": "item_spice_mix",
 	"molasses": "item_molasses",
-	# The third sauce's two raw SOLIDS and its two finished goods (the
-	# mustard epic). **Four keys and no more, because mustard's middle is
-	# WET**: the crusher mills the seed with vinegar and discharges a fluid,
-	# so `mustard_mash` and `mustard_mix` never touch a belt and have no
-	# business in this table at all — they are `FLUID_TINTS` entries
-	# instead. Mustard is the first sauce with no pail stage, which is why
-	# it adds two raws and two packages here where ketchup added five ids.
+	# The second sauce's two raw SOLIDS, its ground seed and its two
+	# finished goods. Ground mustard is the crusher's dry output on its way
+	# to the mixer (2026-10-03, when mustard stopped being milled wet), so
+	# it rides a belt in a pail of its own, exactly as tomato paste does;
+	# the finished `mustard` is a fluid and lives in `FLUID_TINTS` instead.
 	#
 	# `bottled_mustard` and `boxed_mustard` get models of their own for the
 	# reason the BBQ pair above states: a belt of mustard has to be
@@ -1143,6 +1093,7 @@ const ITEM_MODELS := {
 	# make every crate of all three the same cardboard box.
 	"mustard_seed": "item_mustard_seed",
 	"turmeric": "item_turmeric",
+	"ground_mustard": "item_ground_mustard",
 	"bottled_mustard": "item_bottle_mustard",
 	"boxed_mustard": "item_box_mustard",
 }
@@ -5229,8 +5180,8 @@ func _poll_machine_load() -> void:
 
 
 ## What a machine is making, for a title: the recipe's display name, or —
-## for an UNDECIDED machine, whose `recipe` is null on the wire — the words
-## that say it will take any sauce. One helper so the hover and the
+## for a machine with no recipe chosen, whose `recipe` is null on the wire —
+## the words that say how to choose one. One helper so the hover and the
 ## configuration panel can never disagree about the neutral state.
 func _machine_making_text(recipe) -> String:
 	if recipe == null or String(recipe) == "":
@@ -5256,8 +5207,9 @@ func _stall_reason_text(stall) -> String:
 		"fluid_input":
 			return "waiting for %s in the pipe" % item
 		"no_supply_pipe":
-			# An UNDECIDED machine with no pipe at all names no fluid: no
-			# recipe is chosen yet, so there is no one fluid it is missing.
+			# Defensive: the sim names the fluid now that a machine reports
+			# this only for a chosen recipe, but an empty `item` must still
+			# read as a sentence.
 			if String(stall.get("item", "")) == "":
 				return "no supply pipe"
 			return "no supply pipe for %s" % item
@@ -5283,10 +5235,10 @@ func _stall_reason_text(stall) -> String:
 		# empty on this kind and is deliberately not printed.
 		"mothballed":
 			return "switched off"
-		# Nothing fed yet has picked one of the kind's recipes, so there
-		# is no one ingredient to name: `item` is empty and not printed.
+		# No recipe chosen (2026-10-03): it makes nothing until the
+		# player picks one, so the sentence is the fix. `item` is empty.
 		"undecided":
-			return "waiting for ingredients"
+			return "no recipe chosen — click it to pick one"
 	return ""
 
 
@@ -13568,7 +13520,17 @@ func _config_picker_choices() -> Array:
 		return [RACK_ANY_CHOICE] + _hopper_items + _tank_fluids
 	if _config_kind == SPLITTER_KIND:
 		return SPLITTER_MODES
-	return []
+	return _machine_recipes(_config_kind)
+
+
+## Every recipe a machine of `kind` can be set to, off the simulation
+## (`machine_recipes_json`, `data/recipes.ron` order). Empty for anything that
+## is not a machine, so a non-machine panel never grows a picker.
+func _machine_recipes(kind: String) -> Array:
+	if kind == "" or sim == null:
+		return []
+	var parsed = JSON.parse_string(sim.machine_recipes_json(kind))
+	return parsed if parsed is Array else []
 
 
 func _build_config_picker_slot(index: int, item_id: String) -> void:
@@ -13685,7 +13647,26 @@ func _config_picker_icon(choice: String) -> Texture2D:
 		return _icon_for_asset(SPLITTER_MODE_ASSETS.get(choice, SPLITTER_ASSET))
 	if choice == RACK_ANY_CHOICE:
 		return _icon_for_asset(_shop_asset_for(WAREHOUSE_RACK_KIND))
+	if _machine_recipes(_config_kind).has(choice):
+		return _recipe_icon(choice)
 	return _icon_for(choice)
+
+
+## A recipe's picture in a machine's picker: what it makes, when that has a
+## picture of its own (a pail of paste, a bottle, a case), and otherwise the
+## face of the sauce it is a stage of — `bbq_mix` and the finished `mustard`
+## only ever stand in a pipe, and a cardboard box would say nothing. Both
+## answers come off the content (`icon_names_json`, `cookbook_json`).
+func _recipe_icon(recipe: String) -> Texture2D:
+	if _icon_names.has(recipe) or ITEM_MODELS.has(recipe) or FLUID_MODELS.has(recipe):
+		return _icon_for(recipe)
+	var book = JSON.parse_string(sim.cookbook_json())
+	if book is Dictionary:
+		for sauce in book.get("sauces", []):
+			for step in sauce.get("steps", []):
+				if String(step.get("recipe", "")) == recipe and sauce.get("icon") != null:
+					return _icon_for_asset(String(sauce["icon"]))
+	return _icon_for(recipe)
 
 
 func _config_picker_name(choice: String) -> String:
@@ -13772,14 +13753,21 @@ func _open_config_panel(origin: Vector2i, kind: String) -> void:
 	#
 	# A splitter is the fourth: the picker alone, choosing which way it
 	# splits. It holds nothing to fill and has no level.
+	#
+	# A machine of a kind with several recipes carries a picker too: what it
+	# MAKES (2026-10-03). It runs the recipe the player chose and nothing
+	# else, so this is the one place that choice is made.
 	var crewed := _config_can_mothball(origin)
 	var rack := kind == WAREHOUSE_RACK_KIND
 	var splitter := kind == SPLITTER_KIND
+	var chooses_recipe := _machine_recipes(kind).size() > 1
 	_config_picker_box.visible = (
-		kind == HOPPER_KIND or kind == FLUID_TANK_KIND or rack or splitter
+		kind == HOPPER_KIND or kind == FLUID_TANK_KIND or rack or splitter or chooses_recipe
 	)
 	_config_picker_heading.text = (
-		"RESERVED FOR" if rack else ("SPLITS" if splitter else "CONTENTS")
+		"RESERVED FOR" if rack else (
+			"SPLITS" if splitter else ("MAKES" if chooses_recipe else "CONTENTS")
+		)
 	)
 	_config_machine_box.visible = crewed
 	_config_fill_row.visible = not crewed and not splitter
@@ -14282,6 +14270,10 @@ func _update_config_machine(key: String) -> void:
 		_set_config_level(_machine_progress(key))
 	_config_machine_state.text = _config_machine_state_text(key, mothballed)
 	_apply_config_mothball_state(mothballed)
+	if _config_picker_box.visible:
+		var recipe = machine.get("recipe")
+		_update_config_picker(String(recipe) if recipe != null else "")
+		_set_config_picker_note(MACHINE_PICKER_NOTE, [])
 
 
 ## The dock's version of the same panel (issue #19). It gets the switch for
@@ -14673,7 +14665,8 @@ func _on_config_picker_pressed(index: int) -> void:
 	if not _config_open:
 		return
 	if _config_kind != HOPPER_KIND and _config_kind != FLUID_TANK_KIND \
-			and _config_kind != WAREHOUSE_RACK_KIND and _config_kind != SPLITTER_KIND:
+			and _config_kind != WAREHOUSE_RACK_KIND and _config_kind != SPLITTER_KIND \
+			and _machine_recipes(_config_kind).size() <= 1:
 		return
 	if index < 0 or index >= _config_picker_slots.size():
 		return
@@ -14706,6 +14699,19 @@ func _on_config_picker_pressed(index: int) -> void:
 			"tile": [_config_tile.x, _config_tile.y],
 			"fluid": chosen,
 		})
+	elif _config_kind != HOPPER_KIND and _config_kind != FLUID_TANK_KIND \
+			and _config_kind != WAREHOUSE_RACK_KIND:
+		# A machine's recipe. A world command, not a config one: the chosen
+		# recipe names the pipe runs the machine touches and tints its
+		# product, so the runs and the machine are redrawn. Re-picking the
+		# current recipe is a no-op in the sim — it does not throw a batch
+		# away — so the press goes out whatever the slot shows.
+		_issue_world_command({
+			"type": "set_machine_recipe",
+			"tile": [_config_tile.x, _config_tile.y],
+			"recipe": chosen,
+		})
+		_update_config_panel()
 	elif _config_kind == WAREHOUSE_RACK_KIND:
 		# `null` is the "any" slot: the rack goes back to shared shelving.
 		# Whether the pick fits is the simulation's question, not this one's.
@@ -14741,7 +14747,8 @@ func _config_contents() -> String:
 		return _rack_filter_of(_rack_states.get(key, {}))
 	if _config_kind == SPLITTER_KIND:
 		return _splitter_mode_of(placement)
-	return ""
+	var recipe = _machine_states.get(key, {}).get("recipe")
+	return String(recipe) if recipe != null else ""
 
 
 ## Issues one of the panel's five commands and redraws what they touch.

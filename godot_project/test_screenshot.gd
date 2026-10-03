@@ -421,9 +421,9 @@ var _cursor_hovered := false
 ## explained in its own output is not the leftover issue #4 is about.
 var _cursor_park_noisy := false
 var _cursor_park_noise_tile := Vector2i(-999999, -999999)
-## `--stalled-run` (issue #54): the BBQ branch with its liquid-smoke tank
-## turned off its own run, cursor parked on a tile of the run that leaves
-## dead. The one frame that can show a DEAD run and a merely EMPTY one side
+## `--stalled-run` (issue #54): the BBQ branch with a second tank, declared
+## vinegar, pouring into the liquid-smoke run, cursor parked on a tile of the
+## run that leaves dead. The one frame that can show a DEAD run and a merely EMPTY one side
 ## by side, with the hover saying which is which.
 var _stalled_run := false
 ## `--after-machine-hover`: see the header.

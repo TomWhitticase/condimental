@@ -132,10 +132,10 @@ fn a_hopper_stands_at_the_head_of_its_own_feed_lane_one_per_raw_ingredient() {
         [
             "tomato".to_string(),
             "sugar".to_string(),
-            "spice_mix".to_string(),
-            "molasses".to_string(),
             "mustard_seed".to_string(),
-            "turmeric".to_string()
+            "turmeric".to_string(),
+            "spice_mix".to_string(),
+            "molasses".to_string()
         ],
         "raw = consumed by some recipe, produced by none — read out of data/recipes.ron, \
          never named in Rust. This is the whole FILE's list, which is why it is longer than \
@@ -191,6 +191,7 @@ fn placing_a_hopper_requires_naming_which_raw_item_it_holds() {
         tile: (0, -5),
         direction: Direction::North,
         item: None,
+        recipe: None,
     });
     assert_eq!(world.placement_count(), before);
     assert_eq!(world.owned_count(HOPPER_KIND), 3);
@@ -201,6 +202,7 @@ fn placing_a_hopper_requires_naming_which_raw_item_it_holds() {
         tile: (0, -5),
         direction: Direction::North,
         item: Some("bottled_ketchup".to_string()),
+        recipe: None,
     });
     assert_eq!(world.placement_count(), before);
 
@@ -210,6 +212,7 @@ fn placing_a_hopper_requires_naming_which_raw_item_it_holds() {
         tile: (0, -5),
         direction: Direction::North,
         item: Some("saffron".to_string()),
+        recipe: None,
     });
     assert_eq!(world.placement_count(), before);
 
@@ -219,6 +222,7 @@ fn placing_a_hopper_requires_naming_which_raw_item_it_holds() {
         tile: (0, -5),
         direction: Direction::North,
         item: Some("sugar".to_string()),
+        recipe: None,
     });
     assert_eq!(world.placement_count(), before + 1);
     assert_eq!(world.owned_count(HOPPER_KIND), 2);
@@ -618,11 +622,13 @@ fn the_place_command_carries_an_optional_item_on_the_wire() {
             tile,
             direction,
             ref item,
+            ref recipe,
         } => {
             assert_eq!(kind, HOPPER_KIND);
             assert_eq!(tile, (3, -3));
             assert_eq!(direction, Direction::North);
             assert_eq!(item.as_deref(), Some("sugar"));
+            assert_eq!(recipe, &None, "a recipe is only ever named for a machine");
         }
         other => panic!("expected a place command, got {other:?}"),
     }

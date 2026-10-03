@@ -1,29 +1,18 @@
-//! The **third sauce**, end to end: `sim::mustard_line` — the shipped ketchup
-//! line and mustard's own five stages in one world — built out of nothing but
-//! `Purchase` and `Place`, run until a box of mustard comes off the packer and
-//! the dock ships it.
+//! The **second sauce**, end to end: `sim::mustard_line` — the shipped ketchup
+//! line and mustard's own four stages in one world — built out of nothing but
+//! `Purchase`, `Place` (each machine placed set to its recipe) and staffing,
+//! run until a box of mustard comes off the packer and the dock ships it.
 //!
 //! `data/recipes.ron` parsing is not evidence that the factory it describes can
 //! be built and run, and mustard's risk is entirely in the plumbing rather than
-//! in the content. Mustard buys `vinegar`, which the ketchup mixer already
-//! drinks, and `World::resolve_network_fluids` does not ask what recipe a
-//! machine is running before deciding what a pipe run beside it could carry:
-//! it seeds a run from **every** recipe of every kind that touches it. Put
-//! mustard's vinegar on the mixer and a tank run touching any mixer has two raw
-//! candidates, narrows to neither, and goes `Ambiguous` — at which point every
-//! machine on it stalls with `AmbiguousPipe` **and the tank cannot even be
-//! filled**, because `World::tank_fluid` has nothing to return. That is a
-//! shipped-line regression a new player would hit before ever unlocking
-//! mustard, since `for_machine` is not gate-aware.
-//!
-//! So mustard's vinegar enters at the **crusher**, which drank nothing, and the
-//! mustard mixer drinks the derived `mustard_mash` down a pipe. The bill per
-//! box is identical; only the machine that drinks moved. The rule that came out
-//! of it — at most one raw fluid per machine kind, drunk by at most one recipe
-//! on that kind — is fenced by
-//! `sim::recipe::tests::at_most_one_raw_fluid_enters_any_machine_kind`, which
-//! reads the data. This file is the other half of the evidence: the running
-//! factory that fence is protecting.
+//! in the content. Both mixers drink bought `vinegar`, and until 2026-10-03
+//! that was impossible: `World::resolve_network_fluids` seeded a run from
+//! every recipe of every kind touching it, so a tank run touching any mixer
+//! had two recipes' claims on it, narrowed to neither, and went `Ambiguous` —
+//! the ketchup line stalled in a new game (issue #184), and mustard drank its
+//! vinegar at the crusher instead. Now a machine claims only for the recipe
+//! the player chose, so the vinegar goes in at the mixer, where it belongs.
+//! This file is the running evidence.
 //!
 //! Three claims:
 //!
@@ -139,9 +128,9 @@ fn pipe_faults(world: &World) -> Vec<((i32, i32), StallKind)> {
         .collect()
 }
 
-/// Claim 1, before a single tick: two lines whose mixers, vats and bottlers are
-/// the same kinds, one of them drinking a bought fluid at the crusher, and
-/// every run still narrows to exactly one fluid.
+/// Claim 1, before a single tick: two lines whose crushers, mixers and
+/// bottlers are the same kinds, both mixers drinking the same bought fluid,
+/// and every run still narrows to exactly one fluid.
 #[test]
 fn every_run_of_a_two_line_factory_names_one_fluid() {
     let world = mustard_line(recipes(), BUDGET);
@@ -160,7 +149,7 @@ fn every_run_of_a_two_line_factory_names_one_fluid() {
         pipe_faults(&world)
     );
 
-    // And the vinegar the two lines compete for reaches both of them: one run
+    // And the vinegar the two lines compete for reaches both mixers: one run
     // per line, each carrying it, because each line has its own tank.
     let vinegar = runs(&world)
         .into_iter()
@@ -212,8 +201,7 @@ fn a_box_of_mustard_is_made_and_the_dock_ships_it() {
     // Every stage, so a failure says which one stopped rather than only that
     // the last one did.
     for stage in [
-        "mustard_mash",
-        "mustard_mix",
+        "ground_mustard",
         "mustard",
         "bottled_mustard",
         "boxed_mustard",

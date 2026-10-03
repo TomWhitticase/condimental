@@ -14,12 +14,12 @@
 //! - a recipe with **two** fluid inputs draws them from two *distinct*
 //!   networks, matched **by fluid id** rather than by position — here from
 //!   one run the line makes itself and one a tank feeds;
-//! - a placed machine runs whichever of its kind's recipes its current
-//!   inputs satisfy, with `recipes.ron` file order as the tiebreak, so two
-//!   machines of one kind on one line can be running different recipes at
-//!   the same time and no command ever names either;
-//! - and which recipe a machine is on survives a save taken mid-craft,
-//!   because the pick is live state now rather than a property of the kind
+//! - a placed machine runs the recipe the player set on it and nothing else
+//!   (2026-10-03), so two machines of one kind on one line run different
+//!   recipes side by side, a machine never switches itself to a recipe its
+//!   inputs happen to suit, and switching one is destructive in exactly the
+//!   ways `PlayerCommand::SetMachineRecipe` says;
+//! - and which recipe a machine is set to survives a save taken mid-craft
 //!   (`sim::save::SavedMachine::recipe`).
 //!
 //! It also covers the two construction-time invariants that changed shape
@@ -70,10 +70,24 @@ fn place(world: &mut World, kind: &str, tile: (i32, i32), direction: Direction) 
         // The hopper is the only kind that takes one, and every fixture
         // here feeds its line the same raw solid.
         item: (kind == "hopper").then(|| "tomato".to_string()),
+        recipe: None,
     });
     assert!(
         world.query_tile(tile).is_some(),
         "{kind} must be standing at {tile:?} after being placed"
+    );
+}
+
+/// Sets the machine at `tile` to `recipe`, as its picker does.
+fn set(world: &mut World, tile: (i32, i32), recipe: &str) {
+    world.issue_command(PlayerCommand::SetMachineRecipe {
+        tile,
+        recipe: Some(recipe.to_string()),
+    });
+    assert_eq!(
+        recipe_of(world, tile),
+        recipe,
+        "the machine at {tile:?} took the recipe"
     );
 }
 
@@ -92,6 +106,34 @@ fn process_of(world: &World, tile: (i32, i32)) -> Option<(u64, u64)> {
         Some(TileSnapshot::Machine { process, .. }) => process,
         other => panic!("{tile:?} is not a machine: {other:?}"),
     }
+}
+
+/// One machine buffer: `(item, count)` slots.
+type Buffer = Vec<(String, u32)>;
+
+/// A machine's input and output buffers, as the save records them.
+fn buffers(world: &World, tile: (i32, i32)) -> (Buffer, Buffer) {
+    world
+        .to_save()
+        .placements
+        .into_iter()
+        .find_map(|placement| match placement.body {
+            SavedBody::Machine(machine) if placement.tile == tile => {
+                Some((machine.input, machine.output))
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no machine at {tile:?}"))
+}
+
+/// How much fluid the pipe run covering a tile holds.
+fn fluid_volume(world: &World, tile: (i32, i32)) -> f64 {
+    world
+        .fluid_snapshots()
+        .into_iter()
+        .find(|n| n.segments.iter().any(|s| s.tile == tile))
+        .unwrap_or_else(|| panic!("no pipe network covers {tile:?}"))
+        .total_volume
 }
 
 /// What the pipe run covering a tile turned out to carry, or `None` while it
@@ -175,9 +217,9 @@ fn tangy_branch() -> RecipeRegistry {
 ///  (0,0)  (1,0) (2,0)  (3,0)(4,0) (5,0) (6,0)(7,0)(9,0)(10,0)(12,0)
 /// ```
 ///
-/// Both vats are the same kind, the same size and the same facing, and
-/// neither is ever told what to make. The first touches one fluid run and
-/// cooks ketchup; the second touches two and makes it tangy. Tank rows and
+/// Both vats are the same kind, the same size and the same facing, and each
+/// is set to its own recipe ([`MACHINE_RECIPES`]): the first touches one
+/// fluid run and cooks ketchup; the second touches two and makes it tangy. Tank rows and
 /// outlet pipes sit exactly where `sim::reference`'s layout rule puts them —
 /// the run east of a footprint is its outlet, the run on the row north of
 /// the whole footprint is a raw feed.
@@ -199,12 +241,24 @@ const LAYOUT: &[(&str, (i32, i32), Direction)] = &[
     ("pipe", (12, 0), Direction::East), // the second vat's outlet
 ];
 
-/// The layout built, stocked and ready to tick.
+/// What each machine in [`LAYOUT`] is set to make.
+const MACHINE_RECIPES: &[((i32, i32), &str)] = &[
+    ((2, 0), "tomato_paste"),
+    ((5, 0), "ketchup_mix"),
+    ((7, 0), "ketchup"),
+    ((10, 0), "tangy_ketchup"),
+];
+
+/// The layout built, every machine set to its recipe, stocked and ready to
+/// tick.
 fn tangy_line() -> World {
     let mut world = funded(tangy_branch());
     stock(&mut world);
     for &(kind, tile, direction) in LAYOUT {
         place(&mut world, kind, tile, direction);
+    }
+    for &(tile, recipe) in MACHINE_RECIPES {
+        set(&mut world, tile, recipe);
     }
     world
 }
@@ -261,8 +315,6 @@ fn a_two_fluid_recipe_draws_from_two_distinct_networks_matched_by_id() {
 
     // The second vat is tapped into two networks, one per fluid its recipe
     // draws, each reporting the units that recipe takes from *that* run.
-    // Read after ticking, because until something reaches the vat it is
-    // undecided and draws for no recipe at all.
     let mut taps: Vec<(String, Option<String>, u32)> = world
         .fluid_snapshots()
         .into_iter()
@@ -299,36 +351,59 @@ fn a_two_fluid_recipe_draws_from_two_distinct_networks_matched_by_id() {
 // 2. Several recipes on one kind
 // =====================================================================
 
-/// Two machines of the same kind on one line, running different recipes,
-/// with no command ever naming either — the pick comes from what each is
-/// plumbed into. This is the "no player-facing recipe picker" decision made
-/// visible.
+/// Two machines of the same kind on one line, each running the recipe it
+/// was set to — and neither ever re-picking, however long the line runs.
 #[test]
-fn two_machines_of_one_kind_run_different_recipes_chosen_from_their_inputs() {
+fn two_machines_of_one_kind_run_the_recipes_they_were_set_to() {
     let mut world = tangy_line();
     for _ in 0..2_000 {
         supply(&mut world);
         world.tick();
     }
-
-    assert_eq!(
-        recipe_of(&world, (7, 0)),
-        "ketchup",
-        "the vat only the mix run touches can cook nothing else"
-    );
-    assert_eq!(
-        recipe_of(&world, (10, 0)),
-        "tangy_ketchup",
-        "the vat that also touches a vinegar run takes the recipe using both — and that is \
-         the later of its kind's two recipes, so this is not file order answering"
-    );
+    assert_eq!(recipe_of(&world, (7, 0)), "ketchup");
+    assert_eq!(recipe_of(&world, (10, 0)), "tangy_ketchup");
 }
 
-/// The other half of "chosen from its inputs", on the solid side and with
-/// everything else held equal: one machine, two recipes of its kind it could
-/// run, and only what the hopper beside it holds deciding which.
+/// A machine with no recipe chosen makes nothing — not even when its inputs
+/// satisfy exactly one recipe of its kind. The player decides, never the
+/// machine: this is the behaviour that used to be "the first satisfied
+/// recipe wins", and its absence is the point of the 2026-10-03 change.
 #[test]
-fn what_a_hopper_holds_decides_which_recipe_its_machine_runs() {
+fn a_machine_with_no_recipe_chosen_makes_nothing_whatever_it_is_fed() {
+    let mut world = tangy_line();
+    world.issue_command(PlayerCommand::SetMachineRecipe {
+        tile: (2, 0),
+        recipe: None,
+    });
+    assert_eq!(recipe_of(&world, (2, 0)), "");
+    for _ in 0..1_000 {
+        supply(&mut world);
+        world.tick();
+    }
+    assert_eq!(
+        recipe_of(&world, (2, 0)),
+        "",
+        "it never picked one for itself"
+    );
+    assert_eq!(
+        process_of(&world, (2, 0)),
+        None,
+        "and it never started a craft"
+    );
+    match world.query_tile((1, 0)) {
+        Some(TileSnapshot::Belt { items_here, .. }) => assert!(
+            !items_here.is_empty(),
+            "the tomato it will not take backs up on the belt in front of it"
+        ),
+        other => panic!("expected the feed belt, got {other:?}"),
+    }
+}
+
+/// A machine takes only what its recipe uses off a belt: a crusher set to
+/// one of its kind's recipes leaves the other's raw on the belt rather than
+/// filling its buffer with stock it will never use.
+#[test]
+fn a_machine_runs_only_its_recipe_and_takes_only_that_recipe_s_inputs() {
     fn two_crusher_recipes() -> RecipeRegistry {
         RecipeRegistry::from_ron_str(
             r#"(
@@ -361,7 +436,7 @@ fn what_a_hopper_holds_decides_which_recipe_its_machine_runs() {
         .expect("the fixture recipe text must parse")
     }
 
-    let run_with = |item: &str| {
+    let run = |item: &str, recipe: &str| {
         let mut world = funded(two_crusher_recipes());
         common::buy(&mut world, item, 100);
         world.issue_command(PlayerCommand::Purchase {
@@ -373,78 +448,138 @@ fn what_a_hopper_holds_decides_which_recipe_its_machine_runs() {
             tile: (0, 0),
             direction: Direction::East,
             item: Some(item.to_string()),
+            recipe: None,
         });
         place(&mut world, "belt", (1, 0), Direction::East);
         place(&mut world, "crusher", (2, 0), Direction::East);
+        set(&mut world, (2, 0), recipe);
         for _ in 0..400 {
             supply(&mut world);
             world.tick();
         }
-        recipe_of(&world, (2, 0))
+        world
     };
 
-    assert_eq!(run_with("tomato"), "tomato_paste");
+    let matched = run("sugar", "sugar_syrup");
+    let (input, output) = buffers(&matched, (2, 0));
+    assert!(
+        output.iter().any(|(id, _)| id == "sugar_syrup")
+            || input.iter().any(|(id, _)| id == "sugar"),
+        "fed what its recipe takes, it takes it and crushes: in {input:?}, out {output:?}"
+    );
+
+    let mismatched = run("sugar", "tomato_paste");
     assert_eq!(
-        run_with("sugar"),
-        "sugar_syrup",
-        "the second recipe of the kind, picked because it is the one the inputs satisfy"
+        recipe_of(&mismatched, (2, 0)),
+        "tomato_paste",
+        "it did not switch itself"
+    );
+    assert_eq!(
+        process_of(&mismatched, (2, 0)),
+        None,
+        "and it started nothing"
+    );
+    let (input, _) = buffers(&mismatched, (2, 0));
+    assert!(input.is_empty(), "the sugar stayed on the belt: {input:?}");
+}
+
+/// Switching a machine's recipe is the destructive act the command says it
+/// is: the craft in progress is abandoned, an input the new recipe does not
+/// take is discarded, and fluid in a run the switch renames is emptied rather
+/// than relabelled — the vat switched from ketchup to tangy must not turn the
+/// ketchup standing in its outlet run into tangy ketchup nobody made.
+#[test]
+fn switching_a_recipe_abandons_the_craft_and_empties_a_renamed_run() {
+    let mut world = tangy_line();
+    let vat = (7, 0);
+    for _ in 0..2_000 {
+        supply(&mut world);
+        world.tick();
+        if process_of(&world, vat).is_some() && fluid_volume(&world, (9, 0)) > 0.0 {
+            break;
+        }
+    }
+    assert!(
+        process_of(&world, vat).is_some(),
+        "the first vat must be cooking"
+    );
+    assert!(
+        fluid_volume(&world, (9, 0)) > 0.0,
+        "with ketchup in its outlet run"
+    );
+
+    // Re-selecting the recipe it already has changes nothing at all.
+    let before = world.to_save_ron();
+    set(&mut world, vat, "ketchup");
+    assert_eq!(world.to_save_ron(), before, "re-selecting is not a switch");
+
+    set(&mut world, vat, "tangy_ketchup");
+    assert_eq!(
+        process_of(&world, vat),
+        None,
+        "the ketchup craft was abandoned"
+    );
+    assert_ne!(
+        fluid_of(&world, (9, 0)).as_deref(),
+        Some("ketchup"),
+        "the outlet run is no longer ketchup's"
+    );
+    assert_eq!(
+        fluid_volume(&world, (9, 0)),
+        0.0,
+        "and the ketchup in it was destroyed, not relabelled"
     );
 }
 
-/// The tiebreak, isolated: when a machine's inputs satisfy **more than one**
-/// of its kind's recipes, `recipes.ron` file order decides. Swapping the two
-/// entries swaps the answer, which is what makes this a property of the file
-/// rather than of some id ordering or hash order along the way.
+/// A recipe the machine's kind does not run is refused, and so is a tile
+/// that is not a machine — silently, changing nothing.
 #[test]
-fn file_order_breaks_a_tie_between_two_satisfied_recipes() {
-    let crush_tomato_two_ways = |first: &str, second: &str| {
-        let text = format!(
-            r#"(
-                schema_version: 3,
-                recipes: [
-                    Recipe(
-                        id: "{first}",
-                        inputs: [("tomato", 1)],
-                        outputs: [("{first}", 1)],
-                        machine: "crusher",
-                        time_ticks: 10,
-                    ),
-                    Recipe(
-                        id: "{second}",
-                        inputs: [("tomato", 1)],
-                        outputs: [("{second}", 1)],
-                        machine: "crusher",
-                        time_ticks: 10,
-                    ),
-                    Recipe(
-                        id: "boxed",
-                        inputs: [("{first}", 1), ("{second}", 1)],
-                        outputs: [("boxed", 1)],
-                        machine: "packer",
-                        time_ticks: 10,
-                    ),
-                ],
-            )"#
-        );
-        let recipes =
-            RecipeRegistry::from_ron_str(&text).expect("the fixture recipe text must parse");
-        let mut world = funded(recipes);
-        common::buy(&mut world, "tomato", 100);
-        place(&mut world, "hopper", (0, 0), Direction::East);
-        place(&mut world, "belt", (1, 0), Direction::East);
-        place(&mut world, "crusher", (2, 0), Direction::East);
-        for _ in 0..400 {
-            supply(&mut world);
-            world.tick();
-        }
-        recipe_of(&world, (2, 0))
-    };
+fn a_recipe_that_does_not_run_on_the_kind_is_refused() {
+    let mut world = tangy_line();
+    let before = world.to_save_ron();
+    for (tile, recipe) in [
+        ((7, 0), "tomato_paste"), // a crusher's recipe on a vat
+        ((7, 0), "no_such_recipe"),
+        ((1, 0), "ketchup"),   // a belt
+        ((40, 40), "ketchup"), // nothing there
+    ] {
+        world.issue_command(PlayerCommand::SetMachineRecipe {
+            tile,
+            recipe: Some(recipe.to_string()),
+        });
+    }
+    assert_eq!(world.to_save_ron(), before);
+}
 
-    // A tomato satisfies both, so the earlier entry wins...
-    assert_eq!(crush_tomato_two_ways("paste", "puree"), "paste");
-    // ...and it is genuinely the file's order, not the ids sorted: "paste"
-    // sorts first but loses when it is written second.
-    assert_eq!(crush_tomato_two_ways("puree", "paste"), "puree");
+/// Placing a machine with a recipe sets it in one command, and placing one
+/// with a recipe its kind does not run is refused outright — not placed
+/// with none.
+#[test]
+fn a_place_can_carry_the_recipe_and_a_wrong_one_refuses_the_place() {
+    let mut world = funded(tangy_branch());
+    world.issue_command(PlayerCommand::Purchase {
+        kind: "cooking_vat".to_string(),
+        quantity: 2,
+    });
+    world.issue_command(PlayerCommand::Place {
+        kind: "cooking_vat".to_string(),
+        tile: (0, 0),
+        direction: Direction::East,
+        item: None,
+        recipe: Some("tangy_ketchup".to_string()),
+    });
+    assert_eq!(recipe_of(&world, (0, 0)), "tangy_ketchup");
+    world.issue_command(PlayerCommand::Place {
+        kind: "cooking_vat".to_string(),
+        tile: (5, 0),
+        direction: Direction::East,
+        item: None,
+        recipe: Some("tomato_paste".to_string()),
+    });
+    assert!(
+        world.query_tile((5, 0)).is_none(),
+        "a crusher's recipe on a vat is refused"
+    );
 }
 
 // =====================================================================
@@ -498,80 +633,66 @@ fn a_save_mid_craft_restores_the_recipe_that_craft_is() {
     );
 }
 
-/// The forward-compatibility half. `recipe` was added to `SavedMachine`
-/// without bumping `SAVE_SCHEMA_VERSION`, on the rule that an additive
-/// `#[serde(default)]` field is not a shape change, so a save written before
-/// it still has to load. An idle machine loads UNDECIDED — where a freshly
-/// placed one starts since 2026-10-02 — and re-picks from its inputs on its
-/// next idle tick; one saved MID-CRAFT loads on its kind's first recipe in
-/// file order, because that is what every machine held when such a save
-/// was written, so it is the craft actually in flight.
+/// A machine with no recipe chosen saves as `recipe: None` and loads that
+/// way: unset is a state the player put it in, not a field to fill in.
 #[test]
-fn a_save_without_the_recipe_field_still_loads() {
+fn a_machine_with_no_recipe_saves_and_loads_with_none() {
     let mut world = tangy_line();
-    for _ in 0..500 {
-        supply(&mut world);
-        world.tick();
-    }
-    let mut data = world.to_save();
-    for placement in &mut data.placements {
-        if let SavedBody::Machine(machine) = &mut placement.body {
-            machine.recipe = None;
-        }
-    }
+    world.issue_command(PlayerCommand::SetMachineRecipe {
+        tile: (10, 0),
+        recipe: None,
+    });
+    let text = world.to_save_ron();
     let loaded = World::from_save_with_content(
-        data,
+        SaveData::from_ron(&text).expect("the save must parse"),
         tangy_branch(),
         MachineRegistry::bundled(),
         ContractRegistry::bundled(),
     )
-    .expect("a save without the field is not corrupt, it is old");
-    let vat = (10, 0);
-    let expected = if process_of(&loaded, vat).is_some() {
-        "ketchup" // mid-craft: the first recipe, the only one it could have been on
-    } else {
-        "" // idle: undecided until its inputs pick
-    };
-    assert_eq!(recipe_of(&loaded, vat), expected);
+    .expect("the save must load");
+    assert_eq!(recipe_of(&loaded, (10, 0)), "");
+    assert_eq!(recipe_of(&loaded, (7, 0)), "ketchup");
+    assert_eq!(loaded.to_save_ron(), text);
 }
 
-/// A machine saved mid-craft with no `recipe` field finishes the craft. It
-/// is the one case where "undecided on load" would be a bug: a process with
-/// no recipe behind it can never deposit, so the vat would hang for good.
+/// A craft in progress with no recipe behind it could never finish, and no
+/// build writes one — so a save holding one is refused as corrupt rather
+/// than loaded onto a guessed recipe. (Version 7 files, where a machine had
+/// picked its own recipe, are rewritten by `scripts/migrate-save-v7-to-v8.py`
+/// before they get here.)
 #[test]
-fn a_legacy_save_mid_craft_finishes_the_craft() {
+fn a_save_with_a_craft_and_no_recipe_is_refused() {
     let mut world = tangy_line();
     let vat = (7, 0);
-    // Run until the plain-ketchup vat is cooking.
     for _ in 0..2_000 {
         supply(&mut world);
         world.tick();
-        if process_of(&world, vat).is_some() && recipe_of(&world, vat) == "ketchup" {
+        if process_of(&world, vat).is_some() {
             break;
         }
     }
     assert!(process_of(&world, vat).is_some(), "the vat never started");
     let mut data = world.to_save();
     for placement in &mut data.placements {
-        if let SavedBody::Machine(machine) = &mut placement.body {
+        if placement.tile == vat
+            && let SavedBody::Machine(machine) = &mut placement.body
+        {
             machine.recipe = None;
         }
     }
-    let mut loaded = World::from_save_with_content(
+    let refused = World::from_save_with_content(
         data,
         tangy_branch(),
         MachineRegistry::bundled(),
         ContractRegistry::bundled(),
-    )
-    .expect("an old save loads");
-    assert_eq!(recipe_of(&loaded, vat), "ketchup");
-    for _ in 0..400 {
-        loaded.tick();
-    }
-    assert_ne!(
-        process_of(&loaded, vat),
-        process_of(&world, vat),
-        "the in-flight craft must finish rather than hang on a missing recipe"
+    );
+    assert!(
+        matches!(
+            refused,
+            Err(sim_core::sim::save::SaveError::CraftWithoutRecipe { tile }) if tile == vat
+        ),
+        "{:?}",
+        refused.err()
     );
 }
 
@@ -735,7 +856,7 @@ fn the_shipped_file_is_two_lines_and_every_recipe_in_it_starts_from_the_market()
         );
     }
 
-    // The independence claim, as ids rather than as prose. Mustard's five
+    // The independence claim, as ids rather than as prose. Mustard's four
     // stages eat mustard's own products, mustard's own two raws, and the one
     // fluid the ketchup mixer also drinks — and nothing else. An id from the
     // tomato side appearing here would make this a branch, which is the BBQ
@@ -748,10 +869,9 @@ fn the_shipped_file_is_two_lines_and_every_recipe_in_it_starts_from_the_market()
         .collect();
     let expected: BTreeSet<String> = [
         "mustard_seed",
+        "ground_mustard",
         "turmeric",
         "vinegar",
-        "mustard_mash",
-        "mustard_mix",
         "mustard",
         "bottled_mustard",
     ]
@@ -889,6 +1009,13 @@ fn pipe_naming_is_independent_of_placement_order() {
         stock(&mut world);
         for (kind, tile, direction) in order {
             place(&mut world, kind, tile, direction);
+        }
+        let mut choices = MACHINE_RECIPES.to_vec();
+        if reverse {
+            choices.reverse();
+        }
+        for (tile, recipe) in choices {
+            set(&mut world, tile, recipe);
         }
         let mut runs: Vec<(_, _)> = world
             .fluid_snapshots()

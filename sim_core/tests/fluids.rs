@@ -297,9 +297,6 @@ fn the_shipped_chain_consumes_fluid_as_it_produces() {
         .taps
         .first()
         .expect("a machine must be tapping the run");
-    // Read by KIND: before its first tick the mixer is undecided and names
-    // no recipe (`Machine::choose`'s rule 4), so the tap's `machine_recipe`
-    // is null here.
     assert_eq!(
         kind_at(&world, tap.machine_tile),
         recipe_kind(FLUID_GATED_RECIPE),
@@ -313,8 +310,13 @@ fn the_shipped_chain_consumes_fluid_as_it_produces() {
         "the fluid recipe must consume a non-zero amount"
     );
     assert_eq!(
-        tap.units_per_craft, 0,
-        "and an undecided mixer is costed at nothing: it is drawing for no recipe yet"
+        tap.machine_recipe.as_deref(),
+        Some(FLUID_GATED_RECIPE),
+        "the fixture places the mixer set to its recipe"
+    );
+    assert!(
+        tap.units_per_craft > 0,
+        "and the tap is costed at what that recipe draws per craft"
     );
     assert!(
         before.producers.is_empty(),
@@ -562,8 +564,9 @@ fn fluid_snapshot_json_has_the_documented_shape() {
     );
     assert_eq!(machine.kind, recipe_kind(FLUID_GATED_RECIPE));
     assert_eq!(
-        tap.machine_recipe, None,
-        "nothing has flowed yet, so the mixer has not been told its sauce"
+        tap.machine_recipe.as_deref(),
+        Some(FLUID_GATED_RECIPE),
+        "the fixture places the mixer set to its recipe, as a player picks one"
     );
     assert_eq!(
         snapshot.tank_tiles.len(),

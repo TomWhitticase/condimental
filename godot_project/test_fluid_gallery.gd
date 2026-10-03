@@ -1,5 +1,5 @@
 # Headless proof of the fluid gallery (issue #72) — the structural claims a
-# machine can check without a framebuffer. Whether the nine colours actually
+# machine can check without a framebuffer. Whether the seven colours actually
 # READ is what `scripts/screenshot-scene.sh --fluid-gallery` is for, the same
 # division `test_pipe_shapes.gd` and `test_belt_shapes.gd` draw for their own
 # galleries.
@@ -10,7 +10,7 @@
 # The fixture exists because `bbq` and `bbq_mix` stood at zero pressure in
 # every other fixture, so the tints issue #68 gave them could not be
 # photographed at all. It is a claim about the SIMULATION as much as about a
-# frame — the nine runs are named by topology, not by a label the fixture
+# frame — the runs are named by the machines' chosen recipes, not by a label the fixture
 # writes — and every way it can degrade is quiet: move one pipe and two
 # networks merge into a single unnameable run, add a machine and a run goes
 # ambiguous, get the fill wrong and a run is named but invisible. In each
@@ -20,13 +20,13 @@
 #     is placed, so a silent "" later means something,
 #   * every placement the gallery asks for is accepted (a refused purchase
 #     would drop a run and nothing else would say so),
-#   * `check_fluid_gallery` passes on the shipped layout: nine runs, each
+#   * `check_fluid_gallery` passes on the shipped layout: every run
 #     `carries` with one fluid named, each above the pressure whose colour
 #     shows in a sight window,
-#   * the nine named fluids are exactly `FLUID_GALLERY_FLUIDS`,
+#   * the named fluids are exactly `FLUID_GALLERY_FLUIDS`,
 #   * `test_layouts.gd`'s hand-copied `FLUID_MIN_VISIBLE_PRESSURE` still
 #     equals `main.gd`'s, the number it was copied from,
-#   * every one of the nine has a `FLUID_TINTS` entry, no two alike, and none
+#   * every one of them has a `FLUID_TINTS` entry, no two alike, and none
 #     of them near-grey (issue #100 — see `FLUID_TINT_MIN_SATURATION`),
 #   * and, the other way round, every key in `FLUID_TINTS` is IN
 #     `FLUID_GALLERY_FLUIDS` (issue #108). Without that the three checks
@@ -41,9 +41,10 @@
 #     that shows its product can run has a `PRODUCT_TINTS` row, both ways
 #     round. `FLUID_GALLERY_FLUIDS` and `FLUID_TINTS` are both hand-written
 #     GDScript, so checking them against each other cannot see a fluid
-#     missing from both: mustard's `mustard_mash`, `mustard_mix` and
-#     `mustard` reached a review drawing in `FLUID_TINT_FALLBACK`, and its
-#     three products in `PRODUCT_TINT_FALLBACK`, with this file green. The
+#     missing from both: mustard's first three fluids (since retired, when
+#     mustard stopped being cooked) reached a review drawing in
+#     `FLUID_TINT_FALLBACK`, and its three products in
+#     `PRODUCT_TINT_FALLBACK`, with this file green. The
 #     expected set now comes off `cookbook_json` and off the machines' own
 #     generated models — see `_wire_fluids()` and `_wire_products()` — so a
 #     fourth sauce is covered by the content landing and nothing else.
@@ -114,15 +115,11 @@ const FLUID_TINT_LUMA_WEIGHT := 2.0
 ## against olive and both are mid-chain fluids that never share a frame in
 ## the shipped fixtures, which is why this is filed rather than fixed here.
 ##
-## **Re-measured over NINE when mustard landed, and the floor did not move.**
-## The three new tints are a value ladder on one hue, so their own two gaps
-## and the gap from `vinegar` to `mustard_mash` all come out at 0.432-0.450 —
-## the third, fourth and fifth worst pairs in the table, and every one of
-## them above `bbq_mix` <-> `liquid_smoke`'s 0.412. The worst pair is still
-## `ketchup_mix` <-> `bbq_mix` at 0.291, so 0.26's 10% margin is still a
-## margin below the same pair it was calibrated against. A third sauce that
-## had needed this number raised would have been a third sauce whose colours
-## were picked badly.
+## **Re-measured over nine when mustard landed (three stages of it, then),
+## and the floor did not move**: the worst pair stayed `ketchup_mix` <->
+## `bbq_mix` at 0.291. Mustard lost its cook and its two intermediate fluids
+## on 2026-10-03, leaving seven; removing tints cannot shrink the worst gap,
+## so the floor still sits the same margin below the same pair.
 ##
 ## `test_bbq_branch.gd` keeps its own, looser 0.08 on plain summed |dRGB|,
 ## and the two are deliberately NOT the same number any more: that one is
@@ -211,7 +208,7 @@ func _run_checks() -> void:
 		)
 		return
 
-	# --- 3. nine runs, each carrying one of the nine ----------------------
+	# --- 3. every run carrying one of the gallery's fluids ----------------
 	var snapshots: Array = JSON.parse_string(main.sim.fluid_snapshots_json())
 	var carried := {}
 	for run in snapshots:
@@ -261,7 +258,7 @@ func _run_checks() -> void:
 	# Sections 4 and 5 check `FLUID_GALLERY_FLUIDS` against `FLUID_TINTS` in
 	# both directions, which sounds complete and is not: both are
 	# hand-written GDScript, so a fluid absent from BOTH is invisible to
-	# them. That is how mustard's three stages reached a review drawing in
+	# them. That is how mustard's first three fluids reached a review drawing in
 	# `FLUID_TINT_FALLBACK` with every script in the suite green. The set
 	# below is read off `cookbook_json` — the simulation's own recipe graph,
 	# which is `data/*.ron` and never a list here — so a fourth sauce's
@@ -327,7 +324,7 @@ func _run_checks() -> void:
 			)
 			return
 
-	# --- 6. nine tints, all different, none of them grey ------------------
+	# --- 6. every tint different, none of them grey ----------------------
 	var seen := {}
 	for fluid in Layouts.FLUID_GALLERY_FLUIDS:
 		if not main.FLUID_TINTS.has(fluid):
@@ -402,7 +399,7 @@ func _run_checks() -> void:
 		return
 
 	print(
-		"FLUID_GALLERY_OK: %d placements stand %d runs, each named by topology alone, each above "
+		"FLUID_GALLERY_OK: %d placements stand %d runs, each named by its machines' recipes, each above "
 		% [placed, snapshots.size()]
 		+ "the %s pressure at which a sight window shows colour, each with a tint of its own "
 		% [Layouts.CROSSING_MIN_DRAWN_PRESSURE]

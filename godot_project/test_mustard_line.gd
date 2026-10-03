@@ -1,4 +1,4 @@
-# Headless proof of THE MUSTARD LINE — the third sauce, running end to end,
+# Headless proof of THE MUSTARD LINE — the second sauce, running end to end,
 # and every id it puts on screen resolving to a model or a tint of its own
 # rather than to a documented fallback.
 #
@@ -6,25 +6,26 @@
 #   godot --headless --path godot_project --script test_mustard_line.gd
 #
 # WHY IT EXISTS. Mustard is the first sauce that is a whole SECOND LINE from
-# raw rather than a branch off an existing one, and it is the first whose
-# middle is entirely WET: the crusher mills the seed with vinegar and
-# discharges a fluid, so `mustard_mash` and `mustard_mix` never touch a belt.
-# Between them those two facts mean the third sauce touches five lookup
-# tables in `main.gd` — `ITEM_MODELS`, `FLUID_TINTS`, `PRODUCT_TINTS`,
-# `HOPPER_FILL_TINTS`, `RACK_LOAD_TINTS` — and every one of them fails
-# SILENTLY. A missing key is a cardboard box sliding down a belt, a pale blue
-# pipe, an unfinished-looking vat or a pallet of the same sand as every other
-# pallet, with the whole suite green (UI_UX.md §2b point 12).
+# raw rather than a branch off an existing one, and since 2026-10-03 it is
+# ground and mixed, never cooked: seed is crushed to `ground_mustard` on a
+# belt, and the mixer drinks the same bought vinegar the ketchup mixer does —
+# two recipes on one machine kind, told apart only by the recipe each mixer
+# was SET to. Between them the sauce touches five lookup tables in `main.gd`
+# — `ITEM_MODELS`, `FLUID_TINTS`, `PRODUCT_TINTS`, `HOPPER_FILL_TINTS`,
+# `RACK_LOAD_TINTS` — and every one of them fails SILENTLY. A missing key is
+# a cardboard box sliding down a belt, a pale blue pipe, an unfinished-looking
+# mixer or a pallet of the same sand as every other pallet, with the whole
+# suite green (UI_UX.md §2b point 12).
 #
 # Verifies:
 #   * THE LINE IS BUILT: every placement `build_mustard_line` asks for is
 #     accepted (a refused purchase is silent, and would leave a gap nothing
 #     else reports),
-#   * THE PLUMBING IS NAMED: all four runs `carries` the fluid the layout
-#     implies, and the mash is on the crusher's side of the mixer while the
-#     mix is on the other. An unnamed run is not an error in `sim_core` — its
-#     machines simply never draw — so it has to be asserted somewhere or it
-#     photographs as a line that is idle for no stated reason,
+#   * THE PLUMBING IS NAMED: both runs `carries` the fluid the layout
+#     implies — vinegar on the mixer's supply side, mustard on its outlet.
+#     An unnamed run is not an error in `sim_core` — its machines simply
+#     never draw — so it has to be asserted somewhere or it photographs as a
+#     line that is idle for no stated reason,
 #   * IT ACTUALLY RUNS: `boxed_mustard` is produced AND delivered. A line
 #     that is plumbed correctly and starved looks identical in a screenshot,
 #   * EVERY MUSTARD ID RESOLVES. Enumerated from the SIMULATION — the sauce's
@@ -33,10 +34,8 @@
 #     review made and issue #108 recorded: a guard that can only be given
 #     more entries has not been fixed. Add a fourth sauce and this test asks
 #     about its ids without being edited,
-#   * THE THREE FLUIDS ARE TELLABLE APART ALONG THE LINE, by the measure the
-#     rest of the repo uses — see `MUSTARD_LUMA_STEP_MIN` below,
-#   * AND THE VAT AGREES WITH ITS OWN PIPE: `PRODUCT_TINTS["mustard"]` equals
-#     `FLUID_TINTS["mustard"]`, one cook and one colour, the rule
+#   * AND THE MIXER AGREES WITH ITS OWN PIPE: `PRODUCT_TINTS["mustard"]`
+#     equals `FLUID_TINTS["mustard"]`, one sauce and one colour, the rule
 #     `test_bbq_branch.gd` pins for the other two sauces.
 #
 # The one-frame-before-checking dance is inherited from test_hover.gd — see
@@ -44,34 +43,6 @@
 extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
-
-## How far apart, in Rec.709 luma on 0..1, two CONSECUTIVE stages of the
-## mustard run have to be drawn.
-##
-## This is the only thing in the suite that asserts mustard's three fluids
-## are three fluids rather than one. `test_fluid_gallery.gd` already holds
-## every pair in the game to a combined chroma-and-value floor, which the
-## mustard trio clears at 0.450 — but that metric is dominated by summed
-## |dRGB|, and three tints of ONE HUE can clear it while being a single
-## colour to a player looking down a pipe. Value is the axis this camera
-## reads by (UI_UX.md §7), and along a single-hue ladder it is the ONLY axis,
-## so it gets a floor of its own.
-##
-## **This floor is in TINT space and the frame is what matters**, so it is
-## set from a rendered measurement rather than from the tints. The pipe
-## body's lit face maps tint luma to pixels compressively (the curve is
-## written out in `main.gd`'s FLUID_TINTS block): the shipped ladder is
-## 0.1354 then 0.1586 of tint luma — 34.5/255 and 40.4/255 — and
-## photographs as **+18.2/255 and +14.1/255**, measured on a fixed 32x16
-## mask over `--fluid-gallery --populate --closeup <tile>,5`. An earlier
-## cut with EVEN 25.6/255 tint steps photographed as +15.3 and +10.4, and
-## 10.4 is inside issue #113's 10.7-11.8 noise band for reading one fluid
-## twice. So 0.120 is roughly a 10% margin under the smaller shipped step,
-## the same deliberately-tight calibration `test_fluid_gallery.gd` and
-## `test_ingredient_models.gd` are set by — and it is a floor a headless
-## test CAN hold, not a claim about pixels it cannot see. A re-tint landing
-## between 0.120 and 0.135 is one a human should re-photograph.
-const MUSTARD_LUMA_STEP_MIN := 0.120
 
 ## The smallest icon that is not the 8x8 placeholder `_icon_for` hands back
 ## for a name no asset answers to. Same threshold, and the same reasoning, as
@@ -88,14 +59,6 @@ var _kind_tiles: Dictionary = {}
 func _fail(msg: String) -> void:
 	printerr("MUSTARD_FAIL: %s" % msg)
 	quit(1)
-
-
-## Rec.709 relative luminance, the weights every legibility measurement in
-## this repo is taken with (`docs/DECISIONS.md`, `test_fluid_gallery.gd`), so
-## a number in a failure message here and a number read off a rendered frame
-## mean the same thing.
-func _luma(c: Color) -> float:
-	return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
 
 
 func _initialize() -> void:
@@ -187,15 +150,15 @@ func _run_checks() -> void:
 			_kind_tiles[kind] = Vector2i(int(origin[0]), int(origin[1]))
 	for pair in [
 		[Layouts.MUSTARD_CRUSHER, "crusher"], [Layouts.MUSTARD_MIXER, "mixer"],
-		[Layouts.MUSTARD_VAT, "cooking_vat"], [Layouts.MUSTARD_BOTTLER, "bottler"],
-		[Layouts.MUSTARD_PACKER, "packer"], [Layouts.MUSTARD_DOCK, "dock"],
+		[Layouts.MUSTARD_BOTTLER, "bottler"], [Layouts.MUSTARD_PACKER, "packer"],
+		[Layouts.MUSTARD_DOCK, "dock"],
 	]:
 		var kind_here := String(main._placement_at_tile(pair[0]).get("kind", ""))
 		if kind_here != pair[1]:
 			_fail("tile %s must carry a %s, not '%s'" % [pair[0], pair[1], kind_here])
 			return
 
-	# --- 2. all four runs named, and named the RIGHT way round ------------
+	# --- 2. both runs named, and named the RIGHT way round ----------------
 	# `carries` and not merely non-empty: `naming` is how `sim_core` says
 	# whether it narrowed to one id or gave up, and an ambiguous run reads
 	# as "" here exactly as an unnameable one does.
@@ -211,7 +174,7 @@ func _run_checks() -> void:
 			return
 		if _fluid_on(tile) != want:
 			_fail(
-				"the run at %s must carry '%s', not '%s' — the mash belongs on the crusher's side of the mixer and the mix on the other, and a layout that swapped them would still report both ids somewhere in the snapshot"
+				"the run at %s must carry '%s', not '%s' — the vinegar belongs on the mixer's supply side and the mustard on its outlet, and a layout that swapped them would still report both ids somewhere in the snapshot"
 				% [tile, want, _fluid_on(tile)]
 			)
 			return
@@ -242,9 +205,9 @@ func _run_checks() -> void:
 		return
 	var steps: Array = sauce.get("steps", [])
 	var inputs: Array = sauce.get("inputs", [])
-	if steps.size() < 5 or inputs.is_empty():
+	if steps.size() < 4 or inputs.is_empty():
 		_fail(
-			"the mustard page lists %d step(s) and %d input(s) — a five-stage line with three raws should not read that short, and a truncated page would make every check below vacuous"
+			"the mustard page lists %d step(s) and %d input(s) — a four-stage line with three raws should not read that short, and a truncated page would make every check below vacuous"
 			% [steps.size(), inputs.size()]
 		)
 		return
@@ -258,7 +221,7 @@ func _run_checks() -> void:
 		if is_fluid:
 			if not main.FLUID_TINTS.has(carries):
 				_fail(
-					"'%s' leaves the %s down a pipe but has no FLUID_TINTS entry — it draws in FLUID_TINT_FALLBACK %s, a neutral pale blue, so a full run of it reads as water. Mustard's middle is ALL pipe, so this is most of the sauce."
+					"'%s' leaves the %s down a pipe but has no FLUID_TINTS entry — it draws in FLUID_TINT_FALLBACK %s, a neutral pale blue, so a full run of it reads as water."
 					% [carries, machine, str(main.FLUID_TINT_FALLBACK)]
 				)
 				return
@@ -324,70 +287,32 @@ func _run_checks() -> void:
 			)
 			return
 
-	# --- 5. the three stages are three colours ----------------------------
-	# In LINE ORDER, off the steps above, so this asserts the direction of
-	# travel and not merely that three numbers differ. Mustard brightens
-	# where ketchup and BBQ cook down — the pigment is turmeric and it does
-	# not go in until the mixer — and that claim is only worth making if the
-	# frame can show it.
-	if fluids_in_order.size() < 3:
-		_fail(
-			"the mustard page names %d piped stage(s); its middle is supposed to be all fluid, so there is nothing here to compare"
-			% fluids_in_order.size()
-		)
+	# --- 5. the mixer and the pipe it fills are one colour ----------------
+	if fluids_in_order.is_empty():
+		_fail("the mustard page names no piped stage; the finished sauce leaves the mixer down a pipe")
 		return
-	var worst_step := INF
-	for i in range(1, fluids_in_order.size()):
-		var before: Color = main.FLUID_TINTS[fluids_in_order[i - 1]]
-		var after: Color = main.FLUID_TINTS[fluids_in_order[i]]
-		var step_luma := _luma(after) - _luma(before)
-		if step_luma <= 0.0:
-			_fail(
-				"'%s' (luma %.4f) is not brighter than '%s' (luma %.4f) — mustard's run is a value LADDER, and a stage that goes the wrong way makes the line unreadable in the one direction a player watches it"
-				% [
-					fluids_in_order[i], _luma(after),
-					fluids_in_order[i - 1], _luma(before),
-				]
-			)
-			return
-		if absf(step_luma) < MUSTARD_LUMA_STEP_MIN:
-			_fail(
-				"'%s' and '%s' are consecutive stages of one run and only %.4f of luma apart (%.1f/255, floor %.3f) — they are one hue, so VALUE is the only axis telling them apart and a player watching the line never sees the product change"
-				% [
-					fluids_in_order[i - 1], fluids_in_order[i], absf(step_luma),
-					absf(step_luma) * 255.0, MUSTARD_LUMA_STEP_MIN,
-				]
-			)
-			return
-		worst_step = minf(worst_step, absf(step_luma))
-
-	# --- 6. the vat and the pipe it fills are one colour ------------------
-	var cooked := String(fluids_in_order[fluids_in_order.size() - 1])
-	if main.PRODUCT_TINTS.get(cooked, main.PRODUCT_TINT_FALLBACK) != main.FLUID_TINTS[cooked]:
+	var mixed := String(fluids_in_order[fluids_in_order.size() - 1])
+	if main.PRODUCT_TINTS.get(mixed, main.PRODUCT_TINT_FALLBACK) != main.FLUID_TINTS[mixed]:
 		_fail(
-			"the vat draws '%s' as %s while the pipe it fills draws it as %s — one cook, one colour"
-			% [cooked, str(main.PRODUCT_TINTS.get(cooked, main.PRODUCT_TINT_FALLBACK)), str(main.FLUID_TINTS[cooked])]
+			"the mixer draws '%s' as %s while the pipe it fills draws it as %s — one sauce, one colour"
+			% [mixed, str(main.PRODUCT_TINTS.get(mixed, main.PRODUCT_TINT_FALLBACK)), str(main.FLUID_TINTS[mixed])]
 		)
 		return
 
 	print(
-		"MUSTARD_OK: %d placements stand a whole second line from raw, all four runs named by "
+		"MUSTARD_OK: %d placements stand a whole second line from raw, both runs named by "
 		% line_placed
-		+ "topology alone (%s), %d case(s) of mustard made and %d delivered in %d ticks; every id "
+		+ "the chosen recipes (%s), %d case(s) of mustard made and %d delivered in %d ticks; every id "
 		% [
 			", ".join(PackedStringArray([
 				_fluid_on(Layouts.MUSTARD_RUNS[0][0]), _fluid_on(Layouts.MUSTARD_RUNS[1][0]),
-				_fluid_on(Layouts.MUSTARD_RUNS[2][0]), _fluid_on(Layouts.MUSTARD_RUNS[3][0]),
 			])),
 			made, shipped, Layouts.MUSTARD_SETTLE_TICKS,
 		]
 		+ "on the sauce's own cookbook page (%d steps, %d inputs) resolves to a model or a tint of "
 		% [steps.size(), inputs.size()]
-		+ "its own and none to a fallback; and the run BRIGHTENS %s by at least %.1f/255 a stage "
-		% [" -> ".join(PackedStringArray(fluids_in_order)), worst_step * 255.0]
-		+ "of TINT luma (floor %.1f; photographs as +18.2 then +14.1), with the vat drawing '%s' "
-		% [MUSTARD_LUMA_STEP_MIN * 255.0, cooked]
-		+ "the same colour as the pipe it fills"
+		+ "its own and none to a fallback, with the mixer drawing '%s' the same colour as the pipe it fills"
+		% mixed
 	)
 	quit(0)
 

@@ -37,17 +37,20 @@ use sim_core::sim::{
 /// repeated here — a balance pass that moves an id between tiers must not
 /// need this file edited to keep passing.
 fn gated() -> (Vec<String>, Vec<String>) {
-    let unlock = bbq_gate();
+    let unlock = first_gate();
     (unlock.ingredients, unlock.contracts)
 }
 
-/// The shipped BBQ gate, read from the content — the product it waits on and
-/// the count it wants are `data/unlocks.ron`'s to choose, so no test below
-/// writes either as a literal.
-fn bbq_gate() -> sim_core::sim::Unlock {
+/// The first gate in the game, read from the content — since 2026-10-03 it
+/// is mustard's, opened by ketchup sales (it was BBQ's). Which gate it is,
+/// the product it waits on and the count it wants are `data/unlocks.ron`'s
+/// to choose, so no test below writes any of them as a literal: what these
+/// tests need is "the gate a running ketchup line opens".
+fn first_gate() -> sim_core::sim::Unlock {
     UnlockRegistry::bundled()
-        .get("bbq_sauce")
-        .expect("data/unlocks.ron must ship the bbq_sauce gate")
+        .ordered()
+        .first()
+        .expect("data/unlocks.ron must ship a gate")
         .clone()
 }
 
@@ -239,7 +242,7 @@ fn the_ledger_counts_every_box_of_a_satisfied_window() {
 /// played half.
 #[test]
 fn the_gate_is_shut_one_box_short_and_open_on_the_threshold() {
-    let gate = bbq_gate();
+    let gate = first_gate();
     let item = gate.after_sold.item.clone();
     let threshold = gate.after_sold.boxes;
     let (ingredients, contracts) = gated();
@@ -300,15 +303,16 @@ fn the_gate_is_shut_one_box_short_and_open_on_the_threshold() {
             "'{id}' must be listed on the board unlocked the tick the gate opens"
         );
     }
-    let bbq = board
+    let gate = first_gate();
+    let announced = board
         .unlocks
         .iter()
-        .find(|u| u.id == "bbq_sauce")
+        .find(|u| u.id == gate.id)
         .expect("the snapshot must carry the gate, so the HUD can announce it");
-    assert!(bbq.open);
-    assert_eq!(bbq.name, "BBQ Sauce");
+    assert!(announced.open);
+    assert_eq!(announced.name, gate.name);
     assert_eq!(
-        (bbq.item.as_str(), bbq.sold, bbq.required),
+        (announced.item.as_str(), announced.sold, announced.required),
         (item.as_str(), threshold, threshold),
         "and it carries what it counted, so the HUD can say so without reading \
          data/unlocks.ron itself"
@@ -316,8 +320,8 @@ fn the_gate_is_shut_one_box_short_and_open_on_the_threshold() {
 }
 
 /// The played half of the gate: a factory that runs the shipped chain and
-/// nothing else reaches the BBQ tier by SELLING, and is shut at every box
-/// before it.
+/// nothing else reaches the first gate's tier by SELLING, and is shut at
+/// every box before it.
 ///
 /// The loop asserts the gate the whole way up rather than only at the end,
 /// which is what would catch an off-by-one the other direction — a gate that
@@ -327,13 +331,13 @@ fn the_gate_is_shut_one_box_short_and_open_on_the_threshold() {
 /// `data/unlocks.ron` is reachable at all by playing.
 #[test]
 fn the_gate_opens_by_playing_and_is_shut_every_box_before_that() {
-    let gate = bbq_gate();
+    let gate = first_gate();
     let item = gate.after_sold.item.clone();
     let threshold = gate.after_sold.boxes;
     let raw = gate
         .ingredients
         .first()
-        .expect("the BBQ gate holds back raws")
+        .expect("the first gate holds back raws")
         .clone();
 
     let mut world = stocked_chain();
@@ -364,16 +368,16 @@ fn the_gate_opens_by_playing_and_is_shut_every_box_before_that() {
 /// size of the ledger.
 #[test]
 fn boxes_of_another_product_never_open_a_gate() {
-    let gate = bbq_gate();
+    let gate = first_gate();
     let raw = gate
         .ingredients
         .first()
-        .expect("the BBQ gate holds back raws")
+        .expect("the first gate holds back raws")
         .clone();
     let elsewhere = "boxed_mustard";
     assert_ne!(
         gate.after_sold.item, elsewhere,
-        "this test needs a product the BBQ gate does NOT count"
+        "this test needs a product the first gate does NOT count"
     );
 
     let world = world_with_boxes_sold(&[(elsewhere, gate.after_sold.boxes * 10)]);
@@ -399,12 +403,12 @@ fn boxes_of_another_product_never_open_a_gate() {
 /// proves the gates a loaded ledger derives are the same ones a *played* one
 /// does ([`the_gate_opens_by_playing_and_is_shut_every_box_before_that`]).
 ///
-/// Some thresholds have to be reached this way. The BBQ gate's hundred boxes
-/// of ketchup are 52 000 ticks and worth simulating once; the mustard gate's
-/// hundred boxes of BBQ are another 73 000 on top of a branch the player
-/// must first build (tick 125 000 from a new game — `measure_gate_ticks.gd`),
-/// which is about sixty-nine minutes of simulated factory for a claim about a
-/// number in a content file. A played world also never visits an odd
+/// Some thresholds have to be reached this way. The first gate's hundred
+/// boxes of ketchup are 52 000 ticks and worth simulating once; the second
+/// gate's hundred boxes of mustard come on top of a second line the player
+/// must first build (`measure_gate_ticks.gd` measures it from a new game),
+/// which is far too much simulated factory for a claim about a number in a
+/// content file. A played world also never visits an odd
 /// ketchup count, the starter order being two boxes wide, so an exact
 /// "one short" is only reachable from here.
 fn world_with_boxes_sold(ledger: &[(&str, u32)]) -> World {
@@ -442,11 +446,11 @@ fn world_with_boxes_sold(ledger: &[(&str, u32)]) -> World {
     world
 }
 
-/// The third sauce's gate: it holds back every raw that feeds nothing but
-/// mustard and every order that asks for a case of it, it holds back nothing
-/// else, and it opens on its own threshold — which counts the tier BELOW it,
-/// because since 2026-09-26 each sauce is earned by selling the sauce before
-/// it.
+/// The second sauce's gate: it holds back every raw that feeds nothing but
+/// mustard and every order whose LATEST sauce is mustard, it holds back
+/// nothing else, and it opens on its own threshold — which counts the tier
+/// BELOW it, ketchup, because since 2026-09-26 each sauce is earned by
+/// selling the sauce before it (and since 2026-10-03 mustard comes second).
 ///
 /// **THE EXPECTED IDS COME FROM THE CONTENT, NOT FROM THE GATE.** The first
 /// draft of this test looped over `mustard_sauce`'s own two lists, so
@@ -458,7 +462,9 @@ fn world_with_boxes_sold(ledger: &[(&str, u32)]) -> World {
 /// `used_in` (every raw the recipe graph feeds to mustard and to nothing
 /// else), the shut-on-a-new-game check runs over THOSE, and the gate's lists
 /// are then compared with them in both directions — an omission and a stray
-/// addition each fail, naming the id and the gate.
+/// addition each fail, naming the id and the gate. An order that also names
+/// a case of BBQ belongs to the later gate, BBQ's: an order is released by
+/// the last of the gates its sauces sit behind.
 ///
 /// `vinegar` is the id this test exists to watch. Mustard drinks it and so
 /// does the shipped ketchup line, so it must NOT be gated: a gate on it would
@@ -467,11 +473,25 @@ fn world_with_boxes_sold(ledger: &[(&str, u32)]) -> World {
 /// recipe touches" — the second phrasing would demand vinegar be gated.
 #[test]
 fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
+    let unlocks = UnlockRegistry::bundled();
+    let mustard = unlocks
+        .get("mustard_sauce")
+        .expect("data/unlocks.ron must ship the mustard_sauce gate")
+        .clone();
+    let bbq = unlocks.get("bbq_sauce").expect("the shipped gate").clone();
+
     // --- what the content says the tier is, read without the gate ---------
+    let names = |c: &sim_core::sim::Contract, item: &str| c.mix.iter().any(|(id, _)| id == item);
     let ordered_mustard: BTreeSet<String> = ContractRegistry::bundled()
         .ordered()
         .iter()
-        .filter(|c| c.mix.iter().any(|(item, _)| item == "boxed_mustard"))
+        .filter(|c| names(c, "boxed_mustard"))
+        .map(|c| c.id.clone())
+        .collect();
+    let mustard_tier: BTreeSet<String> = ContractRegistry::bundled()
+        .ordered()
+        .iter()
+        .filter(|c| names(c, "boxed_mustard") && !names(c, "boxed_bbq"))
         .map(|c| c.id.clone())
         .collect();
     let book = World::new(recipes()).cookbook();
@@ -482,7 +502,7 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
         .map(|page| page.id.clone())
         .collect();
     assert!(
-        !ordered_mustard.is_empty() && !mustard_raws.is_empty(),
+        !mustard_tier.is_empty() && !mustard_raws.is_empty(),
         "data/contracts.ron must order boxed_mustard and the recipe graph must have a raw that \
          feeds nothing else, or the mustard_sauce gate has nothing to hold back and this test \
          proves nothing"
@@ -493,7 +513,7 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
     );
 
     // --- a new game can reach none of it -----------------------------------
-    // These loops run over the DERIVED ids, so an id dropped from the gate
+    // These loops run over the DERIVED ids, so an id dropped from a gate
     // fails here by name rather than quietly shortening a list.
     let shut = world_with_boxes_sold(&[]);
     let market = shut.ingredients_snapshot();
@@ -513,14 +533,13 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
     for id in &ordered_mustard {
         assert!(
             !shut.contract_unlocked(id),
-            "'{id}' orders a case of mustard, so a new game must not be able to sign it — the \
-             mustard_sauce gate in data/unlocks.ron has to name it in `contracts`, or the board \
-             offers an order for a sauce that cannot be made yet and it runs to strikes"
+            "'{id}' orders a case of mustard, so a new game must not be able to sign it — a \
+             gate in data/unlocks.ron has to name it in `contracts`, or the board offers an \
+             order for a sauce that cannot be made yet and it runs to strikes"
         );
         assert!(
             board.board.iter().any(|o| &o.id == id && o.locked),
-            "'{id}' must be padlocked at nought deliveries — the mustard_sauce gate in \
-             data/unlocks.ron has to name it in `contracts`"
+            "'{id}' must be padlocked at nought deliveries"
         );
     }
     assert!(
@@ -533,37 +552,28 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
     );
 
     // --- and the gate's own lists are exactly that, no more ----------------
-    let unlocks = UnlockRegistry::bundled();
-    let mustard = unlocks
-        .get("mustard_sauce")
-        .expect("data/unlocks.ron must ship the mustard_sauce gate")
-        .clone();
-    let bbq = unlocks.get("bbq_sauce").expect("the shipped gate").clone();
     // Each tier waits on the tier below it — the chain the owner's rule
-    // describes. Read from the content in both directions: the product mustard
-    // waits on has to be what the BBQ tier's own contracts SELL, so moving a
-    // tier in this file cannot silently point a gate at a dead end.
+    // describes. Read from the content in both directions: the product BBQ
+    // waits on has to be what the mustard tier's own contracts SELL, so moving
+    // a tier in this file cannot silently point a gate at a dead end.
     assert_eq!(
-        bbq.after_sold.item, "boxed_ketchup",
+        mustard.after_sold.item, "boxed_ketchup",
         "the second sauce is earned by selling the first one's case"
     );
     assert_eq!(
-        mustard.after_sold.item, "boxed_bbq",
-        "and the third by selling the second's: {} is not what the BBQ tier ships",
-        mustard.after_sold.item
+        bbq.after_sold.item, "boxed_mustard",
+        "and the third by selling the second's: {} is not what the mustard tier ships",
+        bbq.after_sold.item
     );
     assert!(
         ContractRegistry::bundled()
             .ordered()
             .iter()
-            .filter(|c| bbq.contracts.contains(&c.id))
-            .any(|c| c
-                .mix
-                .iter()
-                .any(|(item, _)| item == &mustard.after_sold.item)),
-        "the mustard gate counts boxes of '{}', so some contract the BBQ tier releases \
+            .filter(|c| mustard.contracts.contains(&c.id))
+            .any(|c| names(c, &bbq.after_sold.item)),
+        "the BBQ gate counts boxes of '{}', so some contract the mustard tier releases \
          has to BUY that — a gate waiting on a product nothing orders could never open",
-        mustard.after_sold.item
+        bbq.after_sold.item
     );
     assert!(
         mustard.after_sold.boxes > 0 && bbq.after_sold.boxes > 0,
@@ -571,7 +581,8 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
     );
     let listed_raws: BTreeSet<String> = mustard.ingredients.iter().cloned().collect();
     let listed_contracts: BTreeSet<String> = mustard.contracts.iter().cloned().collect();
-    let names = |ids: &BTreeSet<String>, other: &BTreeSet<String>| -> String {
+    let bbq_contracts: BTreeSet<String> = bbq.contracts.iter().cloned().collect();
+    let missing = |ids: &BTreeSet<String>, other: &BTreeSet<String>| -> String {
         ids.difference(other)
             .map(String::as_str)
             .collect::<Vec<_>>()
@@ -581,57 +592,51 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
         mustard_raws.is_subset(&listed_raws),
         "'{}' feeds nothing but mustard and the mustard_sauce gate in data/unlocks.ron does not \
          hold it back",
-        names(&mustard_raws, &listed_raws)
+        missing(&mustard_raws, &listed_raws)
     );
     assert!(
         listed_raws.is_subset(&mustard_raws),
         "the mustard_sauce gate in data/unlocks.ron holds back '{}', which the recipe graph says \
          is not a mustard-only raw",
-        names(&listed_raws, &mustard_raws)
+        missing(&listed_raws, &mustard_raws)
     );
     assert!(
-        ordered_mustard.is_subset(&listed_contracts),
-        "'{}' in data/contracts.ron asks for boxed_mustard and the mustard_sauce gate in \
-         data/unlocks.ron does not hold it back",
-        names(&ordered_mustard, &listed_contracts)
+        mustard_tier.is_subset(&listed_contracts),
+        "'{}' in data/contracts.ron asks for boxed_mustard and no BBQ, and the mustard_sauce \
+         gate in data/unlocks.ron does not hold it back",
+        missing(&mustard_tier, &listed_contracts)
     );
     assert!(
-        listed_contracts.is_subset(&ordered_mustard),
-        "the mustard_sauce gate in data/unlocks.ron holds back '{}', which asks for no mustard",
-        names(&listed_contracts, &ordered_mustard)
+        listed_contracts.is_subset(&mustard_tier),
+        "the mustard_sauce gate in data/unlocks.ron holds back '{}', which asks for no mustard \
+         or for BBQ as well — an order naming BBQ waits on the later gate",
+        missing(&listed_contracts, &mustard_tier)
+    );
+    let mixed: BTreeSet<String> = ordered_mustard.difference(&mustard_tier).cloned().collect();
+    assert!(
+        mixed.is_subset(&bbq_contracts),
+        "'{}' asks for mustard AND BBQ, so the bbq_sauce gate — the later one — has to hold it",
+        missing(&mixed, &bbq_contracts)
     );
 
-    // One short of the threshold the tier is still shut, while the tier
-    // BELOW it is open — which is what makes this gate its own and not a
-    // side effect of the BBQ one.
-    let nearly = world_with_boxes_sold(&[
-        (&bbq.after_sold.item, bbq.after_sold.boxes),
-        (&mustard.after_sold.item, mustard.after_sold.boxes - 1),
-    ]);
+    // One short of the threshold the tier is still shut.
+    let nearly = world_with_boxes_sold(&[(&mustard.after_sold.item, mustard.after_sold.boxes - 1)]);
     for id in &mustard_raws {
         assert!(
             !nearly.ingredient_unlocked(id),
             "'{id}' must still be locked one box short of the mustard_sauce gate"
         );
     }
-    for id in &ordered_mustard {
+    for id in &mustard_tier {
         assert!(
             !nearly.contract_unlocked(id),
             "'{id}' must still be locked one box short of the mustard_sauce gate"
         );
     }
-    for id in bbq.ingredients.iter().chain(bbq.contracts.iter()) {
-        assert!(
-            nearly.ingredient_unlocked(id) || nearly.contract_unlocked(id),
-            "the BBQ tier's '{id}' opened long ago and stays open"
-        );
-    }
 
-    // And on the threshold, every id the content calls mustard's, at once.
-    let open = world_with_boxes_sold(&[
-        (&bbq.after_sold.item, bbq.after_sold.boxes),
-        (&mustard.after_sold.item, mustard.after_sold.boxes),
-    ]);
+    // And on the threshold, every id the content calls mustard's, at once —
+    // and not the orders that also wait on BBQ.
+    let open = world_with_boxes_sold(&[(&mustard.after_sold.item, mustard.after_sold.boxes)]);
     let market = open.ingredients_snapshot();
     let board = open.economy_snapshot();
     for id in &mustard_raws {
@@ -644,7 +649,7 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
             "'{id}' must be listed in the market the tick the mustard_sauce gate opens"
         );
     }
-    for id in &ordered_mustard {
+    for id in &mustard_tier {
         assert!(
             open.contract_unlocked(id),
             "'{id}' must be on the board on the mustard_sauce gate's threshold box"
@@ -652,6 +657,12 @@ fn the_mustard_gate_holds_back_its_own_tier_and_nothing_the_first_line_needs() {
         assert!(
             board.board.iter().any(|o| &o.id == id && !o.locked),
             "'{id}' must be offered unlocked the tick the mustard_sauce gate opens"
+        );
+    }
+    for id in &mixed {
+        assert!(
+            !open.contract_unlocked(id),
+            "'{id}' also wants BBQ, so it waits for the BBQ gate"
         );
     }
     let announced = board
@@ -957,6 +968,7 @@ fn a_hopper_placed_holding_a_locked_ingredient_can_never_be_filled() {
         tile: free,
         direction: sim_core::sim::Direction::East,
         item: Some(locked.clone()),
+        recipe: None,
     });
     assert_eq!(
         hopper_item(&world, free),
@@ -1117,7 +1129,13 @@ fn the_picker_wire_goes_quiet_once_the_gate_opens() {
 fn a_tank_cannot_be_declared_to_a_locked_fluid() {
     /// The reference chain's fluid tank (`tests/auto_fill.rs` pins the same tile).
     const TANK: (i32, i32) = (5, 2);
-    let (ingredients, _) = gated();
+    // Every id any gate holds back: since 2026-10-03 the first gate's raws
+    // are both solids, and the locked fluid is behind a later one.
+    let ingredients: Vec<String> = UnlockRegistry::bundled()
+        .ordered()
+        .iter()
+        .flat_map(|gate| gate.ingredients.clone())
+        .collect();
     let mut world = reference_chain_with_budget(recipes(), 10_000);
     common::stock_up(&mut world);
     world.issue_command(PlayerCommand::FillFluidTank {

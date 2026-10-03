@@ -334,6 +334,7 @@ fn a_machine_placed_and_never_fed_reads_starved_and_undecided() {
         tile: (0, 0),
         direction: Direction::East,
         item: None,
+        recipe: None,
     });
     let before = world.machine_load_snapshots();
     assert_eq!(before.len(), 1);
@@ -443,6 +444,7 @@ fn a_changing_load_dirties_nothing() {
         tile: (0, 0),
         direction: Direction::East,
         item: None,
+        recipe: None,
     });
     world.tick();
     for _ in 0..50 {

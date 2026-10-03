@@ -11,14 +11,22 @@
 // WHY THIS FILE EXISTS. Until it did, the game gated NOTHING: a new game
 // could buy every ingredient and sign every contract in `contracts.ron`,
 // so the only thing that grew as you played was the balance. That was fine
-// while there was one sauce — there was nothing to hold back. BBQ is the
-// second sauce, and handing a player the whole two-sauce board on their
-// first minute makes the ketchup line look like a chore standing between
-// them and the interesting one. So BBQ arrives, with an announcement, once
-// the ketchup line has demonstrably run — and "demonstrably" means it has
-// SOLD KETCHUP, by the box. Mustard arrives the same way off BBQ: each sauce
+// while there was one sauce — there was nothing to hold back. Handing a
+// player the whole three-sauce board on their first minute makes the ketchup
+// line look like a chore standing between them and the interesting ones. So
+// mustard, the second sauce, arrives with an announcement once the ketchup
+// line has demonstrably run — and "demonstrably" means it has SOLD KETCHUP,
+// by the box. BBQ, the third, arrives the same way off mustard: each sauce
 // is earned by the sauce before it, so the tiers are a chain and not a
 // stopwatch.
+//
+// THE ORDER IS KETCHUP, MUSTARD, BBQ since 2026-10-03 (the owner's call; it
+// was ketchup, BBQ, mustard). Mustard is the same five-stage shape as the
+// ketchup line again, with no cook, so building it is "do what you just did,
+// once more" — while BBQ asks the player to treat their own finished ketchup
+// as an ingredient, split the run that ships it, and feed a vat two fluids.
+// That is the harder idea, and it lands better on a factory that already
+// runs two lines. `docs/DECISIONS.md` has the record.
 //
 // WHAT A GATE GATES, AND WHAT IT DELIBERATELY DOES NOT. An `Unlock` names
 // two lists and only two: `ingredients`, the ids removed from the market
@@ -47,9 +55,9 @@
 // player-facing prose and not an id.
 //
 // THE TRIGGER IS BOXES OF A NAMED PRODUCT SOLD (the owner's rule,
-// 2026-09-26). Each gate names an item and a count: BBQ opens after 100
-// boxes of `boxed_ketchup` have been sold, mustard after 100 boxes of
-// `boxed_bbq`. "Sold" is a box handed over as part of a satisfied delivery
+// 2026-09-26). Each gate names an item and a count: mustard opens after
+// 100 boxes of `boxed_ketchup` have been sold, BBQ after 100 boxes of
+// `boxed_mustard`. "Sold" is a box handed over as part of a satisfied delivery
 // window — the dock being PAID is what selling means in this game
 // (`Economy::tick`'s `Paid` event, which now adds each window's mix to
 // `lifetime_boxes_sold` box by box). A missed window sells nothing, and a
@@ -110,19 +118,22 @@
 (
     schema_version: 1,
     unlocks: [
-        // THE FIRST GATE IN THE GAME (docs/BBQ_SAUCE_PLAN.md §5, the BBQ
-        // epic, 2026-09-18; re-triggered on boxes sold 2026-09-26).
+        // THE FIRST GATE IN THE GAME: mustard, after one hundred boxes of
+        // ketchup (the owner's rule of 2026-09-26, and the order of
+        // 2026-10-03). Until 2026-10-03 this gate opened BBQ instead; the
+        // notes below that were measured then say so.
         //
-        // ONE HUNDRED BOXES OF KETCHUP, because that is the owner's rule:
-        // the second sauce is the reward for a ketchup line that has actually
-        // SOLD ketchup. A hundred boxes is a line that was built, fed,
-        // staffed and then left running — not one that survived a fixed
-        // number of windows, which is what the old trigger measured.
+        // ONE HUNDRED BOXES OF KETCHUP: the second sauce is the reward for a
+        // ketchup line that has actually SOLD ketchup. A hundred boxes is a
+        // line that was built, fed, staffed and then left running — not one
+        // that survived a fixed number of windows, which is what the old
+        // trigger measured.
         //
         // WHAT IT COSTS IN TIME, measured 2026-09-26 (headless:
         // `reference_chain_with_budget` plus the stocked larder of
         // `sim_core/tests/common`, raws topped back up as a careful player
-        // does, at ARCHITECTURE.md §3.9's 30 ticks/sec):
+        // does, at ARCHITECTURE.md §3.9's 30 ticks/sec). It counts ketchup
+        // only, so the swap did not move it:
         //
         //   1 order (corner_shop signed  100th box at tick 52 000 — 29 min,
         //   by hand — a new game since    50 delivery windows
@@ -132,285 +143,101 @@
         //   3 orders signed at tick 0     100th box at tick 33 000 — 18 min,
         //                                 44 windows, 1 630 in the bank
         //
-        // SO THIS GATE IS MUCH LATER THAN IT WAS, and the owner asked for the
-        // count knowing the count, not the clock: ten windows was about three
-        // minutes. Eighteen is still one session, but it is no longer "the
-        // first few minutes", and it is later than the MUSTARD gate used to
-        // arrive (25 windows, about 11 minutes — see that entry). If either
-        // tier now wants to land sooner, the fix is this file: a smaller
-        // `boxes`, or a per-window demand raise in `data/contracts.ron`.
+        // WHAT IT OPENS ONTO IS A WHOLE SECOND LINE FROM RAW, so what this
+        // gate has to wait for is MONEY: a gate that opens onto a tier the
+        // bank cannot afford is an announcement followed by nothing the
+        // player can act on. A mustard line out of `data/shop.ron`: 20 belt
+        // at 5, 6 pipe at 8, 2 hopper at 40, 1 fluid_tank at 60, crusher 75,
+        // mixer 100, bottler 120, packer 90, dock 70 = **743** — the
+        // ketchup line's 959 less its vat and that vat's pipe run, since
+        // mustard is not cooked (673 for a player who reuses a dock). The
+        // three-order row above banks 1 630 at the gate, twice that.
         //
-        // WHAT THAT DOES TO ISSUE #55, which the sweep below is the record
-        // of. #55 is that building the BBQ branch starves the ketchup line
-        // while two new pipe runs and a vat prime, which is several missed
-        // windows against three-strike contracts: the reward for building the
-        // thing the game just unlocked is losing the order that paid for it.
-        // The sweep's own table says the trap stops biting at about forty
-        // windows, and BOTH rows above are past it: forty-four windows with
-        // three orders signed at tick 0, fifty with corner_shop alone — and
-        // fifty is the row a real run walks, since a new game signs nothing.
-        // So a gate chosen for a different reason has largely closed #55's
-        // window as a side effect. #55 STAYS OPEN anyway: those rows are where
-        // a fed, staffed line arrives, not where every player does, a player
-        // who reaches the gate slowly still arrives with little banked, and the
-        // real fixes are still its own (#92, #93). Nothing here was tuned for
-        // it.
+        // THE 2026-09-26 AFFORDABILITY SWEEP (in delivery windows, when this
+        // tier was third and cost 959 with its vat) found the same shape:
+        // with the three starter orders signed the balance grows about 13 per
+        // delivery past the ketchup line's start-up, so a second line is
+        // affordable from about the fifteenth delivery on; with corner_shop
+        // alone it FALLS about 10 per delivery, because a factory serving one
+        // 2-box order overproduces into a pool nobody buys from — a
+        // contract-board lesson no gate value can fix. The full table is in
+        // this file as of 0a4a0ee (`git show 0a4a0ee:data/unlocks.ron`).
         //
-        // ==== THE 2026-09-20 SWEEP, IN THE OLD UNIT ====
-        // Everything below was measured when the trigger was LIFETIME
-        // DELIVERY WINDOWS, and its numbers are windows, not boxes. It is
-        // kept because its finding is about the factory and not about the
-        // trigger: what decides whether the branch costs you the board is the
-        // BANK at the moment of building.
-        //
-        // THE PROTOCOL, because every number below moves if it changes.
-        // Each run: build the shipped ketchup line through real purchase and
-        // place commands; fund it; stock the larder with 1 200 of each raw;
-        // leave hopper and tank auto-fill on; hire until fully staffed; sign
-        // the starter contracts AT THE STATED MOMENT; wait for the stated
-        // lifetime-delivery count; build the BBQ branch and its mixed exit;
-        // then settle 15 000 ticks and read the board. "Bank" is finished
-        // boxed_ketchup on hand at the moment the branch goes in. A gate
-        // value other than ten is EMULATED by waiting for that many lifetime
-        // deliveries before building — the shipped gate is long open by then
-        // and nothing else reads the number, so it is exactly equivalent.
-        //
-        //   what the transient costs  boxed_ketchup output stops for about
-        //                             8 500 ticks; roughly 35 boxes' worth of
-        //                             throughput is absorbed into the new
-        //                             pipes and vat before any comes back out
-        //   1 order, gate 10          bank 22 — nothing lost
-        //   3 orders signed AT THE
-        //     GATE, gate 10           bank 22 — diner_supply lost
-        //   3 orders signed at tick
-        //     0, gate 10              bank 7 — corner_shop and diner_supply
-        //                             lost to the branch
-        //   emulated gate 20          bank 12 — 2 lost
-        //   emulated gate 30          bank 19 — 1 lost
-        //   emulated gate 40          bank 24 — NOTHING lost to the branch
-        //
-        // THE CONTROL MATTERS: with three orders signed at tick 0 and NO
-        // branch ever built, market_stall still strikes out at tick 1 500.
-        // That death is the ketchup line starting up, not the BBQ branch, and
-        // it is why the "3 orders at tick 0" rows above count only what the
-        // branch took.
-        //
-        // WHAT THE SWEEP ACTUALLY SHOWS. The deciding variable is the BANK AT
-        // THE MOMENT OF BUILDING — not the number of concurrent orders, which
-        // matters only through the bank it leaves. A delivery count steers
-        // that bank by proxy and badly, because signing more contracts is both
-        // how a player reaches the count sooner and what makes the transient
-        // cost more. Pushed far enough the gate DOES work: forty deliveries
-        // leaves the three-order player 24 banked and costs them nothing. But
-        // forty is not "inside a first session", which is the entire reason
-        // ten was chosen above, and a gate bought that way would be paying for
-        // a transient with the thing the gate exists to deliver.
-        //
-        // That sweep concluded TEN WINDOWS, kept because raising it to a
-        // value that would fix #55 cost more than #55 did — forty windows was
-        // not "inside a first session", which was ten's whole justification.
-        // The 2026-09-26 trigger change reaches forty-four by another route,
-        // and it is worth being plain that this is luck rather than design:
-        // nobody sized 100 boxes against #55. The fixes #55 wants are still
-        // its own first option — say so at placement time, before it costs
-        // anything, which the simulation has the information to do and no
-        // surface to say it on (issue #92) — or a fluid network that will not
-        // let a brand-new consumer take 100% of a network the old one is
-        // living on (issue #93). Both are outside this file. Full records:
-        // `docs/DECISIONS.md`, 2026-09-20, "The bank at the moment of building
-        // decides whether the BBQ branch costs you the board", and 2026-09-26,
-        // "A tier is earned by selling the tier below it".
-        Unlock(
-            id: "bbq_sauce",
-            name: "BBQ Sauce",
-            after_sold: (item: "boxed_ketchup", boxes: 100),
-            // The BBQ branch's three raws (`data/ingredients.ron`).
-            // Finished ketchup is its fourth input and is NOT here: the
-            // factory makes it, so it was never on the market to hold back.
-            ingredients: ["spice_mix", "molasses", "liquid_smoke"],
-            // Every contract that asks for BBQ, including `grill_pub` and
-            // `roadhouse_group`, which ask for ketchup as well. A mixed
-            // order is still a BBQ order — signing one before the branch
-            // exists would be signing up to strike out.
-            contracts: [
-                "rib_shack", "smokehouse_trial", "picnic_caterer", "grill_pub",
-                "steakhouse_group", "roadhouse_group", "smokehouse_wholesale",
-                "bbq_festival", "county_fair",
-            ],
-        ),
-
-        // THE SECOND GATE (the mustard epic, 2026-09-26; re-triggered on
-        // boxes sold the same day), and it is holding back a different KIND of
-        // thing from the first one.
-        //
-        // The BBQ gate holds back a branch: four recipes that hang off a line
-        // the player has already built and paid for, so what it waits for is
-        // understanding. This one holds back a whole second line from raw —
-        // five machines, two hoppers, a tank, and the belt and pipe to join
-        // them — so what it has to wait for is MONEY. A gate that opens onto
-        // a tier the bank cannot afford is worse than no gate: it is an
-        // announcement followed by nothing the player can act on.
-        //
-        // ONE HUNDRED BOXES OF BBQ, because that is the owner's rule and
-        // because it is the same sentence one tier down: mustard is earned by
-        // selling BBQ, exactly as BBQ is earned by selling ketchup. It also
-        // settles the affordability question above by construction rather than
-        // by a number — a player who has SOLD a hundred cases of BBQ has been
-        // paid for them, and a mustard line costs 959.
-        //
-        // WHAT IT COSTS IN TIME, measured from a NEW GAME on 2026-09-29 by
-        // `godot_project/measure_gate_ticks.gd`, re-measured 2026-10-02 when a
-        // case became eight bottles, and again the same day when the contract
-        // board doubled (fully staffed, raws topped up and money no object —
-        // a floor, not a typical run):
-        //
-        //   100th box of boxed_ketchup at tick 52 000, and the 100th box of
-        //   boxed_bbq at tick 125 000 — 69 minutes at 30 ticks/sec, of which
-        //   73 000 ticks (~41 min) are after the first gate opened, with
-        //   every one of the nine BBQ-tier orders signed
-        //
-        //   (the tool prints "58 000 ticks" for that gap because it starts
-        //   its clock at the fixture's hand-off at tick 67 000, 15 000 ticks
-        //   of branch-building and settling after the gate itself opened)
-        //
-        // The bottle change took it from 155 000 to 131 000; the doubled
-        // board (more BBQ demand, the second lever below) from 131 000 to
-        // 125 000, about three minutes. The BBQ gate did not move.
-        //
-        // THAT IS A FLAG, not a measurement in support: it puts mustard over
-        // an hour into a session, where the old trigger put it at eleven
-        // minutes. The cause is not the factory — with all nine BBQ-tier
-        // orders signed the board asks for about 9.0 boxes of BBQ per 1 000
-        // ticks (rib_shack 1 box / 2 000 ticks = 0.50, smokehouse_trial
-        // 2/2 500 = 0.80, picnic_caterer 1/2 000 = 0.50, grill_pub 2/3 000 =
-        // 0.67, steakhouse_group 4/4 000 = 1.00, roadhouse_group 4/4 000 =
-        // 1.00, smokehouse_wholesale 6/5 000 = 1.20, bbq_festival 10/5 000 =
-        // 2.00, county_fair 8/6 000 = 1.33) and the branch put about 1.6 of
-        // them into paid windows (92 boxes in the 58 000 ticks measured; it
-        // was 1.4 against the four-order board's ~4.5, and 1.0 and 88 000
-        // ticks while a case was one bottle, and the whole of that change
-        // follows the BBQ bottler's 8-bottle, 200-tick shape, measured in PR
-        // #225's review — see the note on `bottled_ketchup` in
-        // `data/recipes.ron`), so it is the branch's throughput against the
-        // cadences the orders keep, not a shortage of demand — which is why
-        // doubling the demand bought only three minutes. Whoever wants
-        // mustard sooner has three content-side levers and no Rust to write:
-        // a smaller `boxes` here, more BBQ demand in `data/contracts.ron`, or
-        // a faster BBQ recipe.
-        //
-        // ==== THE 2026-09-26 AFFORDABILITY SWEEP, IN THE OLD UNIT ====
-        // Measured when the trigger was LIFETIME DELIVERY WINDOWS; its
-        // numbers are windows. Kept because what it establishes — what a
-        // mustard line costs, and that the one-order player's balance FALLS
-        // rather than grows — is about the economy and not about the trigger.
-        // Same shape of protocol as the BBQ gate's, one substitution: "bank"
-        // here is the MONEY BALANCE, not boxed_ketchup on hand, because a
-        // mustard line is bought rather than plumbed off an existing one.
-        //
-        // THE PROTOCOL. Build the shipped ketchup line through real purchase
-        // and place commands (`sim::reference_chain_with_budget`, which prices
-        // its own bill out of `data/shop.ron`); leave the remainder of
-        // `sim::STARTING_MONEY` in the bank; hopper and tank auto-fill ON;
-        // sign the stated orders at tick 0; then buy raws like a careful
-        // player — top each one back up to the 20 units `data/storage.ron`
-        // gives for free, and never spend below 30, because wages come first.
-        // Read the balance at each lifetime-delivery mark. A gate value other
-        // than 25 is EMULATED by reading the balance at that many deliveries:
-        // nothing but this file reads the number, so it is exactly
-        // equivalent.
-        //
-        // WHAT A MUSTARD LINE COSTS, out of `data/shop.ron`: 20 belt at 5,
-        // 8 pipe at 8, 2 hopper at 40, 1 fluid_tank at 60, crusher 75,
-        // mixer 100, cooking_vat 200, bottler 120, packer 90, dock 70 =
-        // **959** — the same kit as the ketchup line, because it is the same
-        // five stages in the same order. (A player who already owns a dock
-        // and can reach it pays 889; the gate is sized against the whole
-        // thing.) For contrast, the BBQ branch is 872 on top of a line that
-        // already exists, and `STARTING_MONEY` leaves 2 041 after the first
-        // line's 959.
-        //
-        //   1 order (corner_shop signed  10 deliveries  734
-        //   at tick 0, 40)               25 deliveries  597
-        //                                40 deliveries  449
-        //   3 starter orders signed at   10 deliveries  828
-        //   tick 0 (250 in signatures)   15 deliveries  962
-        //                                20 deliveries  1 039
-        //                                25 deliveries  1 176  <- the old gate
-        //                                30 deliveries  1 231
-        //                                40 deliveries  1 435
-        //
-        // These rows were measured when a new game shipped with corner_shop
-        // already signed for free; since 2026-09-26 (DECISIONS.md) nothing is
-        // signed for the player, so every row here is the measured balance
-        // less corner_shop's 40 signature. Nothing else in the protocol moves:
-        // no row comes near the 30 floor the raw-buying rule keeps, so the
-        // 40 is a flat offset rather than a change in what the player buys.
-        //
-        // The table counts DELIVERIES because that is what the gate counted
-        // when it was measured. The trigger is boxes sold now, so no row here
-        // is a gate any more — what the table still shows is the shape of the
-        // balance as the factory runs, which is the question it was built to
-        // answer.
-        //
-        // WHAT THAT SHOWS, and it is two different things.
-        //
-        // (1) For the player the board is built for — all three starter
-        // orders signed, which `contracts.ron`'s balance note says is the
-        // intended first several minutes — 25 deliveries leaves 1 176 against
-        // a 959 line, arriving at about tick 20 000 (eleven minutes at
-        // ARCHITECTURE.md §3.9's 30 ticks/sec). The line is affordable with
-        // room for the mistakes, and it is affordable from about the 15th
-        // delivery onwards. That was where the old gate sat, and it is the
-        // number the boxes-sold trigger replaced; the affordability finding
-        // survives it, because the balance only ever grows from there for
-        // this player, and the boxes-sold gate lands much later still.
-        //
-        // (2) For the one-order player the balance FALLS, by roughly 10 per
-        // delivery, and no gate value on this table ever reaches 959. That is
-        // not the gate's problem and moving the gate cannot fix it: a factory
-        // serving a single 2-box order overproduces into a delivery pool
-        // nobody is buying from, which is exactly the loss
-        // `contracts.ron`'s header describes, and the fix is signing the
-        // other two starter orders (150 and 60, a window or two of payouts).
-        // Raising the gate would make that player wait longer for a tier they
-        // still could not afford, while making the intended player wait for
-        // nothing.
-        //
-        // Growth past the gate is only about +13 per delivery (+27 per 1 000
-        // ticks), so no nearby value materially changes affordability either
-        // way — 20 would already do, 30 would cost a minute. The same control
-        // the BBQ protocol records still holds: with three orders signed at
-        // tick 0 and no second line ever built, `market_stall` strikes out
-        // during start-up, so its death belongs to the ketchup line warming
-        // up rather than to anything mustard does.
-        //
-        // WHAT IS NOT MEASURED HERE, honestly. These runs do not build the
-        // mustard line and settle it, and they do not stack a BBQ branch's
-        // 872 on top; a player who has just bought a branch is transiently
-        // short, and the fix for that is the same one issue #55 wants
-        // (#92/#93), not a different number in this file. The mustard line
-        // has one advantage the branch does not, which is why it is not
-        // another #55: it shares nothing with the ketchup line except
-        // `vinegar`, so building it cannot starve a running line of anything
-        // but bought stock.
+        // It is not another issue #55: a mustard line shares nothing with
+        // the ketchup line except bought `vinegar`, so building it cannot
+        // starve a running line of anything but stock.
         Unlock(
             id: "mustard_sauce",
             name: "Mustard",
-            after_sold: (item: "boxed_bbq", boxes: 100),
+            after_sold: (item: "boxed_ketchup", boxes: 100),
             // Mustard's two raws (`data/ingredients.ron`). `vinegar` is NOT
             // here and must not be: the ketchup mixer drinks it from tick 0,
             // so gating it would lock the shipped line out of its own
             // ingredient. That is the one thing this gate cannot hold back,
             // and it is also the thing that makes the tier interesting.
             ingredients: ["mustard_seed", "turmeric"],
-            // Every contract that asks for mustard, including `deli_chain`,
-            // which asks for ketchup as well — a mixed order is still a
-            // mustard order, and signing one without a mustard line is
+            // Every contract that asks for mustard and nothing BBQ, including
+            // `deli_chain`, which asks for ketchup as well — a mixed order is
+            // still a mustard order, and signing one without a mustard line is
+            // signing up to strike out. The orders that want mustard AND BBQ
+            // open with BBQ, the later tier of the two.
+            contracts: [
+                "pretzel_cart", "deli_counter", "hot_dog_stand", "ballpark_vendor",
+                "deli_chain", "sandwich_franchise", "charcuterie_supplier",
+            ],
+        ),
+
+        // THE SECOND GATE: BBQ, after one hundred boxes of mustard — the
+        // same sentence one tier down. It holds back a BRANCH: four recipes
+        // that hang off the ketchup line the player already owns, so what it
+        // waits for is understanding more than money (the branch is 872).
+        //
+        // WHAT IT COSTS IN TIME, measured from a NEW GAME on 2026-10-03 by
+        // `godot_project/measure_gate_ticks.gd` (fully staffed, raws topped
+        // up and money no object — a floor, not a typical run):
+        //
+        //   MEASUREMENT PENDING
+        //
+        // Under the old order the second gate (then mustard's, opened by 100
+        // boxes of BBQ) landed at tick 125 000, over an hour in, because the
+        // BBQ branch's 600-tick cook put only about 1.6 boxes per 1 000 ticks
+        // into paid windows. The mustard line has no cook and ships a case
+        // per 200 ticks, which is why this order reaches the third sauce
+        // sooner. Whoever wants it sooner still has three content-side levers
+        // and no Rust to write: a smaller `boxes` here, more mustard demand in
+        // `data/contracts.ron`, or a faster mustard recipe.
+        //
+        // ISSUE #55 IS THIS GATE'S. Building the BBQ branch starves the
+        // ketchup line while two new pipe runs and a vat prime — several
+        // missed windows against three-strike contracts, so the reward for
+        // building the thing the game just unlocked can be losing the order
+        // that paid for it. The 2026-09-20 sweep (measured in delivery
+        // windows, when BBQ was the first gate; full record in
+        // `docs/DECISIONS.md`, "The bank at the moment of building decides
+        // whether the BBQ branch costs you the board") found the deciding
+        // variable is the BANK of finished boxed_ketchup at the moment of
+        // building: the branch absorbs roughly 35 boxes of throughput over
+        // about 8 500 ticks, and a factory forty windows in had banked
+        // enough to lose nothing. A factory that has sold a hundred boxes of
+        // ketchup AND a hundred of mustard is far past that. #55 stays open
+        // anyway — its real fixes are its own (#92, #93), outside this file.
+        Unlock(
+            id: "bbq_sauce",
+            name: "BBQ Sauce",
+            after_sold: (item: "boxed_mustard", boxes: 100),
+            // The BBQ branch's three raws (`data/ingredients.ron`).
+            // Finished ketchup is its fourth input and is NOT here: the
+            // factory makes it, so it was never on the market to hold back.
+            ingredients: ["spice_mix", "molasses", "liquid_smoke"],
+            // Every contract that asks for BBQ, including the mixed orders
+            // that ask for ketchup or mustard as well. A mixed order is still
+            // a BBQ order — signing one before the branch exists would be
             // signing up to strike out.
             contracts: [
-                "pretzel_cart", "deli_counter", "hot_dog_stand", "food_court",
-                "ballpark_vendor", "burger_bar", "deli_chain", "sandwich_franchise",
-                "charcuterie_supplier", "festival_caterers", "national_condiments",
+                "rib_shack", "smokehouse_trial", "picnic_caterer", "grill_pub",
+                "steakhouse_group", "roadhouse_group", "smokehouse_wholesale",
+                "bbq_festival", "county_fair", "food_court", "burger_bar",
+                "festival_caterers", "national_condiments",
             ],
         ),
     ],

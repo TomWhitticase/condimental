@@ -56,6 +56,7 @@ fn place(kind: &str, tile: TileCoord, direction: Direction, item: Option<&str>) 
         tile,
         direction,
         item: item.map(str::to_string),
+        recipe: None,
     }
 }
 

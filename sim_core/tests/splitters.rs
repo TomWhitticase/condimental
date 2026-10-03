@@ -81,6 +81,7 @@ fn build(world: &mut World, kind: &str, tile: TileCoord, direction: Direction) {
         tile,
         direction,
         item: None,
+        recipe: None,
     });
     assert!(
         world.query_tile(tile).is_some(),
@@ -475,6 +476,7 @@ fn placing_a_splitter_follows_every_other_kinds_rules() {
         tile: (0, 0),
         direction: Direction::East,
         item: None,
+        recipe: None,
     });
     assert!(world.query_tile((0, 0)).is_none());
     assert_eq!(world.placement_count(), 0);
@@ -491,6 +493,7 @@ fn placing_a_splitter_follows_every_other_kinds_rules() {
         tile: (0, 0),
         direction: Direction::East,
         item: None,
+        recipe: None,
     });
     assert_eq!(world.owned_count(SPLITTER_KIND), 1);
     assert_eq!(world.placement_count(), 1);
@@ -502,6 +505,7 @@ fn placing_a_splitter_follows_every_other_kinds_rules() {
         tile: (0, 0),
         direction: Direction::North,
         item: None,
+        recipe: None,
     });
     assert_eq!(world.owned_count(SPLITTER_KIND), 1);
     assert_eq!(world.placement_count(), 1);
@@ -524,6 +528,7 @@ fn placing_a_splitter_follows_every_other_kinds_rules() {
         tile: (0, 0),
         direction: Direction::East,
         item: None,
+        recipe: None,
     });
     assert_eq!(world.owned_count("belt"), 1);
 

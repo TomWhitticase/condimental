@@ -234,29 +234,28 @@ impl TimedProcess {
 #[derive(Debug)]
 pub struct Machine {
     /// The machine kind (`machines.ron` id) this body was placed as — what
-    /// [`Machine::choose`] asks [`RecipeRegistry::for_machine`] about. It
-    /// used to be read off the held recipe (`recipe.machine`), which was
-    /// only possible because a machine always held one; an undecided
-    /// machine holds none, so the kind is carried on its own. Never
+    /// `World` checks a chosen recipe against ([`RecipeRegistry::for_machine`]).
+    /// It used to be read off the held recipe (`recipe.machine`), which was
+    /// only possible because a machine always held one; a machine with no
+    /// recipe chosen holds none, so the kind is carried on its own. Never
     /// changes: a placement's kind is fixed for its life.
     pub kind: String,
-    /// The recipe this machine is running, or — when it is idle — the one
-    /// it would run next. **`None` until its inputs pick one**: a freshly
-    /// placed machine of a kind with several recipes has not been told
-    /// which sauce it is making yet, and says so rather than naming the
-    /// first in `recipes.ron` (the owner's 2026-10-02 ruling — every fresh
-    /// mixer, vat, bottler and packer used to read as a ketchup machine).
+    /// The recipe the **player chose** for this machine, or `None` until
+    /// they do — and a machine with none makes nothing (the owner's ruling
+    /// of 2026-10-03, `docs/DECISIONS.md`). Set at placement
+    /// (`PlayerCommand::Place`'s `recipe`) or afterwards
+    /// (`PlayerCommand::SetMachineRecipe`); [`Machine::tick`] never changes
+    /// it. A kind with exactly one recipe is placed holding it, since there
+    /// is nothing to choose.
     ///
-    /// A machine's *kind* used to name exactly one recipe, so this was
-    /// content wearing a field's clothes: `world.rs` looked it up once at
-    /// placement and it never changed again, which is why `save.rs`
-    /// deliberately did not store it. Since the BBQ epic a kind may name
-    /// several ([`RecipeRegistry::for_machine`]) and this is live state:
-    /// [`Machine::tick`] re-picks it on every idle tick from what the
-    /// buffers and the touching pipes actually hold, and **freezes it for
-    /// the length of a craft** — a batch that started as BBQ finishes as
-    /// BBQ even if its inputs are gone, which is exactly why it is now
-    /// saved (`save.rs`'s `SavedMachine::recipe`).
+    /// It used to be picked by the machine itself, from whatever its buffers
+    /// and touching pipes held. That stopped working the moment two recipes
+    /// on one kind drank the same fluid: the pipe resolver, which reads
+    /// recipes to name a run, could not tell a ketchup mixer from a mustard
+    /// one on the same vinegar tank (issue #184). A chosen recipe is a fact
+    /// the resolver can read, so a run's fluid follows from what the player
+    /// set rather than from a guess. Saved (`save.rs`'s
+    /// `SavedMachine::recipe`).
     pub recipe: Option<RecipeId>,
     pub input: Inventory,
     pub output: Inventory,
@@ -298,7 +297,7 @@ pub struct Machine {
 }
 
 impl Machine {
-    /// A machine of `kind` holding `recipe` — `None` for an undecided one,
+    /// A machine of `kind` holding `recipe` — `None` for one with no recipe chosen,
     /// which is what `World` places for any kind with more than one recipe.
     pub fn new(
         kind: impl Into<String>,
@@ -319,6 +318,20 @@ impl Machine {
         }
     }
 
+    /// Whether this machine would take one `item` off a belt right now:
+    /// its chosen recipe consumes it and the buffer has room. A machine
+    /// with no recipe chosen takes nothing, and neither does one handed
+    /// something its recipe has no use for — the belt backs up in front of
+    /// it, which is the readable failure, rather than the buffer silently
+    /// filling with stock it will never use.
+    pub fn takes(&self, item: &str, recipes: &RecipeRegistry) -> bool {
+        self.recipe
+            .as_ref()
+            .and_then(|id| recipes.get(id))
+            .is_some_and(|recipe| recipe.inputs.iter().any(|(wanted, _)| wanted == item))
+            && self.input.has_room_for(item, 1)
+    }
+
     /// Advances the machine by one tick: starts a new process if it's idle
     /// and has enough input, or deposits output once the timer's elapsed.
     /// Returns whether anything changed (dirty-chunk tracking, §4) — a
@@ -326,16 +339,9 @@ impl Machine {
     /// Godot can derive progress itself from `start_tick`/`required_ticks`
     /// plus the current tick count, without a new snapshot every tick.
     ///
-    /// **Which recipe is decided here, never by the player.** A machine
-    /// mid-craft is running the recipe in [`Machine::recipe`] and nothing
-    /// re-picks it. An idle one re-picks every tick: the first of its
-    /// kind's recipes (`data/recipes.ron` order) whose solid inputs are in
-    /// the buffer *and* whose every fluid input is carried by one of the
-    /// networks in `fluid_in`. When none is satisfiable it holds the one it
-    /// is closest to running, so the stall readout names what the machine
-    /// is actually waiting for rather than an arbitrary first entry. A kind
-    /// with one recipe — every kind before the BBQ epic — therefore behaves
-    /// exactly as it always did: there is nothing to pick.
+    /// **It runs [`Machine::recipe`] and nothing else.** The player chose it
+    /// and this method never changes it; a machine with none chosen records
+    /// a starved tick and does nothing.
     ///
     /// `fluid_in` is this machine's taps into the pipe networks it *draws*
     /// from (milestone 6 — ARCHITECTURE.md §9 item 6/§3.4; a [`FluidTap`]
@@ -439,32 +445,16 @@ impl Machine {
             self.load.record(WorkState::Starved);
             return changed;
         }
-        // An in-flight craft owns the recipe for its whole length; only an
-        // idle machine re-reads its inputs to pick one (see this method's
-        // doc). `satisfied` is the same question `Plan::Start` needs asked,
-        // asked once.
-        let held = self.recipe.as_ref().and_then(|id| recipes.get(id));
-        let picked = match (self.process, held) {
-            (Some(_), Some(running)) => Some((running, false)),
-            // A process with no recipe behind it cannot be finished; only a
-            // corrupt save could build one, and `save.rs` refuses it.
-            (Some(_), None) => None,
-            (None, _) => {
-                let chosen = self.choose(recipes, &self.kind, &fluid_in);
-                let chosen_id = chosen.map(|(recipe, _)| &recipe.id);
-                if chosen_id != self.recipe.as_ref() {
-                    self.recipe = chosen_id.cloned();
-                    changed = true;
-                }
-                chosen
-            }
-        };
-        let Some((recipe, satisfied)) = picked else {
-            // Undecided — nothing it has been handed names a sauce yet — or
-            // a kind with no recipe at all, which `World` refuses to place.
-            // Either way there is nothing to start: a tick spent waiting.
+        // The player chose the recipe (`PlayerCommand::SetMachineRecipe`);
+        // nothing here re-picks it. A machine with none chosen makes
+        // nothing: a tick spent waiting to be told what to make.
+        let Some(recipe) = self.recipe.as_ref().and_then(|id| recipes.get(id)) else {
             self.load.record(WorkState::Starved);
             return changed;
+        };
+        let satisfied = self.process.is_none() && {
+            let (met, wanted) = self.satisfaction(recipe, &fluid_in);
+            met == wanted
         };
         // Starved until something below says otherwise: a tick that starts
         // nothing and completes nothing is a tick spent waiting for input.
@@ -607,87 +597,6 @@ impl Machine {
         changed
     }
 
-    /// Which of `kind`'s recipes an idle machine should hold, and whether
-    /// its inputs are satisfied right now.
-    ///
-    /// Two rules, in this order:
-    ///
-    /// 1. **The first fully-satisfied recipe wins**, so `data/recipes.ron`'s
-    ///    own order is the tiebreak when the buffers and the pipes satisfy
-    ///    more than one. That is the only role the file's order plays in
-    ///    recipe selection, and it is why a mixer standing on a vinegar pipe
-    ///    beside a sugar hopper blends ketchup mix while one on a ketchup
-    ///    pipe beside spice and molasses hoppers blends BBQ mix: the two
-    ///    never both match.
-    /// 2. When none is satisfied, **the one closest to being satisfied**,
-    ///    counting requirements met. Nothing in the simulation turns on
-    ///    this — an unsatisfied machine does not move — but the snapshot and
-    ///    the stall readout are read off [`Machine::recipe`], and "waiting
-    ///    for molasses" is a true sentence about a BBQ mixer where "waiting
-    ///    for vinegar" is not.
-    /// 3. **A tie goes to the recipe the machine is already holding**, and
-    ///    only then to the earliest in the file. This is rule 2's own
-    ///    argument applied to the case rule 2 got wrong: a bottler that has
-    ///    just filled twenty bottles of BBQ and drained its tap ties every
-    ///    candidate at zero, and taking the earliest handed it
-    ///    `bottled_ketchup` — so it reported waiting for ketchup it had
-    ///    never touched, and (since 2026-09-21, when a machine started
-    ///    drawing the sauce its recipe names) stood a row of red bottles in
-    ///    a BBQ line.
-    /// 4. **Nothing met at all decides nothing.** When every candidate ties
-    ///    at zero the machine keeps what it holds — rule 3 — and a machine
-    ///    that has never been fed holds `None`, so it stays undecided rather
-    ///    than taking the first recipe in the file. That first recipe is
-    ///    ketchup's at every stage, which is how every fresh machine came to
-    ///    read as a ketchup machine (owner's request, 2026-10-02). One input
-    ///    met is enough to decide: a mixer that has been handed sugar or
-    ///    stands on a vinegar run is a ketchup mixer, and says what it is
-    ///    still waiting for. "Met" here is looser than rule 1's: any amount
-    ///    of an input counts ([`Machine::fed`]), so a crusher handed one
-    ///    tomato of the four a batch needs already knows it is crushing
-    ///    tomatoes.
-    ///
-    /// `None` for an undecided machine with nothing met, and for a kind no
-    /// recipe names (which `World` refuses to place).
-    fn choose<'r>(
-        &self,
-        recipes: &'r RecipeRegistry,
-        kind: &str,
-        fluid_in: &[FluidTap<'_>],
-    ) -> Option<(&'r Recipe, bool)> {
-        let mut closest: Option<(u32, &'r Recipe)> = None;
-        for candidate in recipes.for_machine(kind) {
-            let (met, wanted) = self.satisfaction(candidate, fluid_in);
-            if met == wanted {
-                return Some((candidate, true));
-            }
-            // Rule 3's tie-break: `met > best` alone leaves the earliest
-            // candidate holding a tie, so the held recipe has to be able to
-            // take it back off one that got there first.
-            let held = self.recipe.as_ref() == Some(&candidate.id);
-            if closest.is_none_or(|(best, _)| met > best || (met == best && held)) {
-                closest = Some((met, candidate));
-            }
-        }
-        match closest {
-            // Rule 4: a zero tie decides nothing by itself. The held recipe,
-            // if there is one, already won the tie above; an undecided
-            // machine has nothing to win it with, so it goes by what it has
-            // been HANDED, however little — or stays undecided.
-            Some((0, recipe)) if self.recipe.as_ref() != Some(&recipe.id) => {
-                let mut best: Option<(u32, &'r Recipe)> = None;
-                for candidate in recipes.for_machine(kind) {
-                    let fed = self.fed(candidate, fluid_in);
-                    if fed > best.map_or(0, |(most, _)| most) {
-                        best = Some((fed, candidate));
-                    }
-                }
-                best.map(|(_, recipe)| (recipe, false))
-            }
-            other => other.map(|(_, recipe)| (recipe, false)),
-        }
-    }
-
     /// How many of `recipe`'s inputs this machine could satisfy this tick,
     /// out of how many it asks for — `met == wanted` is exactly the
     /// condition for starting a craft.
@@ -717,24 +626,6 @@ impl Machine {
         }
         let wanted = (recipe.inputs.len() + recipe.fluid_inputs.len()) as u32;
         (met, wanted)
-    }
-
-    /// How many of `recipe`'s inputs this machine holds ANY of — a solid
-    /// in the buffer, or a touching run with fluid of that id in it. The
-    /// undecided machine's question ([`Machine::choose`]'s rule 4): not
-    /// "can it start" but "has it been handed this recipe's ingredients".
-    fn fed(&self, recipe: &Recipe, fluid_in: &[FluidTap<'_>]) -> u32 {
-        let solids = recipe
-            .inputs
-            .iter()
-            .filter(|(item, _)| self.input.count(item) > 0)
-            .count();
-        let fluids = recipe
-            .fluid_inputs
-            .iter()
-            .filter(|(id, _)| fluid_in.iter().any(|tap| tap.can_supply(id, Fx::DELTA)))
-            .count();
-        (solids + fluids) as u32
     }
 
     /// The first tap in `fluid_in` not already `claimed` that carries

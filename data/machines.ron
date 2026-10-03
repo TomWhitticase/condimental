@@ -184,16 +184,14 @@
         // physically smallest machine on the line, and it is deliberately
         // NOT the milestone's "big machine" example.
         //
-        // It mills WET as well as dry since mustard (`mustard_mash` in
-        // `data/recipes.ron`): a crusher can be plumbed to a drum and take a
-        // fluid in alongside the solid off its hopper, and discharge what it
-        // makes as a fluid. Still the same machine and the same 80 ticks —
-        // what changed is the content, not the kind.
+        // It grinds mustard seed too (`ground_mustard` in
+        // `data/recipes.ron`): the same machine and the same 80 ticks, a
+        // second recipe the player picks rather than a second kind.
         MachineKind(
             id: "crusher",
             footprint: Footprint(width_tiles: 1, height_tiles: 1),
             staff: [("manufacturing", 1)],
-            blurb: "Crushes raw solids, dry or wet: whole tomatoes into paste off a hopper alone, mustard seed into mash with vinegar piped in beside it. Either way it is the head of a line, with nothing upstream of it but what you buy.",
+            blurb: "Crushes raw solids off a hopper: whole tomatoes into paste, or mustard seed into ground mustard. Either way it is the head of a line, with nothing upstream of it but what you buy.",
             icon: "machine_crusher",
         ),
         // Blends tomato paste and sugar with vinegar into an uncooked

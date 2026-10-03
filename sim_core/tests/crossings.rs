@@ -57,6 +57,7 @@ fn try_build(world: &mut World, kind: &str, tile: TileCoord, direction: Directio
         tile,
         direction,
         item: (kind == "hopper").then(|| "tomato".to_string()),
+        recipe: None,
     });
     world.owned_count(kind) < owned
 }
@@ -521,6 +522,7 @@ fn only_a_perpendicular_belt_and_pipe_assemble() {
         tile: (8, 0),
         direction: Direction::East,
         item: None,
+        recipe: None,
     });
     assert!(world.query_tile((8, 0)).is_none());
 }

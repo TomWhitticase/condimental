@@ -48,13 +48,21 @@ extends RefCounted
 ## like every other refused command. Every fixture below therefore names it,
 ## and a fixture that forgot would show up as a missing placement rather than
 ## as an error, which is exactly how this was found on `main`.
-static func place(sim, kind: String, tile: Vector2i, direction: String, item := "") -> void:
+##
+## `recipe` is what a MACHINE is set to make (2026-10-03): a machine runs the
+## recipe the player chose and nothing else, and one placed without a recipe
+## makes nothing. Every machine on a line a fixture means to RUN names one.
+static func place(
+	sim, kind: String, tile: Vector2i, direction: String, item := "", recipe := ""
+) -> void:
 	sim.issue_command_json(JSON.stringify({"type": "purchase", "kind": kind}))
 	var command := {
 		"type": "place", "kind": kind, "tile": [tile.x, tile.y], "direction": direction,
 	}
 	if item != "":
 		command["item"] = item
+	if recipe != "":
+		command["recipe"] = recipe
 	sim.issue_command_json(JSON.stringify(command))
 
 
@@ -364,7 +372,7 @@ static func build_demo_line(sim) -> void:
 	place(sim, "belt", Vector2i(4, 0), "north")
 	place(sim, "belt", Vector2i(4, 1), "north")
 	place(sim, "belt", Vector2i(4, 2), "west")
-	place(sim, "crusher", Vector2i(3, 2), "west")
+	place(sim, "crusher", Vector2i(3, 2), "west", "", "tomato_paste")
 	place(sim, "belt", Vector2i(2, 2), "west")
 	place(sim, "belt", Vector2i(1, 2), "west")
 	place(sim, "belt", Vector2i(0, 2), "west")
@@ -381,7 +389,7 @@ static func build_demo_line(sim) -> void:
 ## four of its tiles, and (turned) that a quarter turn is drawn as a quarter
 ## turn.
 static func build_multi_tile(sim, direction := "east") -> void:
-	place(sim, "cooking_vat", Vector2i(0, 0), direction)
+	place(sim, "cooking_vat", Vector2i(0, 0), direction, "", "ketchup")
 
 
 ## A hopper and one belt: the smallest thing that is a working factory at all
@@ -404,7 +412,7 @@ static func build_minimal(sim) -> void:
 ## machine — a refused `place` and therefore a fixture that quietly built four
 ## fewer tiles than it printed.
 static func build_fluid_run(sim) -> void:
-	place(sim, "mixer", Vector2i(0, 0), "east")
+	place(sim, "mixer", Vector2i(0, 0), "east", "", "ketchup_mix")
 	place(sim, "pipe", Vector2i(0, 2), "west")
 	place(sim, "pipe", Vector2i(1, 2), "west")
 	place(sim, "pipe", Vector2i(2, 2), "west")
@@ -421,7 +429,7 @@ static func build_fluid_run(sim) -> void:
 static func build_machines_fixture(sim) -> void:
 	place(sim, "hopper", Vector2i(-1, 0), "east", "tomato")
 	place(sim, "belt", Vector2i(0, 0), "east")
-	place(sim, "crusher", Vector2i(1, 0), "east")
+	place(sim, "crusher", Vector2i(1, 0), "east", "", "tomato_paste")
 	place(sim, "belt", Vector2i(4, 0), "east")
 	place(sim, "dock", Vector2i(5, 0), "east")
 
@@ -547,7 +555,7 @@ static func build_reference_line(sim) -> void:
 	place(sim, "hopper", Vector2i(-1, 0), "east", "tomato")
 	for x in [0, 1, 2, 3]:
 		place(sim, "belt", Vector2i(x, 0), "east")
-	place(sim, "crusher", Vector2i(4, 0), "east")
+	place(sim, "crusher", Vector2i(4, 0), "east", "", "tomato_paste")
 
 	# Stage 2, the mixer: TWO feed lanes, one per solid ingredient — paste
 	# arrives on row 0 from the crusher, sugar on row 1 from its own hopper.
@@ -557,7 +565,7 @@ static func build_reference_line(sim) -> void:
 		place(sim, "belt", Vector2i(x, 0), "east")
 		place(sim, "belt", Vector2i(x, 1), "east")
 	place(sim, "hopper", Vector2i(4, 1), "east", "sugar")
-	place(sim, "mixer", Vector2i(9, 0), "east") # 1x2: it also covers y=1
+	place(sim, "mixer", Vector2i(9, 0), "east", "", "ketchup_mix") # 1x2: it also covers y=1
 
 	# The vinegar supply, on the row north of the mixer's WHOLE footprint
 	# (y = 2 now that the machine is two deep), with the tank one tile west
@@ -574,16 +582,16 @@ static func build_reference_line(sim) -> void:
 	# says a stage's connections are content rather than geometry.
 	for x in [10, 11]:
 		place(sim, "pipe", Vector2i(x, 0), "east")
-	place(sim, "cooking_vat", Vector2i(12, 0), "east") # 2x2: also x=13 and y=1
+	place(sim, "cooking_vat", Vector2i(12, 0), "east", "", "ketchup") # 2x2: also x=13 and y=1
 	for x in [14, 15]:
 		place(sim, "pipe", Vector2i(x, 0), "east")
-	place(sim, "bottler", Vector2i(16, 0), "east")
+	place(sim, "bottler", Vector2i(16, 0), "east", "", "bottled_ketchup")
 
 	# ...and out the other side as solids again: bottles to the packer,
 	# boxes to the dock.
 	for x in [17, 18, 19, 20]:
 		place(sim, "belt", Vector2i(x, 0), "east")
-	place(sim, "packer", Vector2i(21, 0), "east")
+	place(sim, "packer", Vector2i(21, 0), "east", "", "boxed_ketchup")
 	for x in [22, 23, 24, 25]:
 		place(sim, "belt", Vector2i(x, 0), "east")
 	place(sim, "dock", Vector2i(26, 0), "east")
@@ -669,7 +677,7 @@ static func build_bbq_branch(sim) -> void:
 	for x in [10, 11, 12, 13]:
 		place(sim, "belt", Vector2i(x, -3), "east")
 		place(sim, "belt", Vector2i(x, -2), "east")
-	place(sim, "mixer", Vector2i(14, -3), "east")  # 1x2: also covers y=-2
+	place(sim, "mixer", Vector2i(14, -3), "east", "", "bbq_mix")  # 1x2: also covers y=-2
 
 	# The branch itself.
 	place(sim, "pipe", Vector2i(14, -1), "east")
@@ -678,7 +686,7 @@ static func build_bbq_branch(sim) -> void:
 	# needs alongside the BBQ mix.
 	for x in [15, 16]:
 		place(sim, "pipe", Vector2i(x, -3), "east")
-	place(sim, "cooking_vat", Vector2i(17, -3), "east")  # 2x2
+	place(sim, "cooking_vat", Vector2i(17, -3), "east", "", "bbq")  # 2x2
 	place(sim, "fluid_tank", Vector2i(16, -1), "east")
 	for x in [17, 18, 19, 20]:
 		place(sim, "pipe", Vector2i(x, -1), "east")
@@ -686,10 +694,10 @@ static func build_bbq_branch(sim) -> void:
 	# Vat -> bottler -> packer -> its own dock.
 	for x in [19, 20]:
 		place(sim, "pipe", Vector2i(x, -3), "east")
-	place(sim, "bottler", Vector2i(21, -3), "east")
+	place(sim, "bottler", Vector2i(21, -3), "east", "", "bottled_bbq")
 	for x in [22, 23, 24, 25]:
 		place(sim, "belt", Vector2i(x, -3), "east")
-	place(sim, "packer", Vector2i(26, -3), "east")
+	place(sim, "packer", Vector2i(26, -3), "east", "", "boxed_bbq")
 	for x in [27, 28, 29, 30]:
 		place(sim, "belt", Vector2i(x, -3), "east")
 	place(sim, "dock", Vector2i(31, -3), "east")
@@ -1051,8 +1059,9 @@ static func unlock_open(sim, id: String) -> bool:
 	return false
 
 
-## THE MUSTARD LINE (the mustard epic) — the third sauce, running, as a
-## WHOLE SECOND LINE FROM RAW rather than as a branch off an existing one.
+## THE MUSTARD LINE (the mustard epic, reshaped 2026-10-03) — the second
+## sauce, running, as a WHOLE SECOND LINE FROM RAW rather than as a branch
+## off an existing one.
 ##
 ## That is the structural difference from `build_bbq_branch` and the reason
 ## this is its own fixture rather than more tiles on that one. BBQ hangs off
@@ -1062,51 +1071,34 @@ static func unlock_open(sim, id: String) -> bool:
 ## `data/recipes.ron` makes about the tier: a second line, start to finish,
 ## on nothing but content.
 ##
-## THE SHAPE, and the two joints worth knowing before moving a tile:
+## THE SHAPE — four stages, and no cook, since mustard is ground and mixed:
 ##
-##   seed hopper -> belt -> CRUSHER -> [mash] -> MIXER -> [mix] -> VAT
-##       vinegar tank -> [vinegar] -^      turmeric belt -^
-##   ... -> [mustard] -> BOTTLER -> belt -> PACKER -> belt -> DOCK
+##   seed hopper -> belt -> CRUSHER -> belt (ground mustard) -> MIXER
+##                          turmeric hopper -> belt ---------> (row 1)
+##                                         vinegar tank -> pipe -^ (row 2)
+##   MIXER -> [mustard] -> BOTTLER -> belt -> PACKER -> belt -> DOCK
 ##
-##   * **The crusher is plumbed on both sides**, which no crusher in any
-##     other fixture is. The vinegar run comes along row 1 and stops at
-##     (4, 1), touching the crusher's single tile from the south; the mash
-##     leaves east off its outlet face. A machine taps a network by
-##     TOUCHING it and deposits only through the face it points at, so those
-##     two runs cannot be confused however close they look on the floor.
-##   * **Row 1 carries two different things and they must not meet.** West
-##     of the crusher it is the vinegar pipe run; east of it, it is the
-##     turmeric feed belt into the mixer's second tile. They are separated
-##     by the turmeric hopper at (5, 1), which is a building and not a pipe
-##     — one more pipe there and the vinegar run would reach down the line
-##     and merge with the mash.
+## The mixer is 1x2: ground mustard arrives on its row-0 tile, turmeric on its
+## row-1 tile, and the vinegar run touches it from the north — the ketchup
+## mixer's exact arrangement, which is the point: the same machine kind
+## drinks the same bought fluid for two different recipes, and each mixer's
+## CHOSEN recipe is what tells the pipe resolver which is which. Every
+## machine here is placed set to its recipe, as the player's picker does.
 ##
-## WHY THE MIXER IS 1x2 HERE TOO, for a different reason than usual: its
-## second tile is not a second solid lane, it is where the turmeric arrives
-## while the mash comes in by pipe. Mustard is the first recipe to use the
-## two chutes asymmetrically.
-##
-## The bill is 932 — the cheapest complete line in this file, because
-## mustard's middle is wet and three stages of it are pipe rather than belt.
-## It still calls `fund` before stocking, like every fixture that intends to
-## RUN: a larder plus its racks costs far more than the line does.
+## The bill is 743 — the cheapest complete line in this file, because it has
+## no vat. It still calls `fund` before stocking, like every fixture that
+## intends to RUN: a larder plus its racks costs far more than the line does.
 ##
 ## **The gate is crossed by patching the boxes-sold ledger, not by earning
-## it.** `build_bbq_running_line` runs a ketchup line until BBQ's hundredth
-## box of ketchup sells, and that is right for a fixture whose subject IS the
-## unlock. Mustard then wants a hundred boxes of BBQ on top, which is another
-## 73 000 ticks — measured, by `measure_gate_ticks.gd`, which earns both gates
-## from a new game and reaches mustard at tick 125 000 — and this fixture's
-## subject is the line, so it uses
-## `open_every_gate` — the same door `test_ingredient_models.gd` and
-## `test_screenshot.gd` already cross gates through. What stays real is
-## every placement: nothing here is conjured into the world, it is bought
-## and placed over the wire exactly as a player would.
+## it** — this fixture's subject is the line, so it uses `open_every_gate`,
+## the same door `test_ingredient_models.gd` and `test_screenshot.gd` cross
+## gates through. What stays real is every placement: nothing here is
+## conjured into the world, it is bought and placed over the wire exactly as
+## a player would.
 static func build_mustard_line(sim) -> void:
 	# The raws and the contracts are behind `mustard_sauce`; open it before
 	# buying anything, or `stock_larder` silently skips both of mustard's
-	# ingredients and this becomes a complete line that never makes a case
-	# — the failure `build_bbq_running_line` documents at its own ceiling.
+	# ingredients and this becomes a complete line that never makes a case.
 	open_every_gate(sim, "MUSTARD_FIXTURE_FAIL")
 	if fixture_failure() != "":
 		return
@@ -1119,35 +1111,32 @@ static func build_mustard_line(sim) -> void:
 		return
 	fund(sim, 30000)
 
-	# Stage 1, the crusher: seed on a belt from its hopper, vinegar by pipe.
+	# Stage 1, the crusher: seed on a belt from its hopper, ground mustard out
+	# on a belt to the mixer's row-0 tile.
 	place(sim, "hopper", MUSTARD_SEED_HOPPER, "east", "mustard_seed")
 	for x in [0, 1, 2, 3]:
 		place(sim, "belt", Vector2i(x, 0), "east")
-	place(sim, "crusher", Vector2i(4, 0), "east")
-	place(sim, "fluid_tank", MUSTARD_VINEGAR_TANK, "east")
-	for x in [2, 3, 4]:
-		place(sim, "pipe", Vector2i(x, 1), "east")
-
-	# Stage 2, the mixer: mash down a pipe, turmeric along row 1.
-	for x in [5, 6]:
-		place(sim, "pipe", Vector2i(x, 0), "east")
-	place(sim, "hopper", MUSTARD_TURMERIC_HOPPER, "east", "turmeric")
-	place(sim, "belt", Vector2i(6, 1), "east")
-	place(sim, "mixer", Vector2i(7, 0), "east")  # 1x2: also covers y=1
-
-	# Stage 3, the cook. No belt touches it, as no vat's ever does.
-	for x in [8, 9]:
-		place(sim, "pipe", Vector2i(x, 0), "east")
-	place(sim, "cooking_vat", Vector2i(10, 0), "east")  # 2x2: also x=11, y=1
-
-	# Stage 4, back to solids: bottles, cases, dock.
-	for x in [12, 13]:
-		place(sim, "pipe", Vector2i(x, 0), "east")
-	place(sim, "bottler", Vector2i(14, 0), "east")
-	for x in [15, 16, 17, 18]:
+	place(sim, "crusher", MUSTARD_CRUSHER, "east", "", "ground_mustard")
+	for x in [5, 6, 7, 8]:
 		place(sim, "belt", Vector2i(x, 0), "east")
-	place(sim, "packer", Vector2i(19, 0), "east")
-	for x in [20, 21, 22, 23]:
+
+	# Stage 2, the mixer: turmeric along row 1, vinegar down from row 2.
+	place(sim, "hopper", MUSTARD_TURMERIC_HOPPER, "east", "turmeric")
+	for x in [5, 6, 7, 8]:
+		place(sim, "belt", Vector2i(x, 1), "east")
+	place(sim, "fluid_tank", MUSTARD_VINEGAR_TANK, "east")
+	for x in [8, 9]:
+		place(sim, "pipe", Vector2i(x, 2), "east")
+	place(sim, "mixer", MUSTARD_MIXER, "east", "", "mustard")  # 1x2: also covers y=1
+
+	# Stage 3, back to solids: bottles, cases, dock.
+	for x in [10, 11]:
+		place(sim, "pipe", Vector2i(x, 0), "east")
+	place(sim, "bottler", MUSTARD_BOTTLER, "east", "", "bottled_mustard")
+	for x in [13, 14, 15, 16]:
+		place(sim, "belt", Vector2i(x, 0), "east")
+	place(sim, "packer", MUSTARD_PACKER, "east", "", "boxed_mustard")
+	for x in [18, 19, 20, 21]:
 		place(sim, "belt", Vector2i(x, 0), "east")
 	place(sim, "dock", MUSTARD_DOCK, "east")
 
@@ -1179,25 +1168,22 @@ const MUSTARD_UNLOCK := "mustard_sauce"
 ## The tiles any check or shot of the mustard line names, so that a test
 ## asserting where something is does not restate the layout above.
 const MUSTARD_SEED_HOPPER := Vector2i(-1, 0)
-const MUSTARD_TURMERIC_HOPPER := Vector2i(5, 1)
-const MUSTARD_VINEGAR_TANK := Vector2i(1, 1)
+const MUSTARD_TURMERIC_HOPPER := Vector2i(4, 1)
+const MUSTARD_VINEGAR_TANK := Vector2i(7, 2)
 const MUSTARD_CRUSHER := Vector2i(4, 0)
-const MUSTARD_MIXER := Vector2i(7, 0)
-const MUSTARD_VAT := Vector2i(10, 0)
-const MUSTARD_BOTTLER := Vector2i(14, 0)
-const MUSTARD_PACKER := Vector2i(19, 0)
-const MUSTARD_DOCK := Vector2i(24, 0)
+const MUSTARD_MIXER := Vector2i(9, 0)
+const MUSTARD_BOTTLER := Vector2i(12, 0)
+const MUSTARD_PACKER := Vector2i(17, 0)
+const MUSTARD_DOCK := Vector2i(22, 0)
 
-## One tile of each of the four runs the line stands up, with the fluid the
-## simulation must name it. A run is checked HERE and not by walking the
-## snapshot for "some run carrying mustard", because the thing worth pinning
-## is that the mash is on the crusher's side of the mixer and the mix on the
-## other — a layout that merged them would still report both ids somewhere.
+## One tile of each of the two runs the line stands up, with the fluid the
+## simulation must name it: the vinegar into the mixer, and the finished
+## mustard out of it. Pinned by tile rather than by "some run carrying
+## mustard", because what is worth pinning is that the vinegar is on the
+## mixer's supply side and the mustard on its outlet side.
 const MUSTARD_RUNS := [
-	[Vector2i(3, 1), "vinegar"],
-	[Vector2i(5, 0), "mustard_mash"],
-	[Vector2i(8, 0), "mustard_mix"],
-	[Vector2i(12, 0), "mustard"],
+	[Vector2i(8, 2), "vinegar"],
+	[Vector2i(10, 0), "mustard"],
 ]
 
 ## The two single-sauce mustard orders on the board (`data/contracts.ron`):
@@ -1207,14 +1193,13 @@ const MUSTARD_RUNS := [
 ## floor has no ketchup line on it.
 const MUSTARD_CONTRACTS := ["deli_counter", "hot_dog_stand"]
 
-## How many placements `build_mustard_line` makes: 13 belts, 9 pipes,
-## 2 hoppers, 1 tank and the six buildings.
-const MUSTARD_LINE_PLACEMENTS := 13 + 9 + 2 + 1 + 6
+## How many placements `build_mustard_line` makes: 20 belts, 4 pipes,
+## 2 hoppers, 1 tank and the five buildings.
+const MUSTARD_LINE_PLACEMENTS := 20 + 4 + 2 + 1 + 5
 
-## How long the line runs once it is built. Mustard's cook is 360 ticks —
-## between ketchup's 240 and BBQ's 600 — and it is the bottleneck of this
-## line as every vat is of its own, so a case leaves the packer at about
-## that cadence once the pipes have primed. 15 000 is the same budget
+## How long the line runs once it is built. With no cook, the bottler's
+## 200-tick fill is the line's slowest stage, so a case leaves the packer at
+## about that cadence once the belts have filled. 15 000 is the same budget
 ## `BBQ_SETTLE_TICKS` uses and leaves the dock a long way short of backing
 ## up, which is a different fixture's subject.
 const MUSTARD_SETTLE_TICKS := 15000
@@ -1281,14 +1266,18 @@ static func split_dock_lamps_found(sim) -> bool:
 ## and `scripts/screenshot-scene.sh --stalled-run` photographs: the BBQ
 ## branch exactly as it ships, with ONE mistake made in it.
 ##
-## The mistake is the one the branch was actually built with. A fluid tank
-## discharges only into the pipe it FACES, so the liquid-smoke tank at
-## (16, -1), turned off its run, stops pinning that run to liquid smoke; the
-## run narrows to every fluid a cooking vat could be cooking instead of one,
-## the simulation refuses to guess which, and every machine on it waits
-## forever. Nothing about it used to be
-## visible: an unnamed run and a run merely waiting for its first fill are
-## both empty pipe.
+## The mistake: a second fluid tank on the far end of the liquid-smoke run,
+## declared VINEGAR, while the first is declared liquid smoke. Two tanks
+## pouring two different things into one run is two things the player said,
+## and the simulation refuses to guess which they meant — the run is
+## ambiguous, carries neither, and nothing on it ever draws. Nothing about it
+## used to be visible: an unnamed run and a run merely waiting for its first
+## fill are both empty pipe.
+##
+## (Until 2026-10-03 the mistake was #54's original one, the smoke tank
+## turned off its run. That stopped being a fault when machines started
+## running the recipe the player chose: the vat set to BBQ names the run
+## liquid smoke by itself, and it is merely empty.)
 ##
 ## Deliberately NOT run forward. The comparison the shot has to make is
 ## between a DEAD run and a merely EMPTY one, and a settled factory has no
@@ -1296,23 +1285,29 @@ static func split_dock_lamps_found(sim) -> bool:
 ## flagged and its neighbours, equally empty, not.
 static func build_stalled_pipe_run(sim) -> void:
 	build_bbq_branch(sim)
+	fund(sim, 5000)
 	sim.issue_command_json(JSON.stringify({
-		"type": "rotate", "tile": [STALLED_TANK.x, STALLED_TANK.y],
+		"type": "set_tank_fluid", "tile": [STALLED_TANK.x, STALLED_TANK.y], "fluid": "liquid_smoke",
+	}))
+	place(sim, "fluid_tank", STALLED_SECOND_TANK, "west")
+	sim.issue_command_json(JSON.stringify({
+		"type": "set_tank_fluid",
+		"tile": [STALLED_SECOND_TANK.x, STALLED_SECOND_TANK.y],
+		"fluid": "vinegar",
 	}))
 
 
-## The liquid-smoke tank `build_stalled_pipe_run` turns away from its run,
-## the first tile of the run that is left dead, and a tile of the run beside
-## it that is merely empty — the three things any check or shot of that
-## fixture needs to name.
+## The liquid-smoke tank, the second tank `build_stalled_pipe_run` adds at
+## the run's far end (removing it is the fix), the first tile of the run that
+## is left dead, and a tile of the run beside it that is merely empty — the
+## things any check or shot of that fixture needs to name.
 const STALLED_TANK := Vector2i(16, -1)
+const STALLED_SECOND_TANK := Vector2i(21, -1)
 const STALLED_RUN_TILE := Vector2i(18, -1)
 const STALLED_NEIGHBOUR_TILE := Vector2i(15, -3)
-## What the dead run narrowed to, in the order the simulation reports it.
-## One entry per sauce the cooking vat on this run knows how to make, so a
-## third sauce is a third candidate — that growth is the point of the fault,
-## not a regression in it.
-const STALLED_RUN_CANDIDATES := ["ketchup_mix", "liquid_smoke", "mustard_mix"]
+## What the dead run narrowed to, in the order the simulation reports it:
+## the two fluids the two tanks were declared as.
+const STALLED_RUN_CANDIDATES := ["liquid_smoke", "vinegar"]
 
 
 ## Hires into every category the simulation reports short, until none is.
@@ -1633,7 +1628,7 @@ static func build_pipe_gallery(sim) -> void:
 	# Tees: (centre, the side it is CLOSED on) — the arm tiles are the other
 	# three neighbours. The first is fed and tapped.
 	place(sim, "fluid_tank", Vector2i(16, 1), "east")
-	place(sim, "mixer", Vector2i(18, 3), "north") # 1x2 turned: covers (18, 3) and (19, 3)
+	place(sim, "mixer", Vector2i(18, 3), "north", "", "ketchup_mix") # 1x2 turned: covers (18, 3) and (19, 3)
 	for tee in [[Vector2i(18, 1), "south"], [Vector2i(22, 1), "north"], [Vector2i(26, 1), "east"], [Vector2i(30, 1), "west"]]:
 		var centre: Vector2i = tee[0]
 		place(sim, "pipe", centre, "east")
@@ -1642,7 +1637,7 @@ static func build_pipe_gallery(sim) -> void:
 				place(sim, "pipe", centre + _offset(side), "east")
 	# Cross, fed and tapped.
 	place(sim, "fluid_tank", Vector2i(34, 1), "east")
-	place(sim, "mixer", Vector2i(36, 3), "north")
+	place(sim, "mixer", Vector2i(36, 3), "north", "", "ketchup_mix")
 	place(sim, "pipe", Vector2i(36, 1), "east")
 	for side in ["north", "east", "south", "west"]:
 		place(sim, "pipe", Vector2i(36, 1) + _offset(side), "east")
@@ -1657,25 +1652,25 @@ static func build_pipe_gallery(sim) -> void:
 	place(sim, "pipe", Vector2i(8, 6), "east")
 	place(sim, "fluid_tank", Vector2i(11, 7), "south")
 	place(sim, "pipe", Vector2i(11, 6), "east")
-	place(sim, "bottler", Vector2i(15, 6), "east")
+	place(sim, "bottler", Vector2i(15, 6), "east", "", "bottled_ketchup")
 	place(sim, "pipe", Vector2i(14, 6), "east")
-	place(sim, "bottler", Vector2i(18, 6), "west")
+	place(sim, "bottler", Vector2i(18, 6), "west", "", "bottled_ketchup")
 	place(sim, "pipe", Vector2i(19, 6), "east")
-	place(sim, "bottler", Vector2i(22, 7), "north")
+	place(sim, "bottler", Vector2i(22, 7), "north", "", "bottled_ketchup")
 	place(sim, "pipe", Vector2i(22, 6), "east")
-	place(sim, "bottler", Vector2i(25, 5), "south")
+	place(sim, "bottler", Vector2i(25, 5), "south", "", "bottled_ketchup")
 	place(sim, "pipe", Vector2i(25, 6), "east")
 	# --- row 10-12: the shipped middle ------------------------------------
 	place(sim, "fluid_tank", Vector2i(0, 12), "east")
 	for tile in [Vector2i(1, 12), Vector2i(2, 12), Vector2i(3, 12)]:
 		place(sim, "pipe", tile, "east")
-	place(sim, "mixer", Vector2i(3, 10), "east")
+	place(sim, "mixer", Vector2i(3, 10), "east", "", "ketchup_mix")
 	for tile in [Vector2i(4, 10), Vector2i(5, 10)]:
 		place(sim, "pipe", tile, "east")
-	place(sim, "cooking_vat", Vector2i(6, 10), "east")
+	place(sim, "cooking_vat", Vector2i(6, 10), "east", "", "ketchup")
 	for tile in [Vector2i(8, 10), Vector2i(9, 10)]:
 		place(sim, "pipe", tile, "east")
-	place(sim, "bottler", Vector2i(10, 10), "east")
+	place(sim, "bottler", Vector2i(10, 10), "east", "", "bottled_ketchup")
 
 
 ## Every placement `build_pipe_gallery` makes, so a test asserting it was
@@ -1795,7 +1790,7 @@ static func build_stress_line(sim) -> void:
 		place(sim, "fluid_tank", Vector2i(-1, y), "east")
 		for x in range(STRESS_PIPES_PER_RUN):
 			place(sim, "pipe", Vector2i(x, y), "east")
-		place(sim, "mixer", Vector2i(STRESS_PIPES_PER_RUN, y), "east")
+		place(sim, "mixer", Vector2i(STRESS_PIPES_PER_RUN, y), "east", "", "ketchup_mix")
 
 
 ## How many placements `build_stress_line` makes, so a test can assert the
@@ -2063,25 +2058,25 @@ static func build_belt_gallery(sim) -> void:
 	# Machine lines, one per facing.
 	place(sim, "hopper", Vector2i(0, 6), "east", "tomato")
 	place(sim, "belt", Vector2i(1, 6), "east")
-	place(sim, "crusher", Vector2i(2, 6), "east")
+	place(sim, "crusher", Vector2i(2, 6), "east", "", "tomato_paste")
 	place(sim, "belt", Vector2i(3, 6), "east")
 	place(sim, "dock", Vector2i(4, 6), "east")
 
 	place(sim, "dock", Vector2i(0, 9), "west")
 	place(sim, "belt", Vector2i(2, 9), "west")
-	place(sim, "crusher", Vector2i(3, 9), "west")
+	place(sim, "crusher", Vector2i(3, 9), "west", "", "tomato_paste")
 	place(sim, "belt", Vector2i(4, 9), "west")
 	place(sim, "hopper", Vector2i(5, 9), "west", "tomato")
 
 	place(sim, "hopper", Vector2i(12, 0), "north", "tomato")
 	place(sim, "belt", Vector2i(12, 1), "north")
-	place(sim, "crusher", Vector2i(12, 2), "north")
+	place(sim, "crusher", Vector2i(12, 2), "north", "", "tomato_paste")
 	place(sim, "belt", Vector2i(12, 3), "north")
 	place(sim, "dock", Vector2i(12, 4), "north")
 
 	place(sim, "dock", Vector2i(16, 0), "south")
 	place(sim, "belt", Vector2i(16, 2), "south")
-	place(sim, "crusher", Vector2i(16, 3), "south")
+	place(sim, "crusher", Vector2i(16, 3), "south", "", "tomato_paste")
 	place(sim, "belt", Vector2i(16, 4), "south")
 	place(sim, "hopper", Vector2i(16, 5), "south", "tomato")
 
@@ -2108,10 +2103,11 @@ const BELT_GALLERY_LEFT_CORNERS := {
 }
 
 
-## THE FLUID GALLERY (issue #72) — all NINE fluids the game has, standing in
-## nine pipe runs in one frame, so the question "are these nine colours
-## actually tellable apart?" can be answered by looking at a picture instead
-## of by reasoning about nine hex values.
+## THE FLUID GALLERY (issue #72) — every fluid the game has (seven since
+## mustard stopped being cooked, 2026-10-03), standing in its own pipe run in
+## one frame, so the question "are these colours actually tellable apart?"
+## can be answered by looking at a picture instead of by reasoning about hex
+## values.
 ##
 ## `main.gd`'s FLUID_TINTS grew from two entries to six across the BBQ epic
 ## and was never once seen whole: the shipped line shows three of them, the
@@ -2121,45 +2117,32 @@ const BELT_GALLERY_LEFT_CORNERS := {
 ## isolation, which is not a review (UI_UX.md §2b point 9).
 ##
 ## **Naming a run is not the same as filling it, and this fixture does both
-## differently.** A run's fluid id comes from the MACHINE RECIPES either end
-## of it (`sim::world::resolve_network_fluids`), not from anything that has
-## ever flowed through it, so the naming here is pure topology and is exact
-## the moment the last pipe is placed — nothing has to run. The layout is
-## chosen so that each of the ketchup and BBQ chain's six runs narrows to
-## exactly one candidate:
+## differently.** A run's fluid id comes from the RECIPES CHOSEN for the
+## machines either end of it (`sim::world::resolve_network_fluids`), not from
+## anything that has ever flowed through it, so the naming here is exact the
+## moment the last machine is set — nothing has to run. Each machine is
+## placed set to its recipe, and each run narrows to exactly one candidate:
 ##
 ##   tank -> [A] -> mixer -> [B] -> vat -> [C] -> mixer -> [D] -> vat -> [F]
 ##                                                          tank -> [E] ->
 ##
-##   * A is tank-fed, so it is narrowed to RAW fluids, and the one raw fluid
-##     a mixer draws is vinegar.
-##   * B is filled by that mixer, whose two recipes make `ketchup_mix` and
-##     `bbq_mix`; `bbq_mix` needs ketchup on an input run and this mixer's
-##     only input run is A, so `ketchup_mix` is the only feasible one.
-##   * C is filled by a vat fed only by B, so `bbq` (which needs `bbq_mix`
-##     AND liquid smoke, on two distinct runs) is out and it is `ketchup`.
-##   * D is filled by the second mixer, fed only by C; `ketchup_mix` needs
-##     vinegar, so it is `bbq_mix`.
-##   * E is the second tank's run, drawn by the second vat: raw again, and
-##     the one raw fluid a vat draws is `liquid_smoke`.
-##   * F leaves that vat, which now has `bbq_mix` and `liquid_smoke` on two
-##     distinct input runs and no `ketchup_mix` anywhere: `bbq`.
+##   * A is tank-fed and drawn by a mixer set to `ketchup_mix`: vinegar.
+##   * B is filled by that mixer: `ketchup_mix`.
+##   * C is filled by a vat set to `ketchup`, and drawn by a mixer set to
+##     `bbq_mix`, which draws ketchup: `ketchup`.
+##   * D is filled by that second mixer: `bbq_mix`.
+##   * E is the second tank's run, drawn by the vat set to `bbq` for its
+##     raw fluid: `liquid_smoke`.
+##   * F leaves that vat: `bbq`.
 ##
-## **MUSTARD'S THREE ride on row 5, in a chain of their own**, because the
-## third sauce shares no fluid with the first two and needs no tank at all:
+## **MUSTARD'S ONE rides on row 5, in a chain of its own**, because the
+## second sauce shares no fluid with the others but the vinegar it buys:
 ##
-##   crusher -> [G] -> mixer -> [H] -> vat -> [I]
+##   tank -> [G] -> mixer -> [H]
 ##
-##   * G is filled by a CRUSHER, and that is the tightest naming in this
-##     whole fixture: a crusher has exactly two recipes, one of which
-##     (`tomato_paste`) outputs no fluid, so the only thing a crusher can
-##     ever put in a pipe is `mustard_mash`. The run is named by the machine
-##     kind alone, with nothing plumbed to its far end.
-##   * H is filled by the mixer fed only by G. `ketchup_mix` wants vinegar
-##     and `bbq_mix` wants ketchup, neither of which is on any run this
-##     mixer touches, so `mustard_mix` is the only feasible one.
-##   * I leaves the vat fed only by H, and `mustard` is the one vat recipe
-##     that drinks `mustard_mix`.
+##   * G is vinegar again, a second run of it, drawn by a mixer set to
+##     `mustard` — the same kind drinking the same raw for another recipe.
+##   * H is filled by that mixer: `mustard`.
 ##
 ## Row 5 and not row 3: rows 3 and 4 are left EMPTY between the two chains
 ## so neither can reach the other. A pipe joins a pipe, and one tile of
@@ -2192,22 +2175,22 @@ static func build_fluid_gallery(sim) -> String:
 	place(sim, "fluid_tank", Vector2i(0, 0), "east")
 	for x in [1, 2]:
 		place(sim, "pipe", Vector2i(x, 0), "east")
-	place(sim, "mixer", Vector2i(3, 0), "east")  # 1x2: also covers y=1
+	place(sim, "mixer", Vector2i(3, 0), "east", "", "ketchup_mix")  # 1x2: also covers y=1
 
 	# Run B, ketchup mix: off the mixer's outlet face into the first vat.
 	for x in [4, 5]:
 		place(sim, "pipe", Vector2i(x, 0), "east")
-	place(sim, "cooking_vat", Vector2i(6, 0), "east")  # 2x2: also x=7, y=1
+	place(sim, "cooking_vat", Vector2i(6, 0), "east", "", "ketchup")  # 2x2: also x=7, y=1
 
 	# Run C, ketchup: out of that vat and into the second mixer.
 	for x in [8, 9]:
 		place(sim, "pipe", Vector2i(x, 0), "east")
-	place(sim, "mixer", Vector2i(10, 0), "east")
+	place(sim, "mixer", Vector2i(10, 0), "east", "", "bbq_mix")
 
 	# Run D, BBQ mix: into the second vat.
 	for x in [11, 12]:
 		place(sim, "pipe", Vector2i(x, 0), "east")
-	place(sim, "cooking_vat", Vector2i(13, 0), "east")  # 2x2: also x=14, y=1
+	place(sim, "cooking_vat", Vector2i(13, 0), "east", "", "bbq")  # 2x2: also x=14, y=1
 
 	# Run E, liquid smoke. The tank TOUCHES the vat's north-west tile, which
 	# is how a machine taps a network (see `build_reference_line`), and the
@@ -2223,21 +2206,14 @@ static func build_fluid_gallery(sim) -> String:
 		place(sim, "pipe", Vector2i(x, 0), "east")
 
 	# --- mustard's chain, on row 5 (see the doc above) -------------------
-	# Run G, mustard mash: a crusher is the only machine whose every
-	# fluid-making recipe makes this one thing, so nothing else is needed to
-	# name it — no tank, no feed belt, no second machine.
-	place(sim, "crusher", Vector2i(0, 5), "east")
+	# Run G, vinegar into a mixer set to mustard.
+	place(sim, "fluid_tank", Vector2i(0, 5), "east")
 	for x in [1, 2]:
 		place(sim, "pipe", Vector2i(x, 5), "east")
+	place(sim, "mixer", Vector2i(3, 5), "east", "", "mustard")  # 1x2: also covers y=6
 
-	# Run H, mustard mix: the mixer drinks G and can drink nothing else.
-	place(sim, "mixer", Vector2i(3, 5), "east")  # 1x2: also covers y=6
+	# Run H, mustard: the finished sauce, and the brightest body in the frame.
 	for x in [4, 5]:
-		place(sim, "pipe", Vector2i(x, 5), "east")
-
-	# Run I, mustard: the cook, and the brightest body in the frame.
-	place(sim, "cooking_vat", Vector2i(6, 5), "east")  # 2x2: also x=7, y=6
-	for x in [8, 9]:
 		place(sim, "pipe", Vector2i(x, 5), "east")
 
 	fill_fluid_runs(sim)
@@ -2253,27 +2229,25 @@ static func build_fluid_gallery(sim) -> String:
 	return complaint
 
 
-## How many placements `build_fluid_gallery` makes: 18 pipes, 2 tanks,
-## 3 mixers, 3 vats and 1 crusher — 1,239 of the 3000 a new game starts
-## with, of which mustard's chain on row 5 is 423.
-const FLUID_GALLERY_PLACEMENTS := 18 + 2 + 3 + 3 + 1
+## How many placements `build_fluid_gallery` makes: 16 pipes, 3 tanks,
+## 3 mixers and 2 vats.
+const FLUID_GALLERY_PLACEMENTS := 16 + 3 + 3 + 2
 
 ## Every fluid the game has. The gallery's whole claim is that it stands all
 ## of them up at once, so the list it is checked against is written here
 ## once rather than recounted from the layout.
 ##
 ## In LINE ORDER per sauce, which is the order the frame reads left to
-## right: mustard's three brighten where the other two darken
-## (`main.gd`'s `FLUID_TINTS`), and a reviewer comparing the picture to this
-## list should be able to walk both the same way.
+## right, so a reviewer comparing the picture to this list can walk both the
+## same way.
 const FLUID_GALLERY_FLUIDS: PackedStringArray = [
 	"vinegar", "ketchup_mix", "ketchup", "bbq_mix", "liquid_smoke", "bbq",
-	"mustard_mash", "mustard_mix", "mustard",
+	"mustard",
 ]
 
 
-## Asks the simulation whether the gallery is actually a gallery: all nine
-## fluids present, each on a run the sim can NAME (`carries`, not `ambiguous`
+## Asks the simulation whether the gallery is actually a gallery: every
+## fluid present, each on a run the sim can NAME (`carries`, not `ambiguous`
 ## or `unnameable`), each at a pressure whose colour actually shows —
 ## [constant CROSSING_MIN_DRAWN_PRESSURE], not the far lower floor at which
 ## `main.gd` merely creates the body.

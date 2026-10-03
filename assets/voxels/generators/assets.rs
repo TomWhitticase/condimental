@@ -434,6 +434,10 @@ pub const ASSETS: &[Asset] = &[
         build: item_turmeric,
     },
     Asset {
+        name: "item_ground_mustard",
+        build: item_ground_mustard,
+    },
+    Asset {
         name: "item_paste_pail",
         build: item_paste_pail,
     },
@@ -2269,6 +2273,18 @@ pub fn item_turmeric(p: &Palette) -> VoxModel {
 /// UI_UX.md §2b point 12 records, so it is worth not keeping one around.
 pub fn item_paste_pail(p: &Palette) -> VoxModel {
     pail(p, "pail_grey", "liquid_paste", "brass")
+}
+
+/// Ground mustard seed: the crusher's mustard output, riding the belt to the
+/// mixer since mustard stopped being milled wet (2026-10-03). The paste
+/// pail's silhouette, because it is the same crusher handing on the same
+/// kind of bulk intermediate — and a DRY fill, `mustard_gold` in the `matte`
+/// class, because it is flour, not sauce (`palette.ron`'s `bulk_pale` rule;
+/// `a_pail_s_contents_take_the_class_of_the_substance` pins it). Gold in a
+/// grey pail is told apart from red paste in the same pail by hue and by
+/// value at once.
+pub fn item_ground_mustard(p: &Palette) -> VoxModel {
+    pail(p, "pail_grey", "mustard_gold", "brass")
 }
 
 /// The uncooked ketchup mix, between the mixer and the cooking vat (the
@@ -9075,11 +9091,9 @@ mod tests {
     /// claim about each substance; asserted here, a fourth pail has to say
     /// what is in it and why that is wet or dry.
     ///
-    /// The mustard branch is the case that forced the distinction and then
-    /// added no pail at all: its crusher mills the seed WET into a fluid, so
-    /// every bulk mustard stage stands in a pipe as `fluid_pale` tinted by
-    /// `main.gd`, and nothing between the seed tote and the bottle rides a
-    /// belt.
+    /// Mustard is the case that forced the distinction, and since
+    /// 2026-10-03 the dry pail it describes exists: the crusher grinds seed
+    /// to a flour that rides the belt, so its fill is `matte`.
     #[test]
     fn a_pail_s_contents_take_the_class_of_the_substance() {
         let p = palette();
@@ -9101,6 +9115,12 @@ mod tests {
                 item_ketchup_pail(&p),
                 "liquid_ketchup",
                 MaterialClass::Liquid,
+            ),
+            (
+                "item_ground_mustard",
+                item_ground_mustard(&p),
+                "mustard_gold",
+                MaterialClass::Matte,
             ),
         ] {
             let contents = p.idx(colour);

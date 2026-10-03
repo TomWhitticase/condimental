@@ -411,6 +411,7 @@ fn a_command_that_costs_nothing_answers_rather_than_erroring() {
             tile: (40, 40),
             direction: Direction::East,
             item: None,
+            recipe: None,
         },
         PlayerCommand::Remove { tile: (0, 0) },
         PlayerCommand::Rotate { tile: (0, 0) },

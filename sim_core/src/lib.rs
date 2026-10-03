@@ -1047,6 +1047,17 @@ impl SimBridge {
     /// wire is titled; a second title-caser in Rust would be a second thing
     /// to keep in step (`godot_project/CLAUDE.md`'s one rule). Likewise a
     /// step carries `time_ticks` and the panel divides by `TICK_HZ`.
+    /// Every recipe a machine of `kind` can be set to, as a JSON array of
+    /// recipe ids in `data/recipes.ron` order — what the machine's picker
+    /// lists (`PlayerCommand::SetMachineRecipe`). `[]` for a kind no recipe
+    /// runs on.
+    #[func]
+    fn machine_recipes_json(&self, kind: GString) -> GString {
+        let ids = self.world.recipes_for_kind(&kind.to_string());
+        let json = serde_json::to_string(&ids).expect("recipe ids must serialize");
+        GString::from(json.as_str())
+    }
+
     #[func]
     fn cookbook_json(&self) -> GString {
         let cookbook = self.world.cookbook();

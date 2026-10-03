@@ -255,14 +255,13 @@ impl std::error::Error for RecipeLoadError {}
 /// code encodes which recipe comes after which, the file's own ordering
 /// does.
 ///
-/// **That order is a tiebreak, not a sequence, since the BBQ epic.** The
-/// file used to describe exactly one production line, one stage per entry,
-/// and `world.rs` enforced that consecutive entries chained. It now
-/// describes a production *graph* — ketchup and BBQ share a mixer, a
-/// cooking vat, a bottler and a packer — so what the order means is
-/// narrower and sharper: when a machine's current inputs satisfy more than
-/// one of its kind's recipes, **the earlier entry wins**. See
-/// [`Self::for_machine`].
+/// **That order is not a sequence, since the BBQ epic.** The file used to
+/// describe exactly one production line, one stage per entry, and
+/// `world.rs` enforced that consecutive entries chained. It now describes a
+/// production *graph* — the sauces share a mixer, a bottler and a packer —
+/// and since 2026-10-03 the player chooses which recipe each machine runs,
+/// so the order decides nothing in the simulation: it is the order a
+/// machine's picker lists its kind's recipes in. See [`Self::for_machine`].
 #[derive(Debug, Default)]
 pub struct RecipeRegistry {
     recipes: Vec<Recipe>,
@@ -338,10 +337,9 @@ impl RecipeRegistry {
     /// A kind used to name exactly one recipe, and a second was a
     /// construction-time panic. Several are ordinary content since the BBQ
     /// epic: a mixer blends ketchup mix or BBQ mix, a cooking vat cooks
-    /// either, and which one a *placed* machine runs is decided by what is
-    /// in its buffers and its pipes at the moment a craft starts, never by
-    /// the player (`machine.rs`'s `Machine::choose`). This order is the
-    /// tiebreak when more than one is satisfiable.
+    /// either, and which one a *placed* machine runs is the player's
+    /// choice (`PlayerCommand::SetMachineRecipe`, 2026-10-03). This order
+    /// is the order the machine's picker lists them in.
     pub fn for_machine(&self, kind: &str) -> impl Iterator<Item = &Recipe> {
         self.by_machine
             .get(kind)
@@ -502,154 +500,6 @@ mod tests {
         let recipe = registry.get("ketchup_mix").expect("recipe present");
         assert!(recipe.outputs.is_empty());
         assert_eq!(recipe.fluid_outputs, vec![("ketchup_mix".to_string(), 1)]);
-    }
-
-    /// No two recipes on one machine kind take the same set of inputs — in
-    /// fact no two of them share a single input id.
-    ///
-    /// This is what makes `data/recipes.ron`'s file order a tiebreak that
-    /// never actually decides anything, and it is the reason there is no
-    /// player-facing recipe picker. A machine re-picks, every idle tick,
-    /// whichever of its kind's recipes its *current inputs* satisfy
-    /// (`super::machine::Machine::choose`), so the plumbing and the hoppers
-    /// are the picker: a mixer on the vinegar pipe beside a sugar hopper can
-    /// only ever blend ketchup mix, and one on the ketchup pipe beside spice
-    /// and molasses hoppers can only ever blend BBQ mix. Neither can be fed
-    /// the other's ingredients by accident, because no ingredient is in both
-    /// lists.
-    ///
-    /// Break this and the tiebreak starts mattering: two recipes a machine
-    /// could both run means reordering the file silently changes what a
-    /// factory makes, and a player would have no way to ask for the other
-    /// one. If a future sauce genuinely needs two recipes with overlapping
-    /// inputs on one kind, that is the moment the picker has to be designed
-    /// — not the moment to quietly reorder this file.
-    #[test]
-    fn recipes_on_a_kind_take_disjoint_inputs() {
-        let registry = RecipeRegistry::from_ron_str(include_str!("../../../data/recipes.ron"))
-            .expect("data/recipes.ron must parse");
-        let mut kinds: Vec<&str> = registry
-            .ordered()
-            .iter()
-            .map(|r| r.machine.as_str())
-            .collect();
-        kinds.sort_unstable();
-        kinds.dedup();
-        for kind in kinds {
-            let recipes: Vec<&Recipe> = registry.for_machine(kind).collect();
-            for (index, recipe) in recipes.iter().enumerate() {
-                for other in &recipes[index + 1..] {
-                    let inputs = |r: &Recipe| -> Vec<String> {
-                        r.inputs
-                            .iter()
-                            .chain(r.fluid_inputs.iter())
-                            .map(|(id, _)| id.clone())
-                            .collect()
-                    };
-                    let mine = inputs(recipe);
-                    let shared: Vec<String> = inputs(other)
-                        .into_iter()
-                        .filter(|id| mine.contains(id))
-                        .collect();
-                    assert!(
-                        shared.is_empty(),
-                        "'{}' and '{}' both run on the {kind} and both consume {shared:?}. \
-                         Recipes sharing a machine kind must take disjoint inputs, so that \
-                         what a machine is plumbed to *is* which recipe it runs and file \
-                         order never decides anything. See this test's doc comment.",
-                        recipe.id,
-                        other.id
-                    );
-                }
-            }
-        }
-    }
-
-    /// **At most one RAW fluid enters any one machine kind, and at most one
-    /// recipe on that kind drinks it.** A second sauce whose fluid wants into
-    /// a kind that already drinks one has to arrive as a *derived* fluid,
-    /// made a stage earlier by a machine of some other kind.
-    ///
-    /// This is a fence around `World::resolve_network_fluids`, which names a
-    /// pipe run rather than being told what it carries. Step 1 seeds a run
-    /// from every recipe of every kind whose face or footprint touches it,
-    /// with no regard for which recipe that machine is actually running, and
-    /// a run that touches a TANK is then intersected with the raw fluids. So
-    /// two raws drinkable at one kind put two candidates on a tank run that
-    /// nothing downstream can narrow — the run goes `Ambiguous`, every
-    /// machine on it stalls with `AmbiguousPipe`, and `World::tank_fluid`
-    /// returns `None`, which means the tank cannot even be FILLED. That is
-    /// worse than a stall: the player's only lever, `SetTankFluid`, is a
-    /// declaration nothing in the shipped flow issues for them.
-    ///
-    /// Mustard is why this is written down (2026-09-26). It wanted vinegar at
-    /// the mixer, which `ketchup_mix` already drinks, and measuring it on a
-    /// NEW GAME — mustard still behind its gate — showed both failures on the
-    /// shipped ketchup line, because `for_machine` is not gate-aware and the
-    /// resolver sees locked content. Mustard's vinegar went upstream to the
-    /// crusher instead, which drank nothing, and the mixer gets the derived
-    /// `mustard_mash` down a pipe. The bill per box is identical either way;
-    /// only the machine that drinks moved.
-    ///
-    /// Breaking this is a content change that stalls a line the player has
-    /// already built, so it fails here rather than in a playtest. The fix is
-    /// never to relax the fence: it is to derive the fluid a stage earlier,
-    /// or to give the new sauce a kind of its own.
-    #[test]
-    fn at_most_one_raw_fluid_enters_any_machine_kind() {
-        use crate::sim::ingredients::raw_ingredient_ids;
-        use std::collections::BTreeSet;
-
-        let registry = RecipeRegistry::from_ron_str(include_str!("../../../data/recipes.ron"))
-            .expect("data/recipes.ron must parse");
-        let raws: BTreeSet<String> = raw_ingredient_ids(&registry).into_iter().collect();
-        let mut kinds: Vec<&str> = registry
-            .ordered()
-            .iter()
-            .map(|r| r.machine.as_str())
-            .collect();
-        kinds.sort_unstable();
-        kinds.dedup();
-
-        for kind in kinds {
-            // Every recipe on this kind that names a raw fluid, with the raws
-            // it names — in file order, so the message below names the pair a
-            // reader can find.
-            let drinkers: Vec<(&str, BTreeSet<&str>)> = registry
-                .for_machine(kind)
-                .map(|recipe| {
-                    let drunk: BTreeSet<&str> = recipe
-                        .fluid_inputs
-                        .iter()
-                        .map(|(id, _)| id.as_str())
-                        .filter(|id| raws.contains(*id))
-                        .collect();
-                    (recipe.id.as_str(), drunk)
-                })
-                .filter(|(_, drunk)| !drunk.is_empty())
-                .collect();
-
-            if let [(first, first_raws), (second, second_raws), ..] = drinkers.as_slice() {
-                panic!(
-                    "on the {kind}, '{first}' drinks {first_raws:?} and '{second}' drinks \
-                     {second_raws:?} — two recipes on one kind drinking a BOUGHT fluid. A \
-                     tank run touching that kind cannot be narrowed to one fluid, so it \
-                     goes ambiguous and cannot even be filled. Derive the second sauce's \
-                     fluid a stage earlier instead. See this test's doc comment."
-                );
-            }
-
-            let entering: BTreeSet<&str> = drinkers
-                .iter()
-                .flat_map(|(_, drunk)| drunk.iter().copied())
-                .collect();
-            assert!(
-                entering.len() <= 1,
-                "on the {kind}, one recipe drinks {entering:?} — more than one bought fluid \
-                 entering a single kind is the same ambiguity as two recipes doing it. See \
-                 this test's doc comment."
-            );
-        }
     }
 
     /// The reason [`Recipe::display_name`] exists: the presentation layer
