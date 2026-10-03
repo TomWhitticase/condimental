@@ -300,14 +300,11 @@ func _run_checks(main) -> void:
 		_fail("a new game's board must show some padlocked offers, or the padlock checks prove nothing")
 		return
 	if not _card_ids(main).is_empty() or not _active_ids(main).is_empty():
-		_fail("a new game's clipboard should carry no docket, got %s" % str(_card_ids(main)))
+		_fail("a new game's contracts plate should carry no row, got %s" % str(_card_ids(main)))
 		return
 	if not main._contract_empty_label.visible or not main._contract_empty_label.text.contains("press C"):
-		_fail("a new game's empty clipboard should say so and name the key, got visible=%s '%s'" % [
+		_fail("a new game's empty contracts plate should say so and name the key, got visible=%s '%s'" % [
 			str(main._contract_empty_label.visible), main._contract_empty_label.text])
-		return
-	if not main._contract_hint_label.text.contains("C"):
-		_fail("the clipboard should tell the player which key opens the board")
 		return
 	main._update_contract_board()
 	for id in offers:
@@ -629,8 +626,10 @@ func _run_checks(main) -> void:
 		return
 
 	# --- The docket shows the state four ways ------------------------------
-	main._update_contract_panel()
-	for card in main._contract_cards:
+	# The docket is the board's (the YOUR CONTRACTS column) since 2026-10-02;
+	# the plate's compact row reads the same risk level (test_contract_panel).
+	main._update_contract_board()
+	for card in main._board_active_cards:
 		if String(card["status_label"].text) == "":
 			_fail("docket '%s' has no status line" % card["id"])
 			return
@@ -649,7 +648,7 @@ func _run_checks(main) -> void:
 			return
 	# Drive one docket through the states by hand — the card updater is pure
 	# given a contract dictionary, exactly like the risk function.
-	var card0: Dictionary = main._contract_cards[0]
+	var card0: Dictionary = main._board_active_cards[0]
 	var late := base.duplicate()
 	late["id"] = card0["id"]
 	late["name"] = "x"

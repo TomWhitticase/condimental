@@ -1,40 +1,33 @@
-# Headless structural proof of the contract "clipboard" panel (docs/UI_UX.md
-# §5 — "a contract IS a clipboard"), which reskinned the plain money/contract
-# Label into its own diegetic panel with checkbox-style tick marks, and now
-# shows EVERY active contract at once (GAMEPLAY.md §6: several concurrent
-# orders competing for one factory's throughput is the whole design pressure,
-# and it only reaches the player if they are all on screen).
+# Headless structural proof of the contracts plate (docs/UI_UX.md §5) and of
+# the docket cards the C board's YOUR CONTRACTS column draws.
+#
+# Since 2026-10-02 the always-visible plate is a dark plate in the right-hand
+# column, one compact row per signed contract; the full docket (checklist,
+# strikes, cadence, tallies) is the board's. Both halves are proved here,
+# because GAMEPLAY.md §6's design pressure — several concurrent orders
+# competing for one factory — only reaches the player if every order is on
+# screen at once, and the details of each are one key away.
 #
 # Run with:
 #   godot --headless --path godot_project --script test_contract_panel.gd
 #
-# Like test_presentation.gd, this deliberately does NOT claim to verify that
-# the panel *looks* like a clipboard — that needs eyes on
-# scripts/screenshot-scene.sh's output. What it verifies is the structural
-# half:
+# Like test_presentation.gd, this deliberately does NOT claim to verify how
+# the plate LOOKS — that needs eyes on scripts/screenshot-scene.sh's output.
+# What it verifies is the structural half:
 #
-#   * the economy/contract readout lives in its own distinct node
-#     (`ContractPanel`), separate from whatever the general HUD panel above
-#     it contains,
-#   * there is exactly one docket card per contract `economy_snapshot_json`
-#     reports, in the same (priority) order, each named after its contract id,
-#   * every card carries a checkbox per required unit of ITS OWN mix — the
-#     case that broke the old single-contract panel is that all three shipped
-#     contracts ask for the same item, so per-item state cannot be shared,
-#   * a checkbox's visual state (its stylebox override + tick-mark
-#     visibility) actually changes when progress changes — driven directly
-#     through `_set_checkbox_checked`, the same "call the method directly, no
-#     live mouse/window needed" approach test_camera_nav.gd uses,
-#   * money appears ONCE (a single shared counter, GAMEPLAY.md §1) while each
-#     card's countdown is its OWN — verified by driving the real simulation
-#     forward and asserting the cards' countdowns diverge,
-#   * the money figure flashes what just CHANGED it (a purchase is driven
-#     through a real command and the flyout must show a visible, correctly
-#     inked debit), since a balance that only shows its current value hides
-#     every payout that arrived while the player was looking elsewhere,
-#   * and the single-contract case still renders correctly, driven through
-#     `_rebuild_contract_cards` with a one-contract array so the regression
-#     the multi-contract work could plausibly cause is actually covered.
+#   * the plate is its own node (`ContractPanel`), the column's width, and
+#     shows the balance ONCE (a single shared counter, GAMEPLAY.md §1),
+#   * there is exactly one row per contract `economy_snapshot_json` reports,
+#     in the same (priority) order, each named after its contract id and
+#     showing the contract's name, a status, a countdown in seconds and a
+#     draining bar that counts down independently as the sim runs,
+#   * a row's status says its state in a glyph AND a word, from the same
+#     `_contract_risk_for` the docket reads (UI_UX.md §7),
+#   * the docks are mentioned only when full, and in words,
+#   * the money figure flashes what just CHANGED it,
+#   * and on the board, every docket carries a checkbox per required unit of
+#     ITS OWN mix — all the shipped contracts ask for the same item, so
+#     per-item state cannot be shared — whose visual state actually changes.
 extends SceneTree
 
 
@@ -75,10 +68,10 @@ func _initialize() -> void:
 		_fail("expected at least one other HUD panel besides ContractPanel — did the general HUD panel disappear?")
 		return
 
-	# --- One docket per reported contract, in the same order --------------
+	# --- One row per reported contract, in the same order -----------------
 	# Since 2026-09-26 a new game runs no contract and every one is signed;
-	# this proof is about several dockets on one board, so sign every offer
-	# first, through the real command, the way the board menu does
+	# this proof is about several orders at once, so sign every offer first,
+	# through the real command, the way the board menu does
 	# (test_contract_board.gd covers the menu itself).
 	for offer in JSON.parse_string(main.sim.economy_snapshot_json()).get("board", []):
 		if not bool(offer.get("active", false)):
@@ -95,157 +88,121 @@ func _initialize() -> void:
 		_fail("economy_snapshot_json reported %d contract(s) after signing every offer — this test needs the shipped multi-contract data/contracts.ron to prove anything" % contracts.size())
 		return
 	if main._contract_cards.size() != contracts.size():
-		_fail("expected %d docket card(s), found %d" % [contracts.size(), main._contract_cards.size()])
+		_fail("expected %d contract row(s), found %d" % [contracts.size(), main._contract_cards.size()])
+		return
+
+	# The plate is the column's width, so its edges line up with STOCK and
+	# CREW under it — the owner's complaint about the clipboard it replaced.
+	if contract_panel.custom_minimum_size.x != main.STOCK_PANEL_MIN_WIDTH:
+		_fail("the contracts plate should be the column's width (%.0f), is pinned at %.0f" % [
+			main.STOCK_PANEL_MIN_WIDTH, contract_panel.custom_minimum_size.x
+		])
 		return
 
 	for i in range(contracts.size()):
-		var card: Dictionary = main._contract_cards[i]
+		var row: Dictionary = main._contract_cards[i]
 		var contract: Dictionary = contracts[i]
 		var contract_id: String = String(contract["id"])
-		if String(card["id"]) != contract_id:
-			_fail("docket %d is for '%s' but the snapshot's contract %d is '%s' — order must match, it is the scarcity priority" % [
-				i, String(card["id"]), i, contract_id
+		if String(row["id"]) != contract_id:
+			_fail("row %d is for '%s' but the snapshot's contract %d is '%s' — order must match, it is the scarcity priority" % [
+				i, String(row["id"]), i, contract_id
 			])
 			return
-		var panel: PanelContainer = card["panel"]
+		var panel: PanelContainer = row["panel"]
 		if panel.get_parent() != main._contract_cards_box:
-			_fail("docket '%s' is not inside the panel's card list" % contract_id)
+			_fail("row '%s' is not inside the plate's list" % contract_id)
 			return
 		if not String(panel.name).ends_with(contract_id):
-			_fail("docket node '%s' should be named after its contract id '%s'" % [panel.name, contract_id])
+			_fail("row node '%s' should be named after its contract id '%s'" % [panel.name, contract_id])
 			return
-		if String(card["name_label"].text) != String(contract["name"]):
-			_fail("docket '%s' shows the name '%s', expected '%s'" % [
-				contract_id, card["name_label"].text, contract["name"]
+		if String(row["name_label"].text) != String(contract["name"]):
+			_fail("row '%s' shows the name '%s', expected '%s'" % [
+				contract_id, row["name_label"].text, contract["name"]
 			])
 			return
-
-		# --- Checkboxes: one per required unit of THIS contract's mix -----
-		var mix: Array = contract["mix"]
-		if mix.is_empty():
-			_fail("contract '%s' reported an empty mix — nothing to check against" % contract_id)
+		# Only what a glance needs: no checklist and no tallies on the plate.
+		if row.has("rows") or row.has("done_label") or row.has("strike_pips"):
+			_fail("row '%s' carries docket detail — the checklist, tallies and strikes are the C board's" % contract_id)
 			return
-		for pair in mix:
-			var item_id: String = String(pair[0])
-			var required: int = int(pair[1])
-			var row: Dictionary = card["rows"].get(item_id, {})
-			if row.is_empty():
-				_fail("docket '%s' has no checklist row for '%s'" % [contract_id, item_id])
-				return
-			var boxes: Array = row["boxes"]
-			var expected_box_count: int = required if required <= main.CONTRACT_CHECKLIST_MAX_BOXES else 1
-			if boxes.size() != expected_box_count:
-				_fail("docket '%s': expected %d checkbox(es) for '%s' (required=%d), found %d" % [
-					contract_id, expected_box_count, item_id, required, boxes.size()
-				])
-				return
-			for box in boxes:
-				if not (box is Panel):
-					_fail("checklist entries must be Panel nodes (the checkbox squares)")
-					return
+		# The countdown is a DRAINING BAR as well as a figure, and the figure
+		# is in seconds, not ticks — this plate is the player's clock.
+		var countdown_text: String = String(row["countdown_label"].text)
+		if countdown_text == "" or countdown_text.contains("tick"):
+			_fail("row '%s' should show its time left in seconds, got: '%s'" % [contract_id, countdown_text])
+			return
+		if row["countdown_meter"] == null or not row["countdown_meter"].has_meta("fraction"):
+			_fail("row '%s' has no countdown meter driven by _set_meter" % contract_id)
+			return
+		if String(row["status_label"].text) == "":
+			_fail("row '%s' has no status" % contract_id)
+			return
 
-	# Every shipped contract asks for the same item, which is exactly the case
-	# a per-item (rather than per-contract) node dictionary would collapse.
-	# Assert the dockets really do own distinct nodes.
-	var first_boxes: Array = main._contract_cards[0]["rows"].values()[0]["boxes"]
-	var second_boxes: Array = main._contract_cards[1]["rows"].values()[0]["boxes"]
-	if first_boxes[0] == second_boxes[0]:
-		_fail("two dockets share the same checkbox node — per-contract state got collapsed by item id")
-		return
-
-	# --- A checkbox's visual state actually changes -----------------------
-	var box: Panel = first_boxes[0]
-	var mark: Label = box.get_node_or_null("Mark")
-	if mark == null:
-		_fail("checkbox '%s' has no 'Mark' tick-mark child" % box.name)
-		return
-
-	var style_before = box.get_theme_stylebox("panel")
-	main._set_checkbox_checked(box, true)
-	if box.get_theme_stylebox("panel") == style_before:
-		_fail("checking a box did not change its stylebox override")
-		return
-	if not mark.visible:
-		_fail("checking a box did not reveal its tick mark")
-		return
-	if box.get_theme_stylebox("panel") != main._checkbox_style_checked:
-		_fail("a checked box must use the checked stylebox resource")
-		return
-
-	main._set_checkbox_checked(box, false)
-	if box.get_theme_stylebox("panel") != main._checkbox_style_unchecked:
-		_fail("unchecking a box did not restore the unchecked stylebox")
-		return
-	if mark.visible:
-		_fail("unchecking a box did not hide its tick mark")
-		return
-
-	# --- The full update path (economy_snapshot_json -> box state) --------
-	main._update_contract_panel()
-	for card in main._contract_cards:
-		for item_id in card["rows"]:
-			for b in card["rows"][item_id]["boxes"]:
-				if bool(b.get_meta("checked", false)):
-					_fail("with empty docks, no checkbox should read as checked yet")
-					return
-
-	# --- Money once, countdowns per contract ------------------------------
-	var money_labels := _count_money_labels(contract_panel)
+	# --- Money once -------------------------------------------------------
+	var money_labels := _count_money_labels(contract_panel, main._contract_money_label.text)
 	if money_labels != 1:
-		_fail("expected exactly one money readout on the clipboard, found %d — money is a single shared counter (GAMEPLAY.md §1)" % money_labels)
+		_fail("expected exactly one money readout on the plate, found %d — money is a single shared counter (GAMEPLAY.md §1)" % money_labels)
+		return
+	if String(main._contract_money_label.text) != "%d" % int(float(econ.get("money", 0.0))):
+		_fail("the balance should read the wire's money, got '%s'" % main._contract_money_label.text)
 		return
 
-	# Each docket's cadence line must be ITS contract's, not a shared one.
-	# Two contracts MAY share a cadence (since 2026-09-11's growth tier the
-	# shipped board has two at 1500 and two at 2000), so this cannot demand
-	# every line be unique: it checks each card against its own snapshot —
-	# the line is printed in seconds through `_format_remaining`, so the
-	# expectation goes through the same formatter — and that cards on
-	# different cadences print different lines.
-	var cadence_lines: Dictionary = {}
-	for i in range(main._contract_cards.size()):
-		var text := String(main._contract_cards[i]["meta_label"].text)
-		var own_cadence := int(contracts[i].get("cadence_ticks", 0))
-		var expected := "every %s" % main._format_remaining(own_cadence)
-		if text != expected:
-			_fail("docket %d's cadence line is '%s', expected '%s' for its own cadence of %d ticks" % [i, text, expected, own_cadence])
-			return
-		cadence_lines[text] = true
-	var distinct_cadences: Dictionary = {}
-	for c in contracts:
-		distinct_cadences[int(c.get("cadence_ticks", 0))] = true
-	if cadence_lines.size() != distinct_cadences.size():
-		_fail("dockets on different cadences share a cadence line — each contract clocks independently, so its countdown must be its own")
+	# --- A row's status: a glyph and a word for every state ---------------
+	var base := {
+		"id": "x", "name": "x", "payout": 50, "mix": [["boxed_ketchup", 2]],
+		"progress": [["boxed_ketchup", 1]], "satisfied": false,
+		"cadence_ticks": 1000, "next_delivery_tick": 1000, "strikes": 3,
+		"consecutive_misses": 0,
+	}
+	var calm: Dictionary = main._contract_row_state(base, 100)
+	if calm["level"] != "ok" or calm["status_text"] != "1/2":
+		_fail("a calm row reads its tally, got %s" % str(calm))
 		return
-
-	# The countdown is a DRAINING BAR as well as a figure (the UI visualisation
-	# pass), and the figure is in seconds, not in ticks — ticks are an
-	# implementation detail of ARCHITECTURE.md §3.9's fixed timestep and this
-	# panel is the player's clock.
-	for card in main._contract_cards:
-		var countdown_text: String = String(card["countdown_label"].text)
-		if countdown_text.contains("tick"):
-			_fail("the docket countdown still prints ticks: %s" % countdown_text)
-			return
-		if not (countdown_text.ends_with("to go") or countdown_text == "due now"):
-			_fail("the docket countdown should read as a wait, got: %s" % countdown_text)
-			return
-		if card["countdown_meter"] == null or not card["countdown_meter"].has_meta("fraction"):
-			_fail("the docket has no countdown meter driven by _set_meter")
-			return
-		# Every tally carries a glyph as well as its word (UI_UX.md §7).
-		if not String(card["done_label"].text).begins_with("✓"):
-			_fail("the delivered tally should be a glyph and a word, got: %s" % card["done_label"].text)
-			return
-		if not String(card["missed_label"].text).begins_with("✗"):
-			_fail("the missed tally should be a glyph and a word, got: %s" % card["missed_label"].text)
-			return
-		# Never missed, so the warning colour is not spent on it yet.
-		if card["missed_label"].label_settings != main._contract_meta_settings:
-			_fail("a docket that has missed nothing must not carry the warning ink")
-			return
+	if calm["time_text"] != main._format_remaining(900):
+		_fail("a row's time left is `_format_remaining`'s, got '%s'" % calm["time_text"])
+		return
+	var risky: Dictionary = main._contract_row_state(base, 800)
+	if risky["level"] != "risk" or not String(risky["status_text"]).begins_with("⚠"):
+		_fail("an at-risk row carries the warning glyph, got %s" % str(risky))
+		return
+	if risky["due"]:
+		_fail("a fifth of the window left is not yet due, got %s" % str(risky))
+		return
+	if not main._contract_row_state(base, 950)["due"]:
+		_fail("a twentieth of the window left should read as due")
+		return
+	var last := base.duplicate()
+	last["consecutive_misses"] = 2
+	var last_state: Dictionary = main._contract_row_state(last, 100)
+	if last_state["level"] != "last_chance" or not String(last_state["status_text"]).contains("LAST CHANCE"):
+		_fail("one miss from lost reads LAST CHANCE in words, got %s" % str(last_state))
+		return
+	var full := base.duplicate()
+	full["progress"] = [["boxed_ketchup", 2]]
+	full["satisfied"] = true
+	var ready: Dictionary = main._contract_row_state(full, 100)
+	if ready["level"] != "ready" or not String(ready["status_text"]).begins_with("✔"):
+		_fail("a filled row reads READY with its tick, got %s" % str(ready))
+		return
+	var paid: Dictionary = main._contract_row_state(base, 100, true)
+	if not String(paid["status_text"]).contains("PAID"):
+		_fail("a row that just paid reads PAID, got %s" % str(paid))
+		return
+	var due_now: Dictionary = main._contract_row_state(base, 1000)
+	if due_now["time_text"] != "due now":
+		_fail("a row at its check reads 'due now', got '%s'" % due_now["time_text"])
+		return
+	# The row's border takes the state's style.
+	var row0: Dictionary = main._contract_cards[0]
+	main._update_contract_row(row0, last, 100)
+	if row0["panel"].get_theme_stylebox("panel") != main._contract_row_styles["last_chance"]:
+		_fail("a last-chance row should carry the last-chance rule")
+		return
+	if row0["status_label"].label_settings != main._contract_row_status_settings["last_chance"]:
+		_fail("a last-chance row's status should take the warning ink")
+		return
 
 	# Countdowns must actually count DOWN, independently, as the sim runs.
+	main._update_contract_panel()
 	var before: Array = _countdowns(main)
 	for i in range(250):
 		main.sim.tick()
@@ -253,70 +210,22 @@ func _initialize() -> void:
 	var after: Array = _countdowns(main)
 	for i in range(before.size()):
 		if after[i] >= before[i]:
-			_fail("docket %d's countdown did not advance with the simulation (%f -> %f)" % [i, before[i], after[i]])
+			_fail("row %d's countdown did not advance with the simulation (%f -> %f)" % [i, before[i], after[i]])
 			return
 
-	# --- What stands on the docks is surfaced, and tracks real deliveries -
-	if main._contract_dock_row == null:
-		_fail("no on-the-dock readout on the clipboard")
-		return
-	if not main._contract_dock_empty_label.visible:
-		_fail("with nothing delivered, the dock line should read as empty")
-		return
-	# Driven with a stock directly rather than by running a chain to fill one.
-	# Since the "Real Placement" epic a world starts EMPTY and a starting
-	# balance cannot buy the six machines a boxed case needs (see
-	# test_layouts.gd's header), so the honest thing to exercise here is the
-	# readout itself, which is pure given the stock — the docks' own arithmetic
-	# is asserted in `cargo test -p sim_core`.
-	var delivered_item := "boxed_ketchup"
-	main._update_contract_dock([[delivered_item, 3]], 48, false)
-	if main._contract_dock_empty_label.visible:
-		_fail("stock is on the dock but the readout still says empty")
-		return
-	if not main._contract_dock_entries.has(delivered_item):
-		_fail("delivered '%s' but the dock readout has no entry for it" % delivered_item)
-		return
-
-	# --- The docks' ceiling: a figure, a bar, and what the ceiling costs --
-	# A dock holds a bounded number of cases (the dock-capacity change,
-	# 2026-09-16; per dock since 2026-09-26), so the readout says both halves of the fraction
-	# and draws UI_UX.md §5e's bar against the sim's own full mark.
-	var dock_entry: Dictionary = main._contract_dock_entries[delivered_item]
-	if String(dock_entry["label"].text) != "3/48":
-		_fail("the dock line must stand its figure against the docks' ceiling, got: %s" % dock_entry["label"].text)
-		return
-	if not dock_entry["meter"].visible:
-		_fail("a figure with a real ceiling earns a bar (UI_UX.md 5e); the dock's is hidden")
-		return
-	var part_full: float = float(dock_entry["meter"].get_meta("fraction", -1.0))
-	if absf(part_full - 3.0 / 48.0) > 0.001:
-		_fail("the dock bar should read 3 of 48, got fraction %f" % part_full)
-		return
+	# --- The docks: said only when full, and in words ---------------------
 	if main._contract_dock_full_label.visible:
-		_fail("the dock is nowhere near full but the clipboard already says it is")
+		_fail("the docks are empty but the plate already says they are full")
 		return
-
-	main._update_contract_dock([[delivered_item, 48]], 48, true)
-	var brim_full: float = float(dock_entry["meter"].get_meta("fraction", -1.0))
-	if absf(brim_full - 1.0) > 0.001:
-		_fail("at the ceiling the dock bar should read full, got fraction %f" % brim_full)
+	var full_econ: Dictionary = econ.duplicate()
+	full_econ["delivery_full"] = true
+	main._update_contract_panel(full_econ)
+	if not main._contract_dock_full_label.visible or not String(main._contract_dock_full_label.text).contains("FULL"):
+		_fail("full docks must say so in words on the plate (UI_UX.md 7)")
 		return
-	if not main._contract_dock_full_label.visible:
-		_fail("a full dock must say so in words, not only as a filled bar (UI_UX.md 7)")
-		return
-	if not String(main._contract_dock_full_label.text).contains("FULL"):
-		_fail("the full-dock line must say FULL, got: %s" % main._contract_dock_full_label.text)
-		return
-	# Last in the line, after the bars whose consequence it states.
-	var kids: Array = main._contract_dock_row.get_children()
-	if kids[kids.size() - 1] != main._contract_dock_full_label:
-		_fail("the full-dock sentence should follow the bars it explains, not head them")
-		return
-
-	main._update_contract_dock([[delivered_item, 3]], 48, false)
+	main._update_contract_panel()
 	if main._contract_dock_full_label.visible:
-		_fail("the dock emptied below its ceiling but the clipboard still says FULL")
+		_fail("the docks are no longer full but the plate still says FULL")
 		return
 
 	# --- The money figure announces what it just did ----------------------
@@ -324,7 +233,6 @@ func _initialize() -> void:
 	# factory, so a balance that only ever shows its current value hides
 	# every event that changed it. Spending is the half a test can drive
 	# deterministically: buy one belt and the flyout must say so.
-	main._update_contract_panel()
 	if main._contract_money_change.modulate.a > 0.0:
 		_fail("the money flyout is showing with nothing having changed the balance")
 		return
@@ -341,52 +249,169 @@ func _initialize() -> void:
 		_fail("a debit must be inked as a debit, not as a payout")
 		return
 
+	# --- Every line on the plate fits the column, on one line ------------
+	# Measured off the FONT, not the Label (godot_project/CLAUDE.md: a
+	# headless run cannot prove a width): a line wider than the plate either
+	# widens it past STOCK and CREW or, wrapped, draws taller than the plate
+	# was fitted at and pushes a row's status under the list's cut — both
+	# found on PR #235's 1280x720 renders.
+	var short_staffed := {
+		"categories": [{"id": "manufacturing", "wage": 2, "headcount": 8, "owed": 8}],
+		"next_payday_tick": 1700 + 120, "next_bill": 16, "shortfall": 6,
+	}
+	# Through the REAL draw path: `_update_contract_wages` is what puts the
+	# break in, and a test that broke the line itself would pass without it.
+	var saved_staff: Dictionary = main._staff_snapshot
+	main._staff_snapshot = short_staffed
+	main._update_contract_wages(10.0)
+	main._staff_snapshot = saved_staff
+	var wage_lines: String = String(main._contract_wages_label.text)
+	if not main._contract_wages_label.visible or wage_lines.find("\n") < 0:
+		_fail("the wage warning should show, broken at its dash for the plate, got '%s'" % wage_lines)
+		return
+	var lines_to_fit: Array = [
+		[main._contract_empty_label, main._contract_empty_label.text],
+		[main._contract_dock_full_label, main._contract_dock_full_label.text],
+	]
+	for line in wage_lines.split("\n"):
+		lines_to_fit.append([main._contract_wages_label, line])
+	for pair in lines_to_fit:
+		var label: Label = pair[0]
+		var text: String = pair[1]
+		var font: Font = label.label_settings.font if label.label_settings.font != null else label.get_theme_font("font")
+		var width: float = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, label.label_settings.font_size).x
+		if width > main.CONTRACT_PLATE_TEXT_WIDTH:
+			_fail("'%s' is %.0fpx, wider than the plate's %.0fpx inside" % [text, width, main.CONTRACT_PLATE_TEXT_WIDTH])
+			return
+		if label.autowrap_mode != TextServer.AUTOWRAP_OFF:
+			_fail("'%s' autowraps — the plate is fitted by its minimum height, which a wrapping Label misreports" % label.name)
+			return
+
+	# --- A capped list is cut after a whole row, not inside the next ------
+	# `_line_boundary_height` used to prefer a line INSIDE the row the cut
+	# fell in, so with the first row whole and the second's top line fitting
+	# it cut the second row in half. Built against the real rows.
+	main._rebuild_contract_cards(contracts)
+	for i in range(contracts.size()):
+		main._update_contract_row(main._contract_cards[i], contracts[i], main.sim.current_tick())
+	var list_box: VBoxContainer = main._contract_cards_box
+	var first_row: float = (list_box.get_child(0) as Control).get_combined_minimum_size().y
+	var gap: float = float(list_box.get_theme_constant("separation"))
+	var second_first_line: float = main._row_line_boundary(list_box.get_child(1) as Control, INF, true)
+	if first_row <= 0.0 or second_first_line <= 0.0:
+		_fail("the rows report no height headlessly (%.0f, %.0f) — this check proves nothing" % [first_row, second_first_line])
+		return
+	var cap: float = first_row + gap + second_first_line + 1.0
+	var cut: float = main._line_boundary_height(list_box, cap)
+	if absf(cut - first_row) > 0.5:
+		_fail("a cap with the first row whole and only the second's top line under it should cut after the first row (%.0f), cut at %.0f" % [first_row, cut])
+		return
+
+	# --- The list's floor is its first WHOLE row --------------------------
+	# A row's second line is the order's status. Floored at one line, a tight
+	# column (1280x720 with the docks full) showed an order's name and hid
+	# whether it was in trouble (PR #235's review). The absolute line — STOCK
+	# down to one row — still wins over the floor.
+	var floor_hard: float = main._contract_list_hard(INF, 0.0, 0.0)
+	if absf(floor_hard - first_row) > 0.5:
+		_fail("with the column wanting the plate short, it should still stand its first whole row (%.0f), got %.0f" % [first_row, floor_hard])
+		return
+	if main._contract_list_hard(10.0, 0.0, 0.0) != 10.0:
+		_fail("the absolute line must still cap the plate below its floor")
+		return
+	if main._contract_list_hard(INF, first_row * 3.0, 0.0) != first_row * 3.0:
+		_fail("where the column allows more, the plate takes it")
+		return
+
 	# --- The single-contract case still renders --------------------------
-	# The regression this ticket could plausibly cause is the OPPOSITE of the
-	# one it fixes, so drive the builder with a one-contract array directly.
 	var single: Array = [contracts[0]]
 	main._rebuild_contract_cards(single)
 	if main._contract_cards.size() != 1:
-		_fail("a one-contract snapshot must render exactly one docket, got %d" % main._contract_cards.size())
+		_fail("a one-contract snapshot must render exactly one row, got %d" % main._contract_cards.size())
 		return
-	var only_card: Dictionary = main._contract_cards[0]
-	if String(only_card["id"]) != String(contracts[0]["id"]):
-		_fail("the single docket is for the wrong contract")
-		return
-	var only_item: String = String(contracts[0]["mix"][0][0])
-	var only_required: int = int(contracts[0]["mix"][0][1])
-	var only_boxes: Array = only_card["rows"][only_item]["boxes"]
-	var expected_single: int = only_required if only_required <= main.CONTRACT_CHECKLIST_MAX_BOXES else 1
-	if only_boxes.size() != expected_single:
-		_fail("single-contract docket: expected %d checkbox(es), found %d" % [expected_single, only_boxes.size()])
-		return
-	main._update_contract_card(only_card, contracts[0], main.sim.current_tick())
-	if String(only_card["countdown_label"].text) == "":
-		_fail("single-contract docket has no countdown line")
-		return
-	# The checklist names its item the way the rest of the UI names it —
-	# "Boxed Ketchup", not the wire format's `boxed_ketchup`.
-	var only_row_text: String = String(only_card["rows"][only_item]["label"].text)
-	if not only_row_text.begins_with(main._item_display_name(only_item)):
-		_fail("the checklist should name its item, got: %s" % only_row_text)
+	if String(main._contract_cards[0]["id"]) != String(contracts[0]["id"]):
+		_fail("the single row is for the wrong contract")
 		return
 
-	print("CONTRACT_PANEL_OK: ContractPanel is a distinct node with %d docket(s) — one per contract, per-contract checkboxes and draining countdown bars read in seconds, glyph tallies, named items, one shared money readout that flashes what it just did and one shared dock line; the single-contract case still renders" % contracts.size())
+	# --- The board's dockets: one checkbox per unit of THEIR OWN mix ------
+	main._rebuild_board_active_cards(contracts)
+	var dockets: Array = main._board_active_cards
+	if dockets.size() != contracts.size():
+		_fail("expected %d docket(s) on the board, found %d" % [contracts.size(), dockets.size()])
+		return
+	for i in range(contracts.size()):
+		var card: Dictionary = dockets[i]
+		var contract: Dictionary = contracts[i]
+		var contract_id: String = String(contract["id"])
+		main._update_contract_card(card, contract, main.sim.current_tick())
+		var mix: Array = contract["mix"]
+		if mix.is_empty():
+			_fail("contract '%s' reported an empty mix — nothing to check against" % contract_id)
+			return
+		for pair in mix:
+			var item_id: String = String(pair[0])
+			var required: int = int(pair[1])
+			var checklist: Dictionary = card["rows"].get(item_id, {})
+			if checklist.is_empty():
+				_fail("docket '%s' has no checklist row for '%s'" % [contract_id, item_id])
+				return
+			var boxes: Array = checklist["boxes"]
+			var expected_box_count: int = required if required <= main.CONTRACT_CHECKLIST_MAX_BOXES else 1
+			if boxes.size() != expected_box_count:
+				_fail("docket '%s': expected %d checkbox(es) for '%s' (required=%d), found %d" % [
+					contract_id, expected_box_count, item_id, required, boxes.size()
+				])
+				return
+			# The checklist names its item the way the rest of the UI names it.
+			if not String(checklist["label"].text).begins_with(main._item_display_name(item_id)):
+				_fail("the checklist should name its item, got: %s" % checklist["label"].text)
+				return
+		var expected_cadence := "every %s" % main._format_remaining(int(contract.get("cadence_ticks", 0)))
+		if String(card["meta_label"].text) != expected_cadence:
+			_fail("docket '%s' cadence line is '%s', expected '%s'" % [contract_id, card["meta_label"].text, expected_cadence])
+			return
+		if not String(card["done_label"].text).begins_with("✓") or not String(card["missed_label"].text).begins_with("✗"):
+			_fail("the docket's tallies should be a glyph and a word")
+			return
+
+	# Every shipped contract asks for the same item, which is exactly the case
+	# a per-item (rather than per-contract) node dictionary would collapse.
+	var first_boxes: Array = dockets[0]["rows"].values()[0]["boxes"]
+	var second_boxes: Array = dockets[1]["rows"].values()[0]["boxes"]
+	if first_boxes[0] == second_boxes[0]:
+		_fail("two dockets share the same checkbox node — per-contract state got collapsed by item id")
+		return
+
+	var box: Panel = first_boxes[0]
+	var mark: Label = box.get_node_or_null("Mark")
+	if mark == null:
+		_fail("checkbox '%s' has no 'Mark' tick-mark child" % box.name)
+		return
+	main._set_checkbox_checked(box, true)
+	if box.get_theme_stylebox("panel") != main._checkbox_style_checked or not mark.visible:
+		_fail("checking a box must swap in the checked style and reveal its tick")
+		return
+	main._set_checkbox_checked(box, false)
+	if box.get_theme_stylebox("panel") != main._checkbox_style_unchecked or mark.visible:
+		_fail("unchecking a box must restore the unchecked style and hide its tick")
+		return
+
+	print("CONTRACT_PANEL_OK: ContractPanel is a column-width plate with %d row(s) — one per contract in priority order, each a name, a glyph-and-word status from the docket's own risk level, a countdown in seconds and a draining bar; one shared balance that flashes what it just did; full docks said in words; and the board's dockets keep per-contract checkboxes" % contracts.size())
 	quit(0)
 
 
-## Every Label on the clipboard whose text is the money figure. Guards
-## against money creeping onto each docket as contracts multiplied.
-func _count_money_labels(node: Node) -> int:
+## Every Label on the plate whose text is the money figure. Guards against
+## money creeping onto each row as contracts multiplied.
+func _count_money_labels(node: Node, figure: String) -> int:
 	var found := 0
-	if node is Label and String(node.text).begins_with("Money:"):
+	if node is Label and String(node.text) == figure:
 		found += 1
 	for child in node.get_children():
-		found += _count_money_labels(child)
+		found += _count_money_labels(child, figure)
 	return found
 
 
-## How full each docket's countdown bar stands. Read from the meter rather
+## How full each row's countdown bar stands. Read from the meter rather
 ## than parsed back out of a label: the bar IS the countdown now, and a
 ## fraction is the number the panel was actually asked to draw.
 func _countdowns(main) -> Array:
