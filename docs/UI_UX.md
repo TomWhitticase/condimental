@@ -1155,7 +1155,8 @@ photographs of one command (issue #82).
 > same top-right tenant, now a dark plate at the column's width whose list
 > scrolls between compact rows rather than between paper dockets. Two of the
 > rules below changed with it, and each says so where it is stated: the board
-> hint is gone, and when the column cuts the list short the cut ends after the
+> hint is no longer a line the list may spend (the key is in the heading
+> since 2026-10-02, `C: board`, beside the title like STOCK's), and when the column cuts the list short the cut ends after the
 > last WHOLE row above it, falling back to a line inside a row only when not
 > even the first row fits (`_line_boundary_height`); and the list's floor is
 > its first whole row, not its first line, because a row's second line is the
@@ -1260,7 +1261,8 @@ least useful sentence on a clipboard whose every order is signed. Issue #13
 made the same trade against the SHORT-STAFFED strip; the difference now is
 that there is exactly ONE owner of the hint's visibility, so
 `_update_staff_alert` no longer touches it.
-**Superseded 2026-10-02:** the contracts plate has no board hint; the list's
+**Superseded 2026-10-02:** the contracts plate has no board-hint LINE (its
+key sits in the heading, `C: board`, and never yields); the list's
 floor is its first WHOLE row (`_contract_list_hard`), because a row's second
 line is the order's status.
 

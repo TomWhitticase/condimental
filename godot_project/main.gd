@@ -8517,7 +8517,7 @@ func _position_market_panel() -> void:
 		panel_size.x,
 		panel_size.y
 	)
-	for plate in [_money_rect(), _contract_panel_rect(), _stock_rect(), _crew_rect()]:
+	for plate in _corner_plate_rects():
 		if plate.size.x > 0.0 and plate.size.y > 0.0:
 			rect = _pushed_clear_of(rect, plate, bounds.x, lower_bound)
 	_market_panel.position = rect.position
@@ -14722,7 +14722,7 @@ func _position_config_panel() -> void:
 	# a test against its old `y` had decided the clipboard was nowhere near it.
 	pos.y = clampf(pos.y, 8.0, maxf(8.0, 8.0 + _config_panel_available_height(bounds) - size.y))
 	var right_bound := bounds.x
-	for plate in [_money_rect(), _contract_panel_rect(), _stock_rect(), _crew_rect()]:
+	for plate in _corner_plate_rects():
 		if plate.size.y <= 0.0:
 			continue
 		if pos.y < plate.end.y and pos.y + size.y > plate.position.y:
@@ -14800,9 +14800,7 @@ func _config_pos_is_clear(pos: Vector2, size: Vector2, bounds: Vector2) -> bool:
 	if pos.y + size.y > bounds.y - _hotbar_reserved_height():
 		return false
 	var rect := Rect2(pos, size)
-	for plate in [
-		_money_rect(), _contract_panel_rect(), _stock_rect(), _crew_rect(), _legend_rect()
-	]:
+	for plate in _corner_plate_rects() + [_legend_rect()]:
 		if plate.size.y > 0.0 and rect.intersects(plate):
 			return false
 	return true
@@ -19711,7 +19709,7 @@ func _panel_draw_size(panel: Control) -> Vector2:
 ## fixed corner — so the two cannot come to disagree about what a plate is.
 ##
 ## Each plate reports its own CURRENT rect through a helper (`_legend_rect`,
-## `_stock_rect`, `_crew_rect`) rather than being measured here, so a
+## `_money_rect`, `_stock_rect`, `_crew_rect`) rather than being measured here, so a
 ## collapsed legend is avoided at the size it actually is — its stub — and not
 ## at the five-line size it had when the game started.
 func _hud_avoid_rects() -> Array[Rect2]:
@@ -20038,6 +20036,14 @@ func _position_money_panel() -> void:
 		maxf(0.0, _contract_panel.position.x - size.x - CONTRACT_PANEL_MARGIN),
 		_contract_panel.position.y
 	)
+
+
+## Every fixed plate in the top-right corner and down the right-hand column,
+## each at its CURRENT rect: the one list the market, the configuration panel
+## and its clearance check step around, so a plate added to that corner is
+## added to all three at once (`test_hud_plates.gd` asserts its members).
+func _corner_plate_rects() -> Array:
+	return [_money_rect(), _contract_panel_rect(), _stock_rect(), _crew_rect()]
 
 
 ## The BALANCE plate's rect on screen, for the panels that must not land on
