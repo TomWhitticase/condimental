@@ -18,6 +18,16 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-02 **The balance is its own plate; the contracts plate lists
+  soonest due first.** `_build_money_panel` puts the one money figure (and
+  its `+N`/`-N` flyout) on a BALANCE plate level with the contracts plate
+  and one `CONTRACT_PANEL_MARGIN` to its left (`_position_money_panel`); it
+  is on `_hud_avoid_rects` and every plate list a cursor or configuration
+  panel avoids. The contracts plate's heading carries `C: board`. The
+  plate's rows are `_contracts_by_due(contracts)`: by `next_delivery_tick`,
+  ties in wire order. The C board's dockets keep the wire's priority order.
+  Full record in `docs/DECISIONS.md`.
+
 - 2026-10-02 **The contracts readout is a plate, not a clipboard.** The
   always-visible contract readout (`_build_contract_panel`) is a dark plate
   at the top of the right-hand column, at STOCK's width and margin

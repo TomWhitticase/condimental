@@ -494,6 +494,31 @@ func _run_checks() -> void:
 		if crew.position.x < float(window.x) * 0.5:
 			_fail("the CREW plate is not on the right-hand half of the %s window (%s)" % [str(window), str(crew)])
 			return
+		# The BALANCE plate: on screen, level with the contracts plate, and
+		# clear of it and of the CREW plate. Clear of the unfolded legend too,
+		# but that is a WIDTH question a headless run cannot answer — its font
+		# metrics put the legend at 772px where a real window draws 684px
+		# (godot_project/CLAUDE.md) — so the 1280x720 render is the acceptance
+		# for that gap, about 29px.
+		var money: Rect2 = main._money_rect()
+		if money.size.x <= 0.0:
+			_fail("the BALANCE plate has no rect at %s" % str(window))
+			return
+		if money.position.x < 0.0 or money.end.x > float(window.x) + 0.5:
+			_fail("the BALANCE plate runs off the %s window (%s)" % [str(window), str(money)])
+			return
+		if absf(money.position.y - main._contract_panel.get_global_rect().position.y) > 0.5:
+			_fail("the BALANCE plate is not level with the contracts plate at %s" % str(window))
+			return
+		for other in [
+			["the contracts plate", main._contract_panel.get_global_rect()],
+			["the CREW plate", crew],
+		]:
+			if money.intersects(other[1]):
+				_fail("the BALANCE plate lands on %s at %s (balance %s, other %s)" % [
+					String(other[0]), str(window), str(money), str(other[1])
+				])
+				return
 		for other in [
 			["the contracts clipboard", main._contract_panel.get_global_rect(), main._contract_panel.visible],
 			["the stock plate", main._stock_rect(), true],

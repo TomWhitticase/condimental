@@ -466,12 +466,11 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   thing on screen and the one plate in the column that did not line up).
   It is a dark plate like STOCK and CREW under it, at their width and on
   their right edge, with a payout-green rule and heading. The heading line
-  carries the balance — shown once, the plate's largest figure, with what
-  just changed it flashed beside it. It is a bare figure, not `Money: N` as
-  the modals print it: on a plate one column wide the word costs the room the
-  flyout needs, and the one large number under a money-green rule is not
-  mistaken for anything else. Then one row per signed contract, in
-  priority order, two short lines: the first product's icon, the name
+  names its key, `C: board`, the way STOCK's says `M: market` and CREW's
+  `H: hire`. Then one row per signed contract, **soonest due first** (by
+  `next_delivery_tick`, ties in the sim's priority order; the C board keeps
+  priority order, which is the order the docks' stock is allocated in), two
+  short lines: the first product's icon, the name
   (trimmed, never wrapped) and the time left in seconds; then the countdown
   bar draining to the next check, with the status at its end — the tally
   (`1/2`), `⚠ 1/2` at risk, `✔ READY`, `⚠ LAST CHANCE`, `✔ PAID` for a beat —
@@ -479,6 +478,17 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   are FULL, and wages are short, only when they are. Past its share of the
   column the list scrolls, cut between rows. Everything else about an order
   is its docket on the board.
+- **The balance is its own BALANCE plate** (the owner's call, 2026-10-02:
+  move the money out of the contracts plate so it can name its key like the
+  others). A small dark plate with the same green rule, level with the
+  contracts plate's top and one margin to its left: the payout coin's icon
+  and the figure, shown once, the largest type in the corner, with what just
+  changed it (`+240` green, `-70` red) hanging under the plate for a moment.
+  A bare figure, not `Money: N` as the modals print it — the coin says what
+  it counts. Beside the column rather than in it, because the column's height
+  is already shared three ways at 1280x720 while the top edge left of it is
+  empty; its figure's floor is five digits so it fits the ~174px between the
+  unfolded legend and the contracts plate at that size.
 - **Diegetic paper-and-metal widgets**: orders are paper dockets with
   checklists — one printed card per contract (the checkbox's paper tone plus
   a steel hairline, no third colour), carrying the checklist, payout,
