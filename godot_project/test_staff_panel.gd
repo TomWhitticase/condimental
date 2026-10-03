@@ -524,12 +524,12 @@ func _run_checks() -> void:
 		_fail("with nobody hired there is no bill, so the line hides rather than reading 'wages 0'")
 
 	# The wages line owns its ink. It recolours when wages cannot be met, and
-	# every docket footnote reads from `_contract_meta_settings`, so sharing
-	# that object would turn the whole board red on one bad payday.
+	# the plate's other captions read from `_contract_plate_hint_settings`, so
+	# sharing that object would turn the whole plate red on one bad payday.
 	if main._contract_wages_label.label_settings != main._contract_wages_settings:
 		_fail("the wages line draws with its own LabelSettings")
-	if main._contract_wages_settings == main._contract_meta_settings:
-		_fail("the wages line must not share the docket footnote's settings object")
+	if main._contract_wages_settings == main._contract_plate_hint_settings:
+		_fail("the wages line must not share the plate's caption settings object")
 
 	# --- 2c. the AFTER-payday notice, pure, then wired through the same
 	# fading notice a lost contract uses (ticket 4) ----------------------------
@@ -824,11 +824,6 @@ func _run_checks() -> void:
 		_fail("the CREW plate's border does not carry the alarm")
 	if main._crew_row_nodes["manufacturing"]["chip_label"].text.find("HIRE") < 0:
 		_fail("the short row names the heads to hire, got '%s'" % main._crew_row_nodes["manufacturing"]["chip_label"].text)
-	# The board hint is back up beside it: they are on different plates now,
-	# so issue #13's one-hint-at-a-time trade no longer applies.
-	main._update_contract_panel()
-	if not main._contract_hint_label.visible:
-		_fail("the board hint yields to an alarm that is no longer on the clipboard")
 	# The panel's own verdict is the same fact, one sentence, under the heading.
 	if main._staff_summary_label.text.find("\u25b2 2 short") < 0:
 		_fail("the panel leads with its verdict, got '%s'" % main._staff_summary_label.text)

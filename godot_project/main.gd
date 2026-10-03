@@ -1451,22 +1451,16 @@ var _legend_collapsed := false
 ## is decided against where the legend WOULD be, and only the drawing yields.
 var _legend_yielded := false
 
-# --- Contract clipboard (UI_UX.md §5) --------------------------------------
-# The money/contract readout used to be one plain Label folded into the
-# generic dark HUD panel above. It now lives in its own diegetic "clipboard"
-# panel (a distinct node, per that ticket) so ticket A's hover-tooltip work
-# can freely reshape or remove the machine-line panel above without ever
-# touching this one.
-#
-# It shows EVERY active contract, not one. `economy_snapshot_json` reports an
-# array of contracts (each with its own mix, cadence and payout, all drawing
-# on the same docks — see sim_core/src/sim/economy.rs), and
-# GAMEPLAY.md §6's whole design pressure is that several concurrent orders
-# compete for one factory's throughput. That pressure only exists for the
-# player if all of them are actually on screen at once, so the clipboard is
-# now a board of dockets: ONE sheet of paper (the panel, its steel clip bar
-# unchanged) carrying the shared money figure and every dock's stock, then
-# one printed docket card per contract below it.
+# --- Contracts plate (UI_UX.md §5) -----------------------------------------
+# The top of the right-hand column: the balance, and one compact row per
+# signed contract — name, time left, a draining bar, and how the order
+# stands (the tally of this window's ask, or its state in a glyph and a word). A dark plate like STOCK and
+# CREW under it, the same width and the same right edge, because the three
+# are one column of glanceable readouts. Everything else about an order (the
+# checklist per product, strikes, cadence, tallies) is on its docket on the C
+# board, which is where a player goes to READ an order rather than glance at
+# it (the owner's 2026-10-02 call; it was a cream paper clipboard of full
+# dockets until then).
 var _contract_panel: PanelContainer
 var _contract_money_label: Label
 ## The money figure's own flyout: what the balance just DID, held briefly and
@@ -1484,28 +1478,28 @@ var _contract_money_change_until_msec := -MONEY_FLYOUT_FADE_MSEC
 ## The balance the last poll saw. `INF` is the "no poll yet" sentinel — the
 ## first frame must not report the whole starting balance as a payout.
 var _last_money := INF
-## What stands on every dock, added up and shown once above the dockets. It
-## is the player-visible face of the allocation rule: every contract below
-## draws from THIS pile, so three checklists reading "2/2" do not mean three
-## payouts — see `_update_contract_dock`.
-var _contract_dock_row: HBoxContainer
-var _contract_dock_entries: Dictionary = {} # item id -> {"row": HBoxContainer, "label": Label, "meter": Panel}
-var _contract_dock_empty_label: Label
+## The one dock fact the plate keeps: a line that appears only when the docks
+## are FULL, because that is the moment the line behind them stops. What
+## stands on each dock is on the dock's own hover.
 var _contract_dock_full_label: Label
-## Wages, always visible on the clipboard (the quality pass, ticket 4):
-## "wages N / period · payday in Xs", with a shortfall warning appended in
-## words and a glyph when the balance cannot cover the next bill — the same
-## figure the H panel shows, read from `_staff_snapshot` (already polled on
-## its own cadence; see `_poll_staff`) so this label costs no extra poll.
+## Wages, on the plate only when the balance cannot cover the next bill
+## (`_contract_wages_state`); the calm countdown is the CREW plate's. Broken
+## onto its second line at the sentence's own dash, never autowrapped, so the
+## plate's measured height is the height it draws at (see the line itself).
 var _contract_wages_label: Label
 ## The wages line's own ink, so switching it to the warning red cannot bleed
 ## into every docket footnote (they share `_contract_meta_settings`).
 var _contract_wages_settings: LabelSettings
-## One docket card per active contract, in snapshot (= priority) order.
-var _contract_cards: Array = [] # Array[Dictionary], see _build_contract_card
+## One compact row per active contract, in snapshot (= priority) order. The
+## full docket card (`_build_contract_card`) is the C board's.
+var _contract_cards: Array = [] # Array[Dictionary], see _build_contract_row
 var _contract_card_ids: Array = [] # the contract ids _contract_cards was built for
 var _contract_cards_box: VBoxContainer
 var _contract_cards_scroll: ScrollContainer
+var _contract_plate_hint_settings: LabelSettings
+var _contract_row_name_settings: LabelSettings
+var _contract_row_status_settings: Dictionary = {} # risk level -> LabelSettings
+var _contract_row_styles: Dictionary = {} # risk level -> StyleBoxFlat
 var _contract_ink_settings: LabelSettings
 var _contract_name_settings: LabelSettings
 var _contract_meta_settings: LabelSettings
@@ -1551,12 +1545,6 @@ const CONTRACT_METER_INK := Color(0.34, 0.29, 0.20, 1.0)
 const CONTRACT_METER_DUE := Color(0.60, 0.24, 0.16, 1.0)
 ## Under this much of a cadence left, the countdown is drawn as due.
 const CONTRACT_DUE_FRACTION := 0.12
-## The ON THE DOCK line's own bar (the dock-capacity change, 2026-09-16).
-## Narrower than a docket's countdown because several ride one line, one per
-## item on the docks — and it exists at all only because the docks HAVE a
-## ceiling: UI_UX.md §5e draws a bar exactly where the simulation defines the
-## full mark. Each item is drawn against every dock's places added up.
-const CONTRACT_DOCK_METER_WIDTH := 38.0 * UI_SCALE
 
 # --- UI scale (the 2026-09-09 tuning pass) ---------------------------------
 ## **Every pixel dimension in this HUD is measured in these two numbers.**
@@ -1707,11 +1695,34 @@ const STOCK_ICON_SIZE := Vector2(28, 28) * UI_SCALE
 ## below it and from the clipboard above it. One number, so the three gaps
 ## cannot drift apart.
 const STOCK_PANEL_MARGIN := 16.0 * UI_SCALE
-## The clipboard's inset from the top and right edges of the window, the one
-## number `_stock_ceiling_y` is measured against to decide how tall the
-## clipboard may grow. NOT `UI_SCALE`d: it is the offset handed to
-## `PRESET_TOP_RIGHT`, which is in window pixels.
-const CONTRACT_PANEL_MARGIN := 16
+## The contracts plate's inset from the top and right edges of the window.
+## The STOCK and CREW plates' own margin, so the three right edges are one
+## line down the column.
+const CONTRACT_PANEL_MARGIN := STOCK_PANEL_MARGIN
+## The contracts plate's rule and heading: the payout green, so the three
+## plates in the column are told apart by colour AND by their headings —
+## STOCK's hazard gold, CREW's blue, CONTRACTS' money.
+const CONTRACT_PLATE_ACCENT := Color(0.55, 0.80, 0.42, 0.95)
+## The balance figure's ink: the plate's brightest text, a warm white.
+const CONTRACT_MONEY_COLOR := Color(0.98, 0.95, 0.86)
+## The width a pinned, wrapping line on the plate gets: the plate's inside.
+const CONTRACT_PLATE_TEXT_WIDTH := STOCK_PANEL_MIN_WIDTH - 20.0 * UI_SCALE
+## A contract row's ground: a step up from the plate, so the rows read as
+## items in a list without a border of their own.
+const CONTRACT_ROW_BG := Color(0.12, 0.12, 0.14, 0.95)
+## A row's countdown bar: a caption on the row, not its subject, so much
+## thinner than a panel meter.
+const CONTRACT_ROW_METER_HEIGHT := 6.0 * UI_SCALE
+## A row's state colour, keyed by `_contract_risk_for`'s level: the row's
+## left rule and its status word. Never the only signal — the word and its
+## glyph say the same thing (UI_UX.md §7). At-risk and last-chance share the
+## red and are told apart by their words, as on the docket.
+const CONTRACT_ROW_STATUS_COLORS := {
+	"ok": Color(0.66, 0.68, 0.72),
+	"ready": Color(0.55, 0.80, 0.42),
+	"risk": Color(0.90, 0.40, 0.32),
+	"last_chance": Color(0.90, 0.40, 0.32),
+}
 ## Wide enough that the longest shipped display name and a four-digit count
 ## sit on one row without the name eliding. Bought stock reaches four digits
 ## (`--payout`'s fixture buys a thousand vinegar), and a plate that resized
@@ -1940,8 +1951,8 @@ var _market_open := false
 # It is a dark-plate MENU (opened on C, centred above the hotbar like the
 # build menu and the market) whose rows are paper dockets: the plate is menu
 # chrome, an offer is an order, and UI_UX.md §5 reserves the paper for
-# exactly that. It is a menu rather than a section of the clipboard because
-# the clipboard is what is RUNNING and this is what is FOR SALE; putting a
+# exactly that. It is a menu rather than a section of the contracts plate
+# because the plate is what is RUNNING and this is what is FOR SALE; putting a
 # SIGN button on the board of running orders would make every docket look
 # like a thing to click.
 #
@@ -1959,8 +1970,8 @@ var _board_rows: Array = [] # Array[Dictionary], see _build_contract_board_row
 var _board_row_ids: Array = []
 var _board_open := false
 ## The left column: the active contracts' dockets, one per entry of
-## `economy_snapshot_json`'s `contracts`, in the same order the clipboard
-## shows them. Records are `_build_contract_card`'s.
+## `economy_snapshot_json`'s `contracts`, in the same order the contracts
+## plate shows them. Records are `_build_contract_card`'s.
 var _board_active_scroll: ScrollContainer
 var _board_active_box: VBoxContainer
 var _board_active_cards: Array = []
@@ -2214,7 +2225,6 @@ var _contract_card_style_locked: StyleBoxFlat
 var _contract_warn_settings: LabelSettings
 var _contract_ready_settings: LabelSettings
 var _contract_empty_label: Label
-var _contract_hint_label: Label
 var _strike_style_empty: StyleBoxFlat
 var _strike_style_struck: StyleBoxFlat
 ## How many units one click buys. TEN, not one: the crusher eats four
@@ -6173,50 +6183,224 @@ func _legend_rect() -> Rect2:
 	return Rect2(_legend_panel.global_position, size)
 
 
-## The diegetic clipboard/checklist widget (UI_UX.md §5) — the money/contract
-## readout as "a paper texture on a metal clipboard clip" rather than a plain
-## Label. Deliberately its own PanelContainer, sibling to (not nested inside)
-## the generic HUD panel above, so this stays intact regardless of what other
-## panels come and go there.
+## The contracts plate: the balance, and one compact row per signed contract
+## (UI_UX.md §5). The top of the right-hand column, above STOCK and CREW, in
+## their dark plate and at their width, so the column reads as one set of
+## readouts and its right edge is one line.
 ##
-## LAYOUT DECISION (contracts-as-data, ticket 2). `economy_snapshot_json`
-## reports an ARRAY of contracts, so this is a board of dockets, not a
-## clipboard per contract: one sheet of paper under one steel clip, carrying
-## the SHARED money figure and the SHARED dock stock once at the top, then one
-## printed docket card per contract stacked below. Both alternatives were
-## considered and rejected — a separate PanelContainer per contract repeats
-## the 12px clip bar and the paper frame three times over for no new
-## information, and a single flat list of checklist rows loses which rows
-## belong to which order the moment two contracts want the same item (all
-## three shipped contracts want `boxed_ketchup`). A docket is a slightly
-## darker paper tone with a steel hairline — the same two colours the panel
-## and its checkboxes already use, so this adds separation without adding a
-## visual language.
+## WHAT IS ON IT, AND WHAT IS NOT (the owner's 2026-10-02 call). A row is
+## what a glance needs to decide whether to act: which order, how much of
+## this window's ask is in, whether it is in danger (a glyph and
+## a word, never colour alone — UI_UX.md §7), and how long is left, as a
+## draining bar and in seconds. The payout, the per-product checklist, strikes, cadence
+## and done/missed tallies are the order's DOCKET, and the docket lives on
+## the C board's YOUR CONTRACTS column (`_build_contract_card`), built and
+## driven by the same code it always was. The plate used to carry all of it
+## on cream paper, which made it the widest thing on screen and the only
+## readout in the column that did not line up with the others.
+##
+## The docket styles and inks are still built HERE, because this runs before
+## the board is built and the board's cards are drawn with them.
 func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
-	# Paper cream background + a thick steel-toned top border standing in for
-	# "the clip" — the same technique the panel above already uses for its
-	# hazard-yellow accent rule, just recoloured and thickened. UI_UX.md §5
-	# only asks for "even just a contrasting-coloured strip along one edge,"
-	# so nothing fancier (a drawn clasp, a texture) is warranted yet.
-	var paper_style := StyleBoxFlat.new()
-	paper_style.bg_color = Color(0.87, 0.81, 0.64, 0.98) # warm off-white paper
-	paper_style.border_color = Color(0.27, 0.29, 0.32, 1.0) # steel-grey frame/clip
-	paper_style.border_width_left = _ui_i(3)
-	paper_style.border_width_right = _ui_i(3)
-	paper_style.border_width_bottom = _ui_i(3)
-	paper_style.border_width_top = _ui_i(12) # the clip bar
-	paper_style.set_content_margin_all(_ui_px(10.0))
-	paper_style.content_margin_top = _ui_px(15.0) # clearance under the thicker clip bar
+	_build_docket_styles()
+
+	var plate := StyleBoxFlat.new()
+	plate.bg_color = Color(0.06, 0.06, 0.07, 0.93)
+	plate.border_color = CONTRACT_PLATE_ACCENT
+	plate.border_width_top = _ui_i(3)
+	plate.set_content_margin_all(_ui_px(10.0))
 
 	_contract_panel = PanelContainer.new()
 	_contract_panel.name = "ContractPanel"
-	_contract_panel.add_theme_stylebox_override("panel", paper_style)
+	_contract_panel.add_theme_stylebox_override("panel", plate)
+	_contract_panel.custom_minimum_size.x = STOCK_PANEL_MIN_WIDTH
 	hud.add_child(_contract_panel)
 
 	var body := VBoxContainer.new()
+	body.name = "ContractBody"
 	body.add_theme_constant_override("separation", _ui_i(6))
 	_contract_panel.add_child(body)
 
+	var heading_settings := LabelSettings.new()
+	heading_settings.font_size = _ui_font(-1)
+	heading_settings.font_color = CONTRACT_PLATE_ACCENT
+	heading_settings.outline_size = base_settings.outline_size
+	heading_settings.outline_color = base_settings.outline_color
+
+	_contract_plate_hint_settings = LabelSettings.new()
+	_contract_plate_hint_settings.font_size = _ui_font(-2)
+	_contract_plate_hint_settings.font_color = STOCK_NONE_COLOR
+	_contract_plate_hint_settings.outline_size = base_settings.outline_size
+	_contract_plate_hint_settings.outline_color = base_settings.outline_color
+
+	# Heading and balance share one line: this column's scarce axis is
+	# height, and every line the chrome spends is a contract row the plate
+	# cannot show. The key to the board is the legend's (`C: contracts`) and
+	# the empty plate's own sentence.
+	var head_row := HBoxContainer.new()
+	head_row.name = "ContractHeadRow"
+	head_row.add_theme_constant_override("separation", _ui_i(12))
+	body.add_child(head_row)
+
+	var title := Label.new()
+	title.name = "ContractHeading"
+	title.label_settings = heading_settings
+	title.text = "CONTRACTS"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	head_row.add_child(title)
+
+	# The balance, the largest type on the plate. Money is shown ONCE, here,
+	# and never per row: GAMEPLAY.md §1 allows exactly one currency, and
+	# sim_core keeps exactly one counter.
+	var money_settings := LabelSettings.new()
+	money_settings.font_size = _ui_font(3)
+	money_settings.font_color = CONTRACT_MONEY_COLOR
+	money_settings.outline_size = base_settings.outline_size
+	money_settings.outline_color = base_settings.outline_color
+
+	_contract_money_label = Label.new()
+	_contract_money_label.name = "Money"
+	_contract_money_label.label_settings = money_settings
+	_contract_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_contract_money_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	head_row.add_child(_contract_money_label)
+
+	# What the balance just did, beside the balance itself: `+240` in green for
+	# money in, `-70` in red for money out. A contract settles on its own clock
+	# while the player is looking at their factory, and this is that event,
+	# drawn where the figure it changed lives.
+	#
+	# A CHILD of the money label, parked to its LEFT on the heading's slack
+	# (`_update_money_flyout`) rather than under it: under it is the first
+	# contract row, and a reserved line would be blank nearly all the time.
+	_contract_gain_settings = LabelSettings.new()
+	_contract_gain_settings.font_size = _ui_font(-1)
+	_contract_gain_settings.font_color = METER_FILL_LEVEL
+	_contract_gain_settings.outline_size = base_settings.outline_size
+	_contract_gain_settings.outline_color = base_settings.outline_color
+	_contract_spend_settings = _contract_gain_settings.duplicate()
+	_contract_spend_settings.font_color = METER_FILL_WARN
+
+	_contract_money_change = Label.new()
+	_contract_money_change.name = "MoneyChange"
+	_contract_money_change.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_contract_money_change.label_settings = _contract_gain_settings
+	_contract_money_change.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_contract_money_change.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_contract_money_change.modulate = Color(1, 1, 1, 0)
+	_contract_money_label.add_child(_contract_money_change)
+
+	# The rows. They scroll past the height `_update_contract_panel` gives
+	# them, which with a row per order takes a long board to reach.
+	_contract_cards_scroll = ScrollContainer.new()
+	_contract_cards_scroll.name = "ContractList"
+	_contract_cards_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_contract_cards_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	body.add_child(_contract_cards_scroll)
+
+	_contract_cards_box = VBoxContainer.new()
+	_contract_cards_box.name = "ContractCards"
+	_contract_cards_box.add_theme_constant_override("separation", _ui_i(4))
+	_contract_cards_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_contract_cards_scroll.add_child(_contract_cards_box)
+
+	_contract_row_name_settings = LabelSettings.new()
+	_contract_row_name_settings.font_size = _ui_font(-1)
+	_contract_row_name_settings.font_color = STOCK_COUNT_COLOR
+	_contract_row_name_settings.outline_size = base_settings.outline_size
+	_contract_row_name_settings.outline_color = base_settings.outline_color
+	_contract_row_status_settings = {}
+	for level in CONTRACT_ROW_STATUS_COLORS:
+		var status_settings: LabelSettings = _contract_plate_hint_settings.duplicate()
+		status_settings.font_color = CONTRACT_ROW_STATUS_COLORS[level]
+		_contract_row_status_settings[level] = status_settings
+	_contract_row_styles = {}
+	for level in CONTRACT_ROW_STATUS_COLORS:
+		var row_style := StyleBoxFlat.new()
+		row_style.bg_color = CONTRACT_ROW_BG
+		row_style.border_color = CONTRACT_ROW_STATUS_COLORS[level]
+		row_style.border_width_left = _ui_i(3)
+		row_style.content_margin_left = _ui_px(8.0)
+		row_style.content_margin_right = _ui_px(6.0)
+		row_style.content_margin_top = _ui_px(3.0)
+		row_style.content_margin_bottom = _ui_px(4.0)
+		_contract_row_styles[level] = row_style
+
+	# A plate with nothing running says so, and says what to do about it — a
+	# player who loses their only contract has no income and no row, and a
+	# money figure over nothing would not tell them why.
+	_contract_empty_label = Label.new()
+	_contract_empty_label.name = "NoContracts"
+	_contract_empty_label.label_settings = _contract_plate_hint_settings
+	_contract_empty_label.text = "none signed — press C"
+	_contract_empty_label.visible = false
+	body.add_child(_contract_empty_label)
+
+	# The docks, said only when they are FULL: that is when the line behind
+	# them stops, and a bar or a count would be one more figure to read on
+	# every other frame (UI_UX.md §7, §5e).
+	var full_settings: LabelSettings = _contract_plate_hint_settings.duplicate()
+	full_settings.font_color = METER_FILL_WARN
+	_contract_dock_full_label = Label.new()
+	_contract_dock_full_label.name = "DockFull"
+	_contract_dock_full_label.label_settings = full_settings
+	# ONE line, and short enough to stay one at the plate's width: a line that
+	# wrapped here was measured at one line and drawn at two, which pushed the
+	# first row's status under the list's cut (PR #235's review).
+	_contract_dock_full_label.text = "⚠ DOCKS FULL — line backing up"
+	_contract_dock_full_label.visible = false
+	body.add_child(_contract_dock_full_label)
+
+	# Wages, only when the balance cannot cover the next bill (the quality
+	# pass, ticket 4 — GAMEPLAY.md §5's third cost axis has to be as visible as
+	# the money it draws from). Its own settings object, recoloured in place.
+	_contract_wages_label = Label.new()
+	_contract_wages_label.name = "WagesLabel"
+	_contract_wages_settings = _contract_plate_hint_settings.duplicate()
+	_contract_wages_label.label_settings = _contract_wages_settings
+	# The shortfall sentence is longer than the plate is wide, so
+	# `_update_contract_wages` breaks it at its own dash rather than
+	# autowrapping it: a wrapping Label's minimum height is shaped at whatever
+	# width it was last drawn at, and this plate is fitted by its minimum
+	# (godot_project/CLAUDE.md's autowrap rule).
+	body.add_child(_contract_wages_label)
+
+	# One row per active contract, read live from economy_snapshot_json rather
+	# than assumed — nothing here hardcodes how many contracts exist, what they
+	# ask for, or what they pay.
+	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
+	_rebuild_contract_cards(econ.get("contracts", []))
+	_known_active_contract_ids.clear()
+	_known_active_primed = false
+	_known_open_unlock_ids.clear()
+	_known_unlocks_primed = false
+
+	# The announcement line: a lone outlined label along the top edge, in the
+	# HUD's own hazard accent, that the plate's poll fills when a contract
+	# is signed or lost. In the HUD layer, not the panel, so it can sit over
+	# the middle of the screen where a player mid-build is looking.
+	var notice_settings := LabelSettings.new()
+	notice_settings.font_size = _ui_font(3)
+	notice_settings.font_color = Color(0.98, 0.85, 0.42)
+	notice_settings.outline_size = _ui_i(6)
+	notice_settings.outline_color = Color(0, 0, 0, 0.9)
+	_contract_notice = Label.new()
+	_contract_notice.name = "ContractNotice"
+	_contract_notice.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_contract_notice.label_settings = notice_settings
+	_contract_notice.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_contract_notice.modulate = Color(1, 1, 1, 0)
+	hud.add_child(_contract_notice)
+
+	_position_contract_panel()
+
+
+## The paper docket's inks and styles: the C board's YOUR CONTRACTS column
+## and its offers are drawn with these (`_build_contract_card`,
+## `_build_contract_board_row`). Built with the contracts plate because that
+## runs first; the plate itself uses none of them.
+func _build_docket_styles() -> void:
 	# Dark ink on paper, not the pale-text-with-black-outline style the panel
 	# above uses — that styling exists specifically to stay legible over a
 	# lit 3D scene, which doesn't apply once text sits on an opaque paper
@@ -6227,25 +6411,6 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_ink_settings.font_size = _ui_font()
 	_contract_ink_settings.font_color = Color(0.16, 0.13, 0.08)
 	_contract_ink_settings.outline_size = 0
-
-	# A small type-scale hierarchy on the clipboard, added during the visual-
-	# overhaul pass: the title and the money figure used to share the exact
-	# body text size, so nothing on the panel told the eye what mattered most
-	# — a real UI_UX.md §5 polish gap ("typography/readability issues"), not
-	# just an aesthetic nicety. Same ink colour and family throughout, only
-	# size steps up, so it still reads as one consistent clipboard rather
-	# than mixed styles. With several dockets on the board the hierarchy has
-	# one more rung: a contract's NAME is the heading of its own docket, and
-	# its cadence/tally line is deliberately the smallest thing on the panel.
-	var title_settings := LabelSettings.new()
-	title_settings.font_size = _ui_font(2)
-	title_settings.font_color = _contract_ink_settings.font_color
-	title_settings.outline_size = 0
-
-	var money_settings := LabelSettings.new()
-	money_settings.font_size = _ui_font(6)
-	money_settings.font_color = _contract_ink_settings.font_color
-	money_settings.outline_size = 0
 
 	_contract_name_settings = LabelSettings.new()
 	_contract_name_settings.font_size = _ui_font(1)
@@ -6275,117 +6440,6 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_missed_settings.font_size = _contract_meta_settings.font_size
 	_contract_missed_settings.font_color = CONTRACT_METER_DUE
 	_contract_missed_settings.outline_size = 0
-
-	# The flyout's two inks: the checkbox's own "done" green for money coming
-	# in, the docket's warning red for money going out. The sign in front of
-	# the figure says which either way (UI_UX.md §7).
-	_contract_gain_settings = LabelSettings.new()
-	_contract_gain_settings.font_size = _ui_font(1)
-	_contract_gain_settings.font_color = Color(0.20, 0.40, 0.20)
-	_contract_gain_settings.outline_size = 0
-
-	_contract_spend_settings = LabelSettings.new()
-	_contract_spend_settings.font_size = _ui_font(1)
-	_contract_spend_settings.font_color = CONTRACT_METER_DUE
-	_contract_spend_settings.outline_size = 0
-
-	# Heading and balance share one row (the same tightening the build menu
-	# and the market got in the 2026-09-09 UI-scale pass, so all three panels
-	# read the same way). At half again the type size, two short strings on
-	# two lines was a whole docket's worth of the board's height.
-	var heading := HBoxContainer.new()
-	heading.add_theme_constant_override("separation", _ui_i(12))
-	body.add_child(heading)
-
-	var title := Label.new()
-	title.label_settings = title_settings
-	title.text = "CONTRACTS"
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	heading.add_child(title)
-
-	# Money is shown ONCE, here, and never per docket: GAMEPLAY.md §1 allows
-	# exactly one currency, and sim_core keeps exactly one counter for it.
-	_contract_money_label = Label.new()
-	_contract_money_label.label_settings = money_settings
-	_contract_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	heading.add_child(_contract_money_label)
-
-	# What the balance just did, under the balance itself. A contract settles
-	# on its own clock while the player is looking at their factory, so the
-	# only evidence a payout happened was a number that had quietly changed by
-	# the next time they looked at it. This is that event, drawn where the
-	# figure it changed lives.
-	#
-	# It is a CHILD of the money label rather than another row of the heading,
-	# positioned in `_update_contract_panel` once the label has a size: a row
-	# reserved for something that is blank most of the time would cost the
-	# board a docket's worth of height at the 1600x900 window UI_UX.md §5c
-	# measures against.
-	_contract_money_change = Label.new()
-	_contract_money_change.name = "MoneyChange"
-	_contract_money_change.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_contract_money_change.label_settings = _contract_gain_settings
-	_contract_money_change.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_contract_money_change.modulate = Color(1, 1, 1, 0)
-	_contract_money_label.add_child(_contract_money_change)
-
-	# What stands on every dock, also once. See _update_contract_dock for why
-	# this line exists at all.
-	_contract_dock_row = HBoxContainer.new()
-	_contract_dock_row.name = "DockRow"
-	_contract_dock_row.add_theme_constant_override("separation", _ui_i(6))
-	body.add_child(_contract_dock_row)
-
-	var dock_title := Label.new()
-	dock_title.label_settings = _contract_meta_settings
-	dock_title.text = "ON THE DOCK"
-	_contract_dock_row.add_child(dock_title)
-
-	_contract_dock_empty_label = Label.new()
-	_contract_dock_empty_label.label_settings = _contract_meta_settings
-	_contract_dock_empty_label.text = "empty"
-	_contract_dock_row.add_child(_contract_dock_empty_label)
-
-	# ...and its opposite. The bar beside each item already says how close
-	# the pool is to its ceiling; this says what being AT it means, in words,
-	# because a bar reading full is a fact and "the line behind it has
-	# stopped" is the consequence (UI_UX.md §7, §5e). Its own settings
-	# object, duplicated rather than shared, for the wage line's reason: it
-	# carries the docket's warning red and every other meta line must not.
-	var full_settings: LabelSettings = _contract_meta_settings.duplicate()
-	full_settings.font_color = CONTRACT_METER_DUE
-	_contract_dock_full_label = Label.new()
-	_contract_dock_full_label.label_settings = full_settings
-	_contract_dock_full_label.text = "⚠ FULL — the belt is backing up"
-	_contract_dock_full_label.visible = false
-	_contract_dock_row.add_child(_contract_dock_full_label)
-
-	# Wages, on the always-visible clipboard rather than only inside the H
-	# panel (the quality pass, ticket 4 — GAMEPLAY.md §5's third cost axis
-	# has to be as visible as the money it draws from). Ink by default,
-	# switched to the docket's own warning red when short of the next bill.
-	# Its OWN settings object, duplicated from the meta ink rather than shared:
-	# the line recolours when wages cannot be met, and every docket's footnote
-	# reads from `_contract_meta_settings`, so recolouring the shared one would
-	# turn the whole board red.
-	_contract_wages_label = Label.new()
-	_contract_wages_label.name = "WagesLabel"
-	_contract_wages_settings = LabelSettings.new()
-	_contract_wages_settings.font_size = _contract_meta_settings.font_size
-	_contract_wages_settings.outline_size = 0
-	_contract_wages_label.label_settings = _contract_wages_settings
-	body.add_child(_contract_wages_label)
-
-	# SHORT-STAFFED used to be a two-line strip HERE, under the wage bill.
-	# The CREW plate took both jobs on 2026-09-16: it names the short
-	# categories and the heads to hire permanently, in warning red, on this
-	# same edge — so the strip was saying a second time what the plate says
-	# always, and its two lines were the difference between the right-hand
-	# column fitting at 1280x720 and the plate below it overlapping the one
-	# below that. The alarm did not go away; it moved to the plate that is
-	# about crew (`_update_staff_alert`), and the clipboard went back to
-	# being about contracts and money.
 
 	_checkbox_style_unchecked = StyleBoxFlat.new()
 	_checkbox_style_unchecked.bg_color = Color(0.80, 0.74, 0.57, 1.0) # a shade darker than the paper
@@ -6451,79 +6505,11 @@ func _build_contract_panel(hud: CanvasLayer, base_settings: LabelSettings) -> vo
 	_contract_card_style_locked.bg_color = Color(0.64, 0.62, 0.56, 1.0)
 	_contract_card_style_locked.border_color = Color(0.42, 0.41, 0.38, 1.0)
 
-	# The dockets live in a ScrollContainer whose height is capped in
-	# _update_contract_panel — a safety valve for a future contracts.ron with
-	# more orders than fit, not a UI the player is expected to drive today.
-	_contract_cards_scroll = ScrollContainer.new()
-	_contract_cards_scroll.name = "ContractList"
-	_contract_cards_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_contract_cards_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	body.add_child(_contract_cards_scroll)
 
-	_contract_cards_box = VBoxContainer.new()
-	_contract_cards_box.name = "ContractCards"
-	_contract_cards_box.add_theme_constant_override("separation", _ui_i(5))
-	_contract_cards_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_contract_cards_scroll.add_child(_contract_cards_box)
-
-	# A board with nothing running says so in a sentence, and says what to do
-	# about it. Since the contract-board epic that is a reachable state — a
-	# player who loses their only contract has no income and no docket, and
-	# an empty paper with a money figure on it would not tell them why.
-	_contract_empty_label = Label.new()
-	_contract_empty_label.name = "NoContracts"
-	_contract_empty_label.label_settings = _contract_ink_settings
-	_contract_empty_label.text = "no contracts — press C to sign one"
-	_contract_empty_label.visible = false
-	body.add_child(_contract_empty_label)
-
-	# And the way to the board is printed on the clipboard itself, because the
-	# clipboard is where a player looks when they want more orders.
-	_contract_hint_label = Label.new()
-	_contract_hint_label.name = "BoardHint"
-	_contract_hint_label.label_settings = _contract_meta_settings
-	_contract_hint_label.text = "C: contracts board — sign more orders"
-	body.add_child(_contract_hint_label)
-
-	# One docket per active contract, read live from economy_snapshot_json
-	# rather than assumed — nothing here hardcodes how many contracts exist,
-	# what they ask for, or what they pay.
-	var econ: Dictionary = JSON.parse_string(sim.economy_snapshot_json())
-	_rebuild_contract_cards(econ.get("contracts", []))
-	_known_active_contract_ids.clear()
-	_known_active_primed = false
-	_known_open_unlock_ids.clear()
-	_known_unlocks_primed = false
-
-	# The announcement line: a lone outlined label along the top edge, in the
-	# HUD's own hazard accent, that the clipboard's poll fills when a contract
-	# is signed or lost. In the HUD layer, not the panel, so it can sit over
-	# the middle of the screen where a player mid-build is looking.
-	var notice_settings := LabelSettings.new()
-	notice_settings.font_size = _ui_font(3)
-	notice_settings.font_color = Color(0.98, 0.85, 0.42)
-	notice_settings.outline_size = _ui_i(6)
-	notice_settings.outline_color = Color(0, 0, 0, 0.9)
-	_contract_notice = Label.new()
-	_contract_notice.name = "ContractNotice"
-	_contract_notice.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_contract_notice.label_settings = notice_settings
-	_contract_notice.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_contract_notice.modulate = Color(1, 1, 1, 0)
-	hud.add_child(_contract_notice)
-
-	# Anchored to the top-right corner with a fixed margin, sized to its own
-	# content — independent of however tall the machine-line panel ends up
-	# being.
-	_contract_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, CONTRACT_PANEL_MARGIN)
-
-
-## Rebuilds the docket stack from a `contracts` array. Called once at build
-## time and again only if the SET of contract ids changes — the shipped world
-## loads its contracts once and never adds or drops one, but a future
-## "contract accepted / contract lost" mechanic (GAMEPLAY.md §11's open
-## question about what a missed window costs) would, and the guard costs a
-## string compare per frame.
+## Rebuilds the plate's rows from a `contracts` array. Called at build time
+## and again only when the SET of contract ids changes — a signature or a
+## lost order — which the guard (`_contract_cards_match`) costs a string
+## compare per frame to notice.
 func _rebuild_contract_cards(contracts: Array) -> void:
 	for card in _contract_cards:
 		# Detach FIRST, then queue_free: queue_free is deferred to the end of
@@ -6541,8 +6527,168 @@ func _rebuild_contract_cards(contracts: Array) -> void:
 	_contract_cards.clear()
 	_contract_card_ids.clear()
 	for contract in contracts:
-		_contract_cards.append(_build_contract_card(contract, _contract_cards_box))
+		_contract_cards.append(_build_contract_row(contract, _contract_cards_box))
 		_contract_card_ids.append(String(contract.get("id", "")))
+
+
+## One contract's row on the plate, two short lines: its first product's
+## icon, its name and the time left; then the countdown bar draining to the
+## next delivery check, with how the order stands at its end. The name trims
+## with an ellipsis rather than wrapping, so every row is the same height and
+## the plate stays the column's width; the full name, the payout and the rest
+## are on the C board.
+##
+## Returns the record `_update_contract_row` drives it through:
+##   {"id", "panel", "name_label", "status_label", "countdown_meter",
+##    "countdown_label", "state"}
+func _build_contract_row(contract: Dictionary, box: VBoxContainer) -> Dictionary:
+	var id := String(contract.get("id", "?"))
+	var panel := PanelContainer.new()
+	panel.name = "ContractRow_%s" % id
+	panel.add_theme_stylebox_override("panel", _contract_row_styles.get("ok"))
+	box.add_child(panel)
+
+	var lines := VBoxContainer.new()
+	lines.add_theme_constant_override("separation", _ui_i(3))
+	panel.add_child(lines)
+
+	var line := HBoxContainer.new()
+	line.name = "Line"
+	line.add_theme_constant_override("separation", _ui_i(6))
+	lines.add_child(line)
+
+	var mix: Array = contract.get("mix", [])
+	var icon := TextureRect.new()
+	icon.name = "Icon"
+	icon.custom_minimum_size = CREW_ICON_SIZE
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture = _icon_for(String(mix[0][0]) if not mix.is_empty() else "")
+	line.add_child(icon)
+
+	var name_label := Label.new()
+	name_label.name = "Name"
+	name_label.label_settings = _contract_row_name_settings
+	name_label.text = String(contract.get("name", id))
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	line.add_child(name_label)
+
+	var countdown_label := Label.new()
+	countdown_label.name = "TimeLeft"
+	countdown_label.label_settings = _contract_plate_hint_settings
+	countdown_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	countdown_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	line.add_child(countdown_label)
+
+	# The second line: the countdown bar draining to the next delivery check,
+	# and how the order stands, in a glyph and a word, at its end — where the
+	# eye lands after the bar says how long is left.
+	var gauge := HBoxContainer.new()
+	gauge.name = "Gauge"
+	gauge.add_theme_constant_override("separation", _ui_i(8))
+	lines.add_child(gauge)
+
+	var countdown_meter := _build_meter(
+		gauge, 0.0, METER_FILL_PROGRESS, METER_TRACK_COLOR, METER_BORDER_COLOR, CONTRACT_ROW_METER_HEIGHT
+	)
+	countdown_meter.name = "Countdown"
+	countdown_meter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	countdown_meter.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+
+	var status_label := Label.new()
+	status_label.name = "Status"
+	status_label.label_settings = _contract_row_status_settings.get("ok")
+	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	gauge.add_child(status_label)
+
+	return {
+		"id": id,
+		"panel": panel,
+		"name_label": name_label,
+		"status_label": status_label,
+		"countdown_meter": countdown_meter,
+		"countdown_label": countdown_label,
+		"state": "",
+	}
+
+
+## The pure half of a contract row: every string and level it shows, from the
+## contract's own snapshot and the tick, so a test can drive it with a
+## dictionary and no scene. The state is `_contract_risk_for`'s — the same
+## one the docket on the board reads — so the two can never disagree.
+##
+## The status is the tally of this window's ask that is in, or the state's
+## word when there is one to say: `1/2`, `⚠ 1/2` (at risk — the glyph and the
+## red), `✔ READY`, `⚠ LAST CHANCE`, and `✔ PAID` for a beat after it pays
+## (`paid`). Never colour alone (UI_UX.md §7).
+##
+## Returns `{"level", "status_text", "time_text", "fraction", "due"}`.
+func _contract_row_state(contract: Dictionary, current_tick: int, paid := false) -> Dictionary:
+	var have := 0
+	var need := 0
+	var mix: Array = contract.get("mix", [])
+	var progress: Array = contract.get("progress", [])
+	for i in range(mix.size()):
+		need += int(mix[i][1])
+		if i < progress.size():
+			have += mini(int(progress[i][1]), int(mix[i][1]))
+	var tally := "%d/%d" % [have, need]
+	var risk := _contract_risk_for(contract, current_tick)
+	var level: String = risk["level"]
+	var status_text := tally
+	match level:
+		"ready":
+			status_text = "✔ READY"
+		"last_chance":
+			status_text = "⚠ LAST CHANCE"
+		"risk":
+			status_text = "⚠ %s" % tally
+	if paid:
+		level = "ready"
+		status_text = "✔ PAID"
+	var cadence: int = int(contract.get("cadence_ticks", 0))
+	var ticks_left: int = max(0, int(contract.get("next_delivery_tick", 0)) - current_tick)
+	var fraction: float = float(ticks_left) / float(cadence) if cadence > 0 else 0.0
+	return {
+		"level": level,
+		"status_text": status_text,
+		# Seconds, the unit the player waits in, by the one `_format_remaining`
+		# every clock in the game uses.
+		"time_text": "due now" if ticks_left <= 0 else _format_remaining(ticks_left),
+		"fraction": fraction,
+		"due": fraction <= CONTRACT_DUE_FRACTION,
+	}
+
+
+## Draws `_contract_row_state` onto a row. A row whose contract just paid
+## reads PAID while its stamp lasts (`_payout_stamp_ticks`, the docket's own
+## clock for the same stamp).
+func _update_contract_row(row: Dictionary, contract: Dictionary, current_tick: int) -> void:
+	var stamp_tick = _payout_stamp_ticks.get(String(row.get("id", "")), null)
+	var paid: bool = (
+		stamp_tick != null
+		and current_tick - int(stamp_tick) >= 0
+		and current_tick - int(stamp_tick) < PAYOUT_STAMP_TICKS
+	)
+	var state := _contract_row_state(contract, current_tick, paid)
+	var level: String = state["level"]
+	row["status_label"].text = state["status_text"]
+	row["countdown_label"].text = state["time_text"]
+	_set_meter(
+		row["countdown_meter"], state["fraction"],
+		METER_FILL_WARN if state["due"] else METER_FILL_PROGRESS
+	)
+	if String(row.get("state", "")) != level:
+		row["state"] = level
+		row["status_label"].label_settings = _contract_row_status_settings.get(
+			level, _contract_row_status_settings["ok"]
+		)
+		row["panel"].add_theme_stylebox_override(
+			"panel", _contract_row_styles.get(level, _contract_row_styles["ok"])
+		)
 
 
 ## One contract's docket: its name and payout on a header row, a checklist row
@@ -6550,10 +6696,10 @@ func _rebuild_contract_cards(contracts: Array) -> void:
 ## clocks independently in sim_core, so this countdown is per docket and is
 ## never shared the way money is.
 ##
-## Built into `box`: the clipboard's stack, or the C board's left column
-## (`_rebuild_board_active_cards`), which shows the same dockets larger and
-## drives them through the same `_update_contract_card` — one docket, two
-## places it hangs.
+## Built into `box`: the C board's YOUR CONTRACTS column
+## (`_rebuild_board_active_cards`), driven through `_update_contract_card`.
+## The contracts plate shows each order as a compact row instead
+## (`_build_contract_row`).
 ##
 ## Returns the record `_update_contract_panel` drives it through:
 ##   {"id", "panel", "name_label", "payout_label", "meta_label",
@@ -6604,7 +6750,7 @@ func _build_contract_card(contract: Dictionary, box: VBoxContainer, status_width
 	var status_label := Label.new()
 	status_label.name = "Status"
 	status_label.label_settings = _contract_ink_settings
-	# The board's column is a fixed width and the clipboard's is not: there the
+	# The board's column is a fixed width: there the
 	# status line wraps inside that PINNED width (the `autowrap_mode` rule
 	# under MODAL_EDGE_MARGIN), because "⚠ LAST CHANCE — … it is LOST" on one
 	# line is wider than the board can give a running docket beside its offers.
@@ -7421,10 +7567,12 @@ func _line_boundary_height(box: Control, cap: float) -> float:
 		var row_top: float = used
 		used += row.get_combined_minimum_size().y
 		if used > cap:
+			# A whole row above the cut wins over a line inside the row it
+			# falls in: a row is the unit the list is read in.
+			if boundary > 0.0:
+				return boundary
 			var inner: float = _row_line_boundary(row, cap - row_top)
-			if inner > 0.0:
-				return row_top + inner
-			return boundary if boundary > 0.0 else cap
+			return row_top + inner if inner > 0.0 else cap
 		boundary = used
 		rows += 1
 	return cap if rows == 0 else boundary
@@ -12937,8 +13085,8 @@ func _stock_ceiling_y() -> float:
 ## docket stack is a scroll bar the player can drag and the C board shows
 ## every contract in full besides, whereas this plate is `MOUSE_FILTER_IGNORE`
 ## from the panel down — a row cut off this list is a row nothing on screen
-## can bring back. So the stack yields first, keeping a whole line of its
-## first docket as it does (`_update_contract_panel`), and the absolute line
+## can bring back. So the contracts list yields first, keeping its first whole
+## row as it does (`_contract_list_hard`), and the absolute line
 ## still ends it: below that the plate would stand on the CREW plate, and a
 ## panel drawn on a panel outranks both.
 func _stock_list_ceiling_y() -> float:
@@ -19696,22 +19844,17 @@ func _pushed_clear_of(rect: Rect2, r: Rect2, bounds_x: float, lower_bound: float
 	return rect
 
 
-## Drives the contract clipboard (UI_UX.md §5) from `economy_snapshot_json`:
-## the one shared money figure, what stands on every dock, and then EVERY
-## active contract's own docket — its checklist boxes, its numeric progress
-## and its own countdown to its own next delivery check.
+## Drives the contracts plate (UI_UX.md §5) from `economy_snapshot_json`:
+## the one balance, the full-docks and short-wages warnings when true, and
+## one row per active contract with its own countdown to its own check.
 func _update_contract_panel(econ: Dictionary = {}) -> void:
 	if econ.is_empty():
 		econ = _read_economy()
 	var money := float(econ.get("money", 0.0))
-	_contract_money_label.text = "Money: %.0f" % money
+	_contract_money_label.text = "%d" % int(money)
 	_flash_money_change(money)
 	_update_money_flyout()
-	_update_contract_dock(
-		econ.get("delivery_stock", []),
-		int(econ.get("delivery_capacity", 0)),
-		bool(econ.get("delivery_full", false))
-	)
+	_contract_dock_full_label.visible = bool(econ.get("delivery_full", false))
 	_update_contract_wages(money)
 	_update_staff_alert()
 
@@ -19720,14 +19863,14 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 	_announce_unlocks(econ.get("unlocks", []))
 	if not _contract_cards_match(contracts):
 		_rebuild_contract_cards(contracts)
-	# Nothing running is a real state now (the contract-board epic): say so,
-	# and hide the empty stack rather than leaving a zero-height scroller.
+	# Nothing running is a real state (the contract-board epic): say so, and
+	# hide the empty list rather than leaving a zero-height scroller.
 	_contract_empty_label.visible = contracts.is_empty()
 	_contract_cards_scroll.visible = not contracts.is_empty()
 
 	var current_tick: int = sim.current_tick()
 	for i in range(min(contracts.size(), _contract_cards.size())):
-		_update_contract_card(_contract_cards[i], contracts[i], current_tick)
+		_update_contract_row(_contract_cards[i], contracts[i], current_tick)
 
 	# A payout, detected from the snapshot this function already had to parse
 	# (see the payout-feedback section's header for why a `deliveries_made`
@@ -19736,42 +19879,26 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 	# (`_refresh_buffers`).
 	_detect_payouts(contracts, current_tick)
 
-	# Cap the docket stack's height rather than letting it grow off the
-	# bottom of the screen: past the cap it scrolls. `data/contracts.ron`
-	# shipped three when this was written and never engaged the cap at a
-	# normal window size; since 2026-09-11 it ships eight (a growth tier
-	# for the second line onward) and the stack DOES scroll at 1600x900 —
-	# the safety valve this was built as is now the ordinary case. A
-	# compact/summary mode is the next step if the board grows again.
+	# Cap the row list's height rather than letting it grow down the column:
+	# past the cap it scrolls. What it is capped against is the space left
+	# above the hotbar once the STOCK and CREW plates below have theirs,
+	# measured the way the build menu measures its own (`_fit_grid_scroll`), so
+	# no two panels disagree about where the usable screen ends. This plate is
+	# the one that yields: its list scrolls by design and the C board shows
+	# every order in full, whereas a row cut off the STOCK plate is a row
+	# nothing on screen can bring back (`_stock_list_ceiling_y`).
 	#
-	# What it is capped AGAINST changed with the 2026-09-09 UI scale. It was
-	# a fixed fraction of the window height, and at half again the type size
-	# that let the board's bottom edge reach down across the larder strip. It
-	# is now the space actually left above the hotbar, measured the same way
-	# the build menu measures its own (`_fit_grid_scroll`), so the two panels
-	# can never disagree about where the usable screen ends. The stock plate
-	# (2026-09-16) took the bottom of that same right-hand column, and the
-	# clipboard is the one that yields: its docket stack already scrolls by
-	# design, whereas a scrolling stock list would hide the ingredient the
-	# player is short of behind a scrollbar they have no reason to look
-	# under.
-	#
-	# The cut lands BETWEEN two dockets, never through one (issue #8). What
-	# made that visible was the SHORT-STAFFED strip (2026-09-16), which sits
-	# inside this same clipboard body and takes two lines out of the stack's
-	# share: the bottom docket then ended mid-sentence, which reads as a
-	# rendering fault rather than as "there is more, scroll". Nothing about
-	# what the stack is capped AGAINST changed — see `_whole_rows_height`.
+	# The cut lands BETWEEN two rows, never through one (issue #8).
 	#
 	# A headless SceneTree run has no viewport at all, and a window that has
-	# not laid out yet reports a zero rect — neither must collapse the stack
-	# to nothing, so "no viewport" means "no cap", not "a cap of zero".
+	# not laid out yet reports a zero rect — neither must collapse the list to
+	# nothing, so "no viewport" means "no cap", not "a cap of zero".
 	var viewport := get_viewport()
 	if viewport != null and viewport.get_visible_rect().size.y > 0.0:
 		var column: float = (
 			viewport.get_visible_rect().size.y - _hotbar_reserved_height() - _ui_px(24.0)
 		)
-		# Where the stack's floors stop mattering: the line the plate below
+		# Where the list's floors stop mattering: the line the STOCK plate
 		# stands on once it has given up everything but one row
 		# (`_stock_ceiling_y`), measured from this panel's own top edge.
 		var hard: float = INF
@@ -19782,79 +19909,61 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 				top = _contract_panel.get_global_rect().position.y
 			hard = maxf(0.0, ceiling_y - top)
 			# Stop EARLIER than that where the column allows: at the line the
-			# plate stands on with its whole list, not the one it stands on
-			# with a single row (`_stock_list_ceiling_y`). Between the two
-			# lines the stack is taking rows off a readout nobody can scroll,
-			# to show dockets the player can scroll to and can read in full on
-			# the C board.
-			#
-			# Floored by this panel's OWN line, which the growth rule did not
-			# need while it aimed at one stock row: a clipboard cut back to its
-			# chrome shows neither a docket nor the cue that there are dockets,
-			# which §5f ranks worse than the ragged edge the growth was
-			# introduced to buy. One whole LINE of the first docket is the
-			# least that still says "there is an order here, and there is more
-			# of it under the cut".
+			# STOCK plate stands on with its whole list (`_stock_list_ceiling_y`)
+			# — floored by the first WHOLE row. A row is two short lines, and
+			# its second is the order's status: a first line alone names an
+			# order and hides whether it is in trouble, which is the one thing
+			# the plate is for (PR #235's review, full docks at 1280x720).
 			var wanted_y: float = _stock_list_ceiling_y()
 			if is_finite(wanted_y):
 				var own_chrome: float = (
 					_contract_panel.get_combined_minimum_size().y
 					- _contract_cards_scroll.custom_minimum_size.y
 				)
-				hard = minf(hard, maxf(
-					maxf(0.0, wanted_y - top),
-					own_chrome + _first_line_boundary(_contract_cards_box)
-				))
+				hard = _contract_list_hard(hard, maxf(0.0, wanted_y - top), own_chrome)
 		var stack_available: float = (
 			column - _stock_reserved_height() - _crew_reserved_height()
 		)
-		# The board hint is the clipboard's one line of advice and the only
-		# thing on this panel the stack can still take a line from. It keeps
-		# its line while the stack has a whole docket LINE to show, and gives
-		# it up when it has not (issue #17): at 1280x720 with every offer
-		# signed the stack is down to twelve pixels — a docket's heading cut
-		# through its own type — and the hint's line is exactly what buys the
-		# cut back onto the first boundary. "Sign more orders" is also the
-		# least useful sentence on a clipboard whose every order is signed.
-		#
-		# Issue #13 made the same trade against the SHORT-STAFFED strip and
-		# for the same reason: the clipboard has room for one line of advice,
-		# and a docket cut through a line outranks it.
-		# With nothing signed the empty line already names the key, and a new
-		# game opens that way: "sign MORE orders" would be wrong, and its line
-		# is what keeps the stock plate off the CREW plate at 1280x720.
-		if _contract_hint_label != null:
-			_contract_hint_label.visible = not _contract_empty_label.visible
-		var cut: float = _fit_grid_scroll(
+		_fit_grid_scroll(
 			_contract_cards_scroll,
 			_contract_cards_box,
 			stack_available,
 			true,
 			hard
 		)
-		if (
-			_contract_hint_label != null
-			and cut < _first_line_boundary(_contract_cards_box)
-			and _contract_cards_scroll.visible
-		):
-			_contract_hint_label.visible = false
-			_fit_grid_scroll(
-				_contract_cards_scroll,
-				_contract_cards_box,
-				stack_available,
-				true,
-				hard
-			)
 	else:
 		_contract_cards_scroll.custom_minimum_size.y = _contract_cards_box.get_combined_minimum_size().y
 
-	# Re-anchor every update, not just once at build time: the panel's
-	# minimum size grows once real text ("Money: 1234", "Next check in 1000
-	# ticks") replaces the empty labels it was built with, and PRESET_MINSIZE
-	# only computes offsets once, at the moment it's called — without this,
-	# the panel stays sized/positioned for its build-time (near-empty) text
-	# and later, wider text spills past its right edge.
-	_contract_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT, Control.PRESET_MODE_MINSIZE, CONTRACT_PANEL_MARGIN)
+	_position_contract_panel()
+
+
+## The tallest the plate may stand, given the most the column allows
+## (`absolute`: STOCK down to one row), where it would rather stop
+## (`wanted`: STOCK with its whole list) and its own chrome. It stops where it
+## would rather — but never short of its first WHOLE row, unless the
+## absolute line forbids it.
+func _contract_list_hard(absolute: float, wanted: float, own_chrome: float) -> float:
+	return minf(absolute, maxf(wanted, own_chrome + _whole_rows_height(_contract_cards_box, 0.0)))
+
+
+## Top-right corner, inset by the column's one margin, sized to its content
+## and never narrower than the STOCK and CREW plates under it — so the three
+## share a right edge AND a width. Re-applied every update, because the
+## plate's height follows its rows and its wrapped warning lines.
+func _position_contract_panel() -> void:
+	if _contract_panel == null:
+		return
+	var size := _contract_panel.get_combined_minimum_size()
+	_contract_panel.size = size
+	var width: float = size.x
+	var vp := get_viewport()
+	if vp == null or vp.get_visible_rect().size.x <= 0.0:
+		_contract_panel.position = Vector2(0.0, CONTRACT_PANEL_MARGIN)
+		return
+	_contract_panel.position = Vector2(
+		maxf(0.0, vp.get_visible_rect().size.x - width - CONTRACT_PANEL_MARGIN),
+		CONTRACT_PANEL_MARGIN
+	)
 
 
 ## True when the built dockets already correspond, in order, to the reported
@@ -19901,19 +20010,23 @@ func _flash_money_change(money: float) -> void:
 
 
 ## Holds the money flyout at full ink, then fades it, and keeps it sitting
-## directly under the figure it belongs to. The position is re-applied every
-## frame for the same reason the panel re-applies its preset: the money
-## label's own size only settles once it has real text in it.
+## just left of the figure it belongs to. The position is re-applied every
+## frame because the money label's own size only settles once it has real
+## text in it.
 ##
-## It FLOATS over the dock line below rather than taking a row of its own:
-## a reserved row would be empty for all but a second or two at a time, and
-## the two never compete for the same words — the dock line grows from the
-## left, this is pinned to the money figure's right edge.
+## It FLOATS over the heading's slack rather than taking a row of its
+## own: a reserved row would be empty for all but a second or two at a time.
 func _update_money_flyout() -> void:
 	if _contract_money_change == null:
 		return
-	_contract_money_change.position = Vector2(0.0, _contract_money_label.size.y)
-	_contract_money_change.size.x = _contract_money_label.size.x
+	# Hung off the figure's LEFT edge on the caption's slack, vertically
+	# centred on it, so it can never sit on the first contract row.
+	var flyout_size := _contract_money_change.get_minimum_size()
+	_contract_money_change.size = flyout_size
+	_contract_money_change.position = Vector2(
+		-flyout_size.x - _ui_px(8.0),
+		(_contract_money_label.size.y - flyout_size.y) * 0.5
+	)
 	var remaining := _contract_money_change_until_msec - _hud_now_msec()
 	if remaining >= 0:
 		_contract_money_change.modulate = Color(1, 1, 1, 1)
@@ -19924,18 +20037,7 @@ func _update_money_flyout() -> void:
 		_contract_money_change.modulate = Color(1, 1, 1, 0)
 
 
-## What stands on every dock, added up and shown once above the dockets.
-##
-## This line is the player-visible face of sim_core's allocation rule:
-## contracts draw on the docks' stock as ONE pile and a settling contract
-## CONSUMES its mix from it, so a box is never credited to two orders. Without it, three
-## dockets whose checklists all read "2/2" look like three imminent payouts
-## when the dock may hold only two boxes total — the checklists are each
-## clamped to their own ask (that clamping is sim_core's, deliberately), and
-## this unclamped number is what reconciles them. It is one line of text
-## rather than a new widget: surfacing the rule is worth it, inventing a
-## second progress language for it is not.
-## Draws `_contract_wages_state` onto the clipboard's wages line. The staff
+## Draws `_contract_wages_state` onto the plate's wages line. The staff
 ## snapshot it reads is polled on its own cadence whether or not the H panel
 ## is open (see `_poll_staff`), so this costs no extra trip across the wire;
 ## the line simply hides itself while there is nothing honest to show.
@@ -19946,9 +20048,9 @@ func _update_contract_wages(money: float) -> void:
 	_contract_wages_label.visible = not state.is_empty()
 	if state.is_empty():
 		return
-	_contract_wages_label.text = String(state["text"])
+	_contract_wages_label.text = String(state["text"]).replace(" — ", " —\n")
 	_contract_wages_settings.font_color = (
-		CONTRACT_RISK_COLOR if bool(state["short"]) else _contract_meta_settings.font_color
+		METER_FILL_WARN if bool(state["short"]) else STOCK_NONE_COLOR
 	)
 
 
@@ -19979,13 +20081,6 @@ func _update_staff_alert() -> void:
 		# categories and how many, and the heading has one line.
 		_crew_hint.text = "▲ SHORT-STAFFED  ·  H"
 		_crew_plate_style.border_color = METER_FILL_WARN
-	# Issue #13 made the board hint yield to the SHORT-STAFFED strip, because
-	# the clipboard had room for one line of advice and hiring beat signing.
-	# The strip is on the CREW plate now and the two are no longer competing
-	# for the same pixels. The hint's line is still the clipboard's to spend,
-	# but there is exactly ONE place that decides whether it is spent —
-	# `_update_contract_panel`, which is the only thing that knows what the
-	# docket stack got — so this no longer touches it.
 	if _staff_alert_known_short < 0:
 		_staff_alert_known_short = short
 		return
@@ -19994,80 +20089,9 @@ func _update_staff_alert() -> void:
 	_staff_alert_known_short = short
 
 
-func _update_contract_dock(stock: Array, capacity: int, full: bool) -> void:
-	var seen: Dictionary = {}
-	for pair in stock:
-		var item_id: String = String(pair[0])
-		var qty: int = int(pair[1])
-		seen[item_id] = true
-		var entry: Dictionary = _contract_dock_entries.get(item_id, {})
-		if entry.is_empty():
-			entry = _build_contract_dock_entry(item_id)
-			_contract_dock_entries[item_id] = entry
-		# The docks have places (the per-dock stock change, 2026-09-26), so
-		# the figure has a denominator — every dock's places added up — and
-		# earns UI_UX.md §5e's bar. An older wire with no capacity on it still reads as the
-		# bare figure it always did rather than inventing a full mark.
-		var meter: Panel = entry["meter"]
-		if capacity > 0:
-			var at_ceiling := qty >= capacity
-			entry["label"].text = "%d/%d" % [qty, capacity]
-			meter.visible = true
-			_set_meter(
-				meter,
-				float(qty) / float(capacity),
-				CONTRACT_METER_DUE if at_ceiling else CONTRACT_METER_INK
-			)
-		else:
-			entry["label"].text = "%d" % qty
-			meter.visible = false
-		entry["row"].visible = true
-	for item_id in _contract_dock_entries:
-		if not seen.has(item_id):
-			_contract_dock_entries[item_id]["row"].visible = false
-	# `delivery_stock` reports non-zero entries only, so an empty array is
-	# genuinely "nothing on the dock" — say so rather than showing a bare label.
-	_contract_dock_empty_label.visible = stock.is_empty()
-	_contract_dock_full_label.visible = full
-	if full:
-		# The label is built before any item entry exists, so it is pushed
-		# back to the end of the line each time it shows: the sentence reads
-		# as the consequence of the bars beside it, not as a heading over them.
-		_contract_dock_row.move_child(_contract_dock_full_label, -1)
-
-
-func _build_contract_dock_entry(item_id: String) -> Dictionary:
-	var row := HBoxContainer.new()
-	row.name = "dock_%s" % item_id
-	row.add_theme_constant_override("separation", _ui_i(3))
-	_contract_dock_row.add_child(row)
-
-	var icon := TextureRect.new()
-	icon.custom_minimum_size = _ui_v(Vector2(14, 14))
-	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.texture = _icon_for(item_id)
-	row.add_child(icon)
-
-	var label := Label.new()
-	label.label_settings = _contract_meta_settings
-	row.add_child(label)
-
-	# One bar per item, in the docket's own ink on its own paper (UI_UX.md
-	# §5e: a clipboard's meter takes the two colours the card already has).
-	# Hidden until a capacity arrives on the wire, so nothing draws a bar
-	# against a full mark that does not exist.
-	var meter := _build_meter(
-		row, CONTRACT_DOCK_METER_WIDTH, CONTRACT_METER_INK,
-		CONTRACT_METER_TRACK, CONTRACT_METER_BORDER, CONTRACT_METER_HEIGHT
-	)
-	meter.visible = false
-	return {"row": row, "label": label, "icon": icon, "meter": meter}
-
-
 ## One docket's live state. `progress` is sim_core's per-contract, clamped
 ## coverage of this contract's own mix (a checklist reads 2/2, never 7/2);
-## the unclamped pool it is drawn from is the dock line above.
+## what actually stands on each dock is on that dock's hover.
 func _update_contract_card(card: Dictionary, contract: Dictionary, current_tick: int) -> void:
 	var mix: Array = contract.get("mix", [])
 	var progress: Array = contract.get("progress", [])
@@ -20909,8 +20933,8 @@ func _update_money_punch(current_tick: int) -> void:
 
 
 ## The rising "+N", parked over the money line it belongs to. Positioned
-## every frame rather than once, because the clipboard re-anchors itself
-## every frame too (its minimum size grows with its own text).
+## every frame rather than once, because the contracts plate re-positions
+## itself every update too (its size follows its rows and warnings).
 func _update_payout_flyout(current_tick: int) -> void:
 	if _payout_flyout == null:
 		return
@@ -20945,22 +20969,24 @@ func _update_payout_flyout(current_tick: int) -> void:
 	_payout_flyout.modulate = Color(1, 1, 1, clampf((1.0 - t) / 0.66, 0.0, 1.0))
 
 
-## The paying docket's payout figure, which reads PAID for a beat instead of
-## "+90". A word, not a colour wash (UI_UX.md §7), and on the one number that
-## just became true rather than on a new widget the docket has no room for.
+## The paying docket's payout figure on the C board, which reads PAID for a
+## beat instead of "+90". A word, not a colour wash (UI_UX.md §7), and on the
+## one number that just became true rather than on a new widget the docket has
+## no room for. The plate's row reads the same stamp (`_update_contract_row`).
 func _update_payout_stamps(current_tick: int) -> void:
-	for i in range(min(_contract_cards.size(), _contract_card_ids.size())):
-		var card: Dictionary = _contract_cards[i]
+	# Expired stamps go first, whatever is on screen: the board's dockets
+	# exist only once the board has been built, and a stamp nothing drew must
+	# not outlive its beat either.
+	for id in _payout_stamp_ticks.keys():
+		var age: int = current_tick - int(_payout_stamp_ticks[id])
+		if age < 0 or age >= PAYOUT_STAMP_TICKS:
+			_payout_stamp_ticks.erase(id)
+	for i in range(min(_board_active_cards.size(), _board_active_ids.size())):
+		var card: Dictionary = _board_active_cards[i]
 		var label: Label = card.get("payout_label")
 		if label == null:
 			continue
-		var id := String(_contract_card_ids[i])
-		var stamped: bool = _payout_stamp_ticks.has(id)
-		if stamped:
-			var age: int = current_tick - int(_payout_stamp_ticks[id])
-			if age < 0 or age >= PAYOUT_STAMP_TICKS:
-				_payout_stamp_ticks.erase(id)
-				stamped = false
+		var stamped: bool = _payout_stamp_ticks.has(String(_board_active_ids[i]))
 		if stamped:
 			if label.text != "PAID":
 				label.text = "PAID"

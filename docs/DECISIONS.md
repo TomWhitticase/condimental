@@ -25,6 +25,49 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-02: **The contracts readout is a plate, not a clipboard.**
+  (Owner, verbatim: "Make the contracts menu (the one in the top right of
+  main gameplay screen) look much better: it looks bad and doesnt line up
+  with the other overlay menus - it shows too much data (we can access the
+  details in the contracts screen (c) so this just needs to show the
+  important stuff".)
+
+  **What it overturns.** UI_UX §5's "a contract IS a clipboard": a cream
+  paper sheet with a steel clip bar, carrying money, an ON THE DOCK line
+  with a bar per item, then one full paper docket per contract (checklist
+  boxes per unit, status sentence, strike pips with the rule in words, a
+  countdown with cadence and done/missed tallies). At 1600x900 it was about
+  660px wide against the column's 342. Each docket was about 80px tall, so
+  with four orders signed only one fit above STOCK and CREW, and that one
+  was cut by its scrollbar.
+
+  **What a glance needs.** It needs to say which order, whether it is in
+  trouble, and how long is left. Those are the name, the state (the same
+  `_contract_risk_for` level the docket uses, so the two cannot disagree)
+  and the countdown. Everything else is read when deciding something, and
+  the C board already shows every running docket in full beside the offers.
+
+  **Layouts tried, by render.** (1) Two lines with the status first on line
+  two showed one row at 1600x900. (2) A single line of icon, name, status
+  and time showed three rows, but `⚠ LAST CHANCE` crushed the name to
+  nothing. (3) The name and time on line one, with the bar and status on
+  line two, shows two whole rows at 1600x900 and one at 1280x720, names
+  readable to about 18 characters. (3) shipped. The payout came off the
+  row: it is a reason to sign, not to glance. The PAID stamp moved to the
+  status (`✔ PAID`).
+
+  **A fitting rule that changed with it.** `_line_boundary_height` used to
+  prefer a line inside the row the cut fell in. With many short rows that
+  cut through the second row when the first had fit whole. It now returns
+  the last whole row above the cut when there is one. And the list's floor
+  (`_contract_list_hard`) is its first WHOLE row, not its first line: a row's
+  second line is its status, and the review's 1280x720 full-docks render
+  showed an order's name with its state cut off — the one thing the plate is
+  for. Every line on the plate is one line by construction (the wages
+  warning breaks at its own dash; no autowrap), so the plate's measured
+  height is its drawn height, and none is wider than the column — both
+  pinned by font measurement in `test_contract_panel.gd`.
+
 - 2026-10-02: **A machine nothing has fed is undecided, not ketchup.**
   (Owner: "by default all machines stuff say ketchup skinned up ketchup,
   only switch when supplied ingredients other sauces, default should be
