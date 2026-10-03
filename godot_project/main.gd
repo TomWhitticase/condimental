@@ -101,6 +101,8 @@ const SettingsPanelScript = preload("res://settings_panel.gd")
 ## THE COOKBOOK's screen, hosted twice from here (the B modal and the pause
 ## menu) exactly as the settings rows are — see `cookbook_panel.gd`.
 const CookbookPanelScript = preload("res://cookbook_panel.gd")
+## How money is written — the `£` and nothing else (2026-10-03).
+const Money = preload("res://money_text.gd")
 
 # --- Scale ---------------------------------------------------------------
 # UI_UX.md §2 fixes one world tile at 32x32x32 voxels. The .vox importer's
@@ -360,69 +362,18 @@ const FLUID_TINTS := {
 	"liquid_smoke": Color(0.439, 0.392, 0.188),
 	# --- Mustard's three, and the first branch that BRIGHTENS -------------
 	#
-	# Mustard is the first sauce whose whole middle is fluid: the crusher
-	# mills the seed wet, so there is no pail stage and these three are the
-	# only place the player ever sees the product between the tote and the
-	# bottle. Getting them wrong is not a missing pail, it is a missing
-	# sauce.
+	# Mustard, the one fluid of the second sauce: mixed, never cooked, so the
+	# finished sauce is the only mustard that stands in a pipe (2026-10-03;
+	# it used to be milled wet and cooked, which put a mash and a mix in
+	# pipes too, on a value ladder below this).
 	#
-	# **All three are `mustard_gold` #DCC63C scaled in VALUE, which is what
-	# `palette.ron` asked for.** That file gives mustard no `liquid_*` entry
-	# of its own — deliberately, since nothing carries mustard in an open
-	# pail — and says in as many words that the tint here "should be derived
-	# from this number (0.863, 0.776, 0.235)". One hue for the branch, three
-	# values along it, so the run reads as one substance at three stages
-	# rather than as three substances.
-	#
-	# **It brightens where ketchup and BBQ darken, and that is the recipe
-	# rather than a whim.** Both older sauces cook down: `ketchup_mix` 0.322
-	# -> `ketchup` 0.239, `bbq_mix` 0.292 -> `bbq` 0.200. Mustard's pigment
-	# does not arrive until the MIXER, where turmeric goes in — the mash is
-	# milled seed and vinegar and nothing else — so the colour develops
-	# along the line instead of reducing. `seed_tan`'s note in `palette.ron`
-	# records the same expectation from the art side.
-	#
-	# **The three multipliers are x0.76, x0.94 and x1.15 of that gold, and
-	# they were MEASURED rather than reasoned.** Evenly spaced tints are not
-	# evenly spaced pixels. Rendering one pipe body at seven points along
-	# this hue, same camera, same 32x16 mask, gives a badly compressive
-	# curve — tint luma 116 -> 178 on the frame, 135 -> 195, 154 -> 208,
-	# 173 -> 219, 193 -> 226, 212 -> 233, 223 -> 237 — so a ladder that is
-	# even in this file bunches at the top of the frame. The first cut here
-	# was three even 25.6/255 steps in tint space and photographed as
-	# +15.3 then **+10.4**, the second of them inside the 10.7-11.8 noise
-	# band issue #113 measured for reading one fluid twice. Even in tint
-	# space is not even, and this table's job is the frame.
-	#
-	# **What actually pins the span is how crowded the frame already is.**
-	# Measured on the fluid gallery, the six older fluids sit at `bbq` 97.6,
-	# `ketchup` 125.2, `bbq_mix` 128.3, `ketchup_mix` 141.0, `liquid_smoke`
-	# 159.6 and `vinegar` 178.2 out of 255. That leaves exactly one free
-	# band, 178 to the ~237 ceiling of this hue, and mustard needs three
-	# values inside it. Dropping the mash below `vinegar` to open the top
-	# was tried and is worse: it lands 6.5/255 from it, and `vinegar` is not
-	# some other sauce's fluid but the one in the pipe on the OTHER side of
-	# the same crusher, since a mustard crusher drinks vinegar and fills
-	# mash. Below `vinegar` the next gap is `liquid_smoke`, the same olive
-	# hue, which is worse still.
-	#
-	# **So: 203.6, 221.8, 235.9 on the frame — +18.2 then +14.1, clearing
-	# `vinegar` by 25.4.** Every step is well outside the noise band, the
-	# margin to the neighbouring fluid is at the ~26/255 "reads reliably"
-	# anchor, and mustard's own tightest pair is wider than two pairs the
-	# game already ships (`ketchup` <-> `bbq_mix` measure 3.1/255 apart, and
-	# `ketchup_mix` <-> `bbq_mix` 12.7). That last number is the honest
-	# frame for this one: the span is narrow because the palette is full,
-	# and a fourth sauce will have to take value off the older two rather
-	# than find more room at the top.
-	"mustard_mash": Color(0.656, 0.590, 0.179),
-	"mustard_mix": Color(0.811, 0.729, 0.221),
-	# `mustard_gold` #DCC63C taken up to x1.15, one notch under where red
-	# clips. `palette.ron` asks for a tint "derived from this number" rather
-	# than for the number, and the derivation is the value scaling above;
-	# the cooked sauce takes the top of the band because it is the one stage
-	# a player watches for, and because the compression curve means the last
-	# step is the one with least room to give.
+	# `mustard_gold` #DCC63C taken up to x1.15 in VALUE, one notch under
+	# where red clips. `palette.ron` gives mustard no `liquid_*` entry of its
+	# own — nothing carries mustard in an open pail — and asks for a tint
+	# "derived from this number" rather than for the number. The top of the
+	# band because the fluid gallery measured the other six at `bbq` 97.6 up
+	# to `vinegar` 178.2 out of 255, leaving 178 to the ~237 ceiling of this
+	# hue free; this lands at 235.9 on the frame, 57.7 clear of `vinegar`.
 	"mustard": Color(0.992, 0.892, 0.270),
 }
 const FLUID_TINT_FALLBACK := Color(0.60, 0.79, 0.86)
@@ -438,8 +389,8 @@ const FLUID_TINT_FALLBACK := Color(0.60, 0.79, 0.86)
 ## writes one mesh per material class, so a machine's product arrives in
 ## Godot as a child node named `liquid` that can be tinted on its own, and
 ## the tint comes from the recipe the simulation says the machine is
-## RUNNING (`MachineSnapshot.recipe` — `Machine::choose`'s live answer,
-## which follows the inputs). One voxel model therefore serves every sauce:
+## RUNNING (`MachineSnapshot.recipe` — the recipe the player chose for it,
+## 2026-10-03). One voxel model therefore serves every sauce:
 ## a new sauce needs a row in this table and nothing else — no new asset, no
 ## machine kind, no generator change, no branch anywhere in this file.
 ##
@@ -463,21 +414,18 @@ const PRODUCT_TINTS := {
 	"boxed_ketchup": Color(0.745, 0.086, 0.055),
 	"bottled_bbq": Color(0.306, 0.141, 0.098),
 	"boxed_bbq": Color(0.306, 0.141, 0.098),
-	# Mustard's three, and the proof of the paragraph above: the third sauce
-	# cost this file three rows and nothing else — no asset, no kind, no
-	# branch. Three and not five because only the vat, the bottler and the
-	# packer carry a `machine_product` mesh; the crusher and the mixer show
-	# no product, which is why `ketchup_mix` and `bbq_mix` have no row here
-	# either and `mustard_mash`/`mustard_mix` need none.
+	# Mustard's two, and the proof of the paragraph above: a sauce costs
+	# this file a row per product-showing machine it runs on and nothing
+	# else. Only the vat, the bottler and the packer carry a
+	# `machine_product` mesh; mustard is never cooked (2026-10-03), so it
+	# runs on the last two only — the mixer shows no product, which is why
+	# `ketchup_mix`, `bbq_mix` and `mustard` have no row here.
 	#
-	# **All three are the same number, and mustard is the only sauce where
-	# that is right.** Ketchup's vat takes `liquid_ketchup` #C4190E while
-	# its bottler takes `ketchup_red` #BE160E, because the palette gives
-	# that substance two entries — one for the pail, one for the bottle.
-	# Mustard has no `liquid_*` entry at all (nothing carries it in a pail),
-	# so the cook in the vat, the sauce behind the bottler's glass and the
-	# print on the packer's case are one colour by construction.
-	"mustard": Color(0.992, 0.892, 0.270),
+	# **Both are `FLUID_TINTS["mustard"]`.** Ketchup's bottler takes
+	# `ketchup_red` rather than its pipe's `liquid_ketchup`, because the
+	# palette gives that substance two entries. Mustard has no `liquid_*`
+	# entry at all, so the sauce in the pipe, behind the bottler's glass and
+	# printed on the case are one colour by construction.
 	"bottled_mustard": Color(0.992, 0.892, 0.270),
 	"boxed_mustard": Color(0.992, 0.892, 0.270),
 }
@@ -488,11 +436,17 @@ const PRODUCT_TINTS := {
 ## replaced could not do (UI_UX.md §2b point 12: every content-id lookup
 ## gets a documented fallback).
 const PRODUCT_TINT_FALLBACK := Color(1, 1, 1)
-## What an UNDECIDED machine is said to be making — one placed but not yet
-## handed anything that names its sauce (`MachineSnapshot.recipe` is null).
-## Its product mesh is left untinted for the same reason: until it is fed it
-## is not any one sauce's machine (owner's request, 2026-10-02).
-const MACHINE_UNDECIDED_TEXT := "any sauce"
+## What a machine with NO RECIPE CHOSEN is said to be making — one placed
+## and not yet told what to make (`MachineSnapshot.recipe` is null). It makes
+## nothing until the player picks a recipe in its panel (2026-10-03), so the
+## words say what to do; its product mesh is left untinted because it is not
+## any one sauce's machine.
+const MACHINE_UNDECIDED_TEXT := "nothing — click to choose"
+## The machine panel's picker note: what picking does, and what a switch costs
+## (`PlayerCommand::SetMachineRecipe` — the craft in progress and any
+## ingredient the new recipe does not take are thrown away, and a pipe run the
+## switch renames is emptied).
+const MACHINE_PICKER_NOTE := "Choose what it makes. Switching abandons the batch in progress and discards ingredients the new recipe does not use."
 
 ## --- The belt family (the pipes & conveyors overhaul, ticket 5) -----------
 ##
@@ -1129,13 +1083,11 @@ const ITEM_MODELS := {
 	# and a drum of syrup as two identical pipe nozzles.
 	"spice_mix": "item_spice_mix",
 	"molasses": "item_molasses",
-	# The third sauce's two raw SOLIDS and its two finished goods (the
-	# mustard epic). **Four keys and no more, because mustard's middle is
-	# WET**: the crusher mills the seed with vinegar and discharges a fluid,
-	# so `mustard_mash` and `mustard_mix` never touch a belt and have no
-	# business in this table at all — they are `FLUID_TINTS` entries
-	# instead. Mustard is the first sauce with no pail stage, which is why
-	# it adds two raws and two packages here where ketchup added five ids.
+	# The second sauce's two raw SOLIDS, its ground seed and its two
+	# finished goods. Ground mustard is the crusher's dry output on its way
+	# to the mixer (2026-10-03, when mustard stopped being milled wet), so
+	# it rides a belt in a pail of its own, exactly as tomato paste does;
+	# the finished `mustard` is a fluid and lives in `FLUID_TINTS` instead.
 	#
 	# `bottled_mustard` and `boxed_mustard` get models of their own for the
 	# reason the BBQ pair above states: a belt of mustard has to be
@@ -1143,6 +1095,7 @@ const ITEM_MODELS := {
 	# make every crate of all three the same cardboard box.
 	"mustard_seed": "item_mustard_seed",
 	"turmeric": "item_turmeric",
+	"ground_mustard": "item_ground_mustard",
 	"bottled_mustard": "item_bottle_mustard",
 	"boxed_mustard": "item_box_mustard",
 }
@@ -1450,6 +1403,9 @@ var _tank_fluids: Array = [] # fluid ids a tank may be declared to hold
 ## is the simulation's (`try_set_hopper_item`/`try_set_tank_fluid`), not this
 ## table's: this is the label on the door, not the lock.
 var _ingredient_gates: Dictionary = {}
+## The same, for the recipes a machine's MAKES picker lists (2026-10-03).
+## A table of its own so a recipe id can never be read as a raw's.
+var _recipe_gates: Dictionary = {}
 ## The ghost's product body — a `hopper_fill` slab tinted with the chosen
 ## item, so the ghost previews WHAT the hopper will hold as well as where it
 ## goes. Colour alone would not be enough (UI_UX.md §7); the prompt names the
@@ -4792,8 +4748,8 @@ func _fluid_material_for(fluid_id: String) -> StandardMaterial3D:
 ## A machine with no `liquid` mesh (every kind that shows no product) is a
 ## no-op rather than a warning — the ordinary case, not a mistake.
 ##
-## A NULL recipe is an UNDECIDED machine — placed, but nothing fed to it yet
-## names a sauce (`Machine::choose`'s rule 4). It is drawn as handling ANY
+## A NULL recipe is a machine with NO RECIPE CHOSEN — placed, and not yet
+## told what to make (2026-10-03). It is drawn as handling ANY
 ## sauce: no override at all, so the product mesh keeps the voxel's own
 ## neutral `fluid_pale` — the same pale an untinted pipe run shows. It used
 ## to be drawn as ketchup, because the sim placed every such machine on its
@@ -5246,8 +5202,8 @@ func _poll_machine_load() -> void:
 
 
 ## What a machine is making, for a title: the recipe's display name, or —
-## for an UNDECIDED machine, whose `recipe` is null on the wire — the words
-## that say it will take any sauce. One helper so the hover and the
+## for a machine with no recipe chosen, whose `recipe` is null on the wire —
+## the words that say how to choose one. One helper so the hover and the
 ## configuration panel can never disagree about the neutral state.
 func _machine_making_text(recipe) -> String:
 	if recipe == null or String(recipe) == "":
@@ -5273,8 +5229,9 @@ func _stall_reason_text(stall) -> String:
 		"fluid_input":
 			return "waiting for %s in the pipe" % item
 		"no_supply_pipe":
-			# An UNDECIDED machine with no pipe at all names no fluid: no
-			# recipe is chosen yet, so there is no one fluid it is missing.
+			# Defensive: the sim names the fluid now that a machine reports
+			# this only for a chosen recipe, but an empty `item` must still
+			# read as a sentence.
 			if String(stall.get("item", "")) == "":
 				return "no supply pipe"
 			return "no supply pipe for %s" % item
@@ -5300,10 +5257,10 @@ func _stall_reason_text(stall) -> String:
 		# empty on this kind and is deliberately not printed.
 		"mothballed":
 			return "switched off"
-		# Nothing fed yet has picked one of the kind's recipes, so there
-		# is no one ingredient to name: `item` is empty and not printed.
+		# No recipe chosen (2026-10-03): it makes nothing until the
+		# player picks one, so the sentence is the fix. `item` is empty.
 		"undecided":
-			return "waiting for ingredients"
+			return "no recipe chosen — click it to pick one"
 	return ""
 
 
@@ -6837,7 +6794,7 @@ func _build_contract_card(contract: Dictionary, box: VBoxContainer, status_width
 	# (GAMEPLAY.md §6), so it belongs on the docket, not in a tooltip.
 	var payout_label := Label.new()
 	payout_label.label_settings = _contract_name_settings
-	payout_label.text = "+%d" % int(contract.get("payout", 0))
+	payout_label.text = Money.change(float(contract.get("payout", 0)))
 	# The figure kept beside the text, because the PAID stamp overwrites the
 	# text for a beat when this contract settles and has to put it back
 	# afterwards without re-reading a snapshot.
@@ -7986,7 +7943,7 @@ func _update_shop_menu() -> void:
 		return
 	var snapshot: Dictionary = JSON.parse_string(sim.shop_snapshot_json())
 	var entries: Array = snapshot.get("entries", [])
-	_shop_money_label.text = "Money: %.0f" % float(snapshot.get("money", 0.0))
+	_shop_money_label.text = "Money: %s" % Money.amount(float(snapshot.get("money", 0.0)))
 	_position_shop_menu()
 
 	# Built once per redraw, not per slot: the last staff poll's wage per
@@ -8007,7 +7964,7 @@ func _update_shop_menu() -> void:
 		# UI_UX.md §7's never-colour-alone rule: the price gains a "✗" mark,
 		# the icon dims, and the whole slot is disabled (which also recolours
 		# its border/background via the disabled stylebox).
-		slot["price_label"].text = ("Cost %.0f" % price) if affordable else ("Cost %.0f  ✗" % price)
+		slot["price_label"].text = ("Cost %s" % Money.amount(price)) if affordable else ("Cost %s  ✗" % Money.amount(price))
 		slot["crew_label"].text = _crew_cost_text(entry.get("crew", []), wages_by_category)
 		slot["price_label"].label_settings.font_color = (
 			Color(0.92, 0.93, 0.94) if affordable else Color(0.55, 0.50, 0.48)
@@ -8262,7 +8219,7 @@ func _owned_ingredient_counts() -> Dictionary:
 func _refresh_hopper_items() -> void:
 	var snapshot := _ingredients_snapshot()
 	var items: Array = snapshot.get("hopper_items", [])
-	_hopper_items = _record_choices(items)
+	_hopper_items = _record_choices(items, _ingredient_gates)
 
 
 ## `_refresh_hopper_items` for tanks. Separate call rather than one that
@@ -8270,30 +8227,31 @@ func _refresh_hopper_items() -> void:
 func _refresh_tank_fluids() -> void:
 	var snapshot := _ingredients_snapshot()
 	var fluids: Array = snapshot.get("tank_fluids", [])
-	_tank_fluids = _record_choices(fluids)
+	_tank_fluids = _record_choices(fluids, _ingredient_gates)
 
 
 ## Splits one wire list of contents choices into the id list the rest of the
 ## scene has always used, and the gate table beside it.
 ##
-## Both callers write the same table, which is why this merges rather than
-## replaces: solids and fluids are disjoint lists, and an id whose gate has
-## since opened has to leave the table, not linger in it. Each list therefore
-## states the truth about its own ids and says nothing about the other's.
-func _record_choices(choices: Array) -> Array:
+## `gates` is the table the list's locks go into: `_ingredient_gates` for the
+## hopper's and tank's lists, which share it — solids and fluids are disjoint
+## lists, so this merges rather than replaces, and an id whose gate has since
+## opened leaves the table — and `_recipe_gates` for a machine's recipes, kept
+## apart so a recipe id is never read as a raw's (2026-10-03).
+func _record_choices(choices: Array, gates: Dictionary) -> Array:
 	var ids: Array = []
 	for choice in choices:
 		var id := String(choice.get("id", ""))
 		ids.append(id)
 		if bool(choice.get("locked", false)):
-			_ingredient_gates[id] = {
+			gates[id] = {
 				"name": String(choice.get("unlock_name", "")),
 				"item": String(choice.get("unlock_item", "")),
 				"required": int(choice.get("unlock_boxes", 0)),
 				"sold": int(choice.get("unlock_sold", 0)),
 			}
 		else:
-			_ingredient_gates.erase(id)
+			gates.erase(id)
 	return ids
 
 
@@ -8320,7 +8278,22 @@ func _selected_hopper_item() -> String:
 ## choice. The simulation is the one that decides — this only reads back the
 ## verdict it already put on the wire.
 func _choice_locked(item) -> bool:
-	return _ingredient_gates.has(String(item))
+	return _choice_gates().has(String(item))
+
+
+## The gate table for whatever the open picker lists: a machine's recipes
+## have their own, every other picker reads the ingredients'.
+func _choice_gates() -> Dictionary:
+	if _machine_recipes_shown():
+		return _recipe_gates
+	return _ingredient_gates
+
+
+## Whether the configuration panel is open on a machine whose MAKES picker
+## lists recipes. Read off the panel's own state, not re-asked of the wire.
+func _machine_recipes_shown() -> bool:
+	return _config_open and _config_kind != HOPPER_KIND and _config_kind != FLUID_TANK_KIND \
+		and _config_kind != WAREHOUSE_RACK_KIND and _config_kind != SPLITTER_KIND
 
 
 ## "tomato_paste" -> "Tomato Paste". Item ids are content, exactly as kind ids
@@ -8692,7 +8665,7 @@ func _update_ingredient_market() -> void:
 	var entries: Array = snapshot.get("entries", [])
 	if not _market_slots_match(entries):
 		_rebuild_market_slots(entries)
-	_market_money_label.text = "Money: %.0f" % float(snapshot.get("money", 0.0))
+	_market_money_label.text = "Money: %s" % Money.amount(float(snapshot.get("money", 0.0)))
 	_update_market_storage()
 	_position_market_panel()
 
@@ -8730,7 +8703,7 @@ func _update_ingredient_market() -> void:
 		if room <= 0:
 			slot["price_label"].text = "AT CAPACITY  ✗"
 		else:
-			slot["price_label"].text = "Buy %d  ·  %.0f" % [crate_units, crate_price]
+			slot["price_label"].text = "Buy %d  ·  %s" % [crate_units, Money.amount(crate_price)]
 			if not affordable:
 				slot["price_label"].text += "  ✗"
 		slot["price_label"].label_settings.font_color = (
@@ -8780,8 +8753,8 @@ func _update_ingredient_market() -> void:
 		# always-on STOCK plate carries the count and a FULL chip; the pair of
 		# numbers lives here, on the panel whose one verb the ceiling stops.
 		slot["owned_label"].text = (
-			("In stock %d\n%.0f each" % [owned, unit_price]) if capacity <= 0
-			else ("In stock %d / %d\n%.0f each" % [owned, capacity, unit_price])
+			("In stock %d\n%s each" % [owned, Money.amount(unit_price)]) if capacity <= 0
+			else ("In stock %d / %d\n%s each" % [owned, capacity, Money.amount(unit_price)])
 		)
 
 
@@ -9458,7 +9431,7 @@ func _build_contract_board_row(offer: Dictionary, index: int) -> Dictionary:
 	payout_label.name = "OfferPayout"
 	payout_label.label_settings = _contract_gain_settings
 	payout_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	payout_label.text = "+%d" % int(offer.get("payout", 0))
+	payout_label.text = Money.change(float(offer.get("payout", 0)))
 	badge_col.add_child(payout_label)
 	var badge_icon := TextureRect.new()
 	badge_icon.custom_minimum_size = _ui_v(BOARD_BADGE_SIZE)
@@ -9808,7 +9781,7 @@ func _update_contract_board(econ: Dictionary = {}) -> void:
 	_rebuild_board_sauce_chips(board)
 	if not _board_rows_match(board):
 		_rebuild_board_rows(board)
-	_board_money_label.text = "Money: %.0f" % float(econ.get("money", 0.0))
+	_board_money_label.text = "Money: %s" % Money.amount(float(econ.get("money", 0.0)))
 
 	# The left column: what is running, the clipboard's dockets at board size.
 	var contracts: Array = econ.get("contracts", [])
@@ -9867,12 +9840,12 @@ func _update_contract_board(econ: Dictionary = {}) -> void:
 			status.text = ("✔ running" + lost_note) if lost > 0 else "✔ running, on the left"
 			row["panel"].add_theme_stylebox_override("panel", _contract_card_style_ready)
 		elif not affordable:
-			button.text = "✗ SIGN · %d" % price
+			button.text = "✗ SIGN · %s" % Money.amount(price)
 			button.disabled = true
 			status.text = ("✗ can't afford" + lost_note) if lost > 0 else "✗ can't afford it"
 			row["panel"].add_theme_stylebox_override("panel", _contract_card_style)
 		else:
-			button.text = "SIGN · %d" % price
+			button.text = "SIGN · %s" % Money.amount(price)
 			button.disabled = false
 			if lost > 0:
 				# One line, the count folded into the word it counts: the
@@ -10611,7 +10584,7 @@ func _staff_row_state(category: Dictionary) -> Dictionary:
 		state_text = "✔ CREWED"
 	return {
 		"hired_text": "hired %d" % headcount,
-		"wage_text": "wage %d / head / period" % wage,
+		"wage_text": "wage %s / head / period" % Money.amount(wage),
 		"meter": {
 			"fraction": minf(float(headcount) / float(required), 1.0) if required > 0 else 0.0,
 			"color": METER_FILL_WARN if short > 0 else METER_FILL_LEVEL,
@@ -10686,7 +10659,7 @@ func _staff_hire_button_text(category: Dictionary) -> String:
 	var wage := int(category.get("wage", 0))
 	if wage <= 0:
 		return "HIRE +1"
-	return "HIRE +1 · %d/period" % wage
+	return "HIRE +1 · %s/period" % Money.amount(wage)
 
 
 ## WHAT a hire would cost the next payday, in words rather than in grey.
@@ -10708,7 +10681,9 @@ func _staff_hire_blocked_text(category: Dictionary, snapshot: Dictionary) -> Str
 	var wage := int(category.get("wage", 0))
 	var bill := _staff_next_bill(snapshot)
 	var money := int(floor(float(snapshot.get("money", 0.0))))
-	return "▲ next payday would go short — %d in hand, %d due, %d / period" % [money, bill, wage]
+	return "▲ next payday would go short — %s in hand, %s due, %s / period" % [
+		Money.amount(money), Money.amount(bill), Money.amount(wage),
+	]
 
 
 ## What hiring this category's shortfall would actually unblock, named from
@@ -10964,7 +10939,7 @@ func _staff_unpaid_count_if_payday_now(snapshot: Dictionary) -> int:
 ## exactly one head would go unpaid.
 func _staff_shortfall_text(shortfall: int, unpaid_count: int) -> String:
 	var head_word := "head goes" if unpaid_count == 1 else "heads go"
-	return "▲ next payday short by %d — %d %s unpaid" % [shortfall, unpaid_count, head_word]
+	return "▲ next payday short by %s — %d %s unpaid" % [Money.amount(shortfall), unpaid_count, head_word]
 
 
 ## The footer's lines, pure given the snapshot and the tick: the bill per
@@ -10979,15 +10954,15 @@ func _staff_footer_text(snapshot: Dictionary, current_tick: int) -> String:
 	var bill := _staff_next_bill(snapshot)
 	# The wire's `next_bill`, so this and the clipboard's wages line can never
 	# quote different numbers at the player for the same payday.
-	lines.append("wages %d / period  ·  next payday in %s" % [
-		bill, _format_remaining(remaining),
+	lines.append("wages %s / period  ·  next payday in %s" % [
+		Money.amount(bill), _format_remaining(remaining),
 	])
 	var money := float(snapshot.get("money", 0.0))
 	var shortfall := _staff_shortfall(snapshot, money)
 	if shortfall > 0:
 		lines.append(_staff_shortfall_text(shortfall, _staff_unpaid_count_if_payday_now(snapshot)))
 	else:
-		lines.append("balance after payday: %d" % (int(floor(money)) - bill))
+		lines.append("balance after payday: %s" % Money.amount(int(floor(money)) - bill))
 	var unpaid_last := int(snapshot.get("unpaid_last_payday", 0))
 	if unpaid_last > 0:
 		lines.append("✗ %d idled unpaid last payday" % unpaid_last)
@@ -11076,7 +11051,9 @@ func _contract_wages_state(snapshot: Dictionary, current_tick: int, money: float
 	var shortfall := _staff_shortfall(snapshot, money)
 	if shortfall > 0:
 		return {
-			"text": "⚠ wages %d due in %s — short %d, unpaid heads leave" % [bill, due, shortfall],
+			"text": "⚠ wages %s due in %s — short %s, unpaid heads leave" % [
+				Money.amount(bill), due, Money.amount(shortfall),
+			],
 			"short": true,
 		}
 	# Calm: silence. The CREW plate has the bill and the countdown, always up.
@@ -11092,7 +11069,7 @@ func _update_staff_panel() -> void:
 	var categories: Array = _staff_snapshot.get("categories", [])
 	if not _staff_rows_match(categories):
 		_rebuild_staff_rows(categories)
-	_staff_money_label.text = "Money: %.0f" % float(_staff_snapshot.get("money", 0.0))
+	_staff_money_label.text = "Money: %s" % Money.amount(float(_staff_snapshot.get("money", 0.0)))
 
 	# The verdict first, so the panel answers "am I short" before any row is
 	# read (the staffing ticket's requirement 2).
@@ -12106,7 +12083,7 @@ func _crew_cost_text(crew, wages_by_category: Dictionary) -> String:
 		if not wages_by_category.has(category):
 			return text
 		cost += int(entry.get("count", 0)) * int(wages_by_category[category])
-	return "%s\n%d / period" % [text, cost]
+	return "%s\n%s / period" % [text, Money.amount(cost)]
 
 
 ## The pure half of a docket's status (the contract-board epic): how far
@@ -12474,7 +12451,7 @@ func _crew_plate_state(snapshot: Dictionary, current_tick: int) -> Dictionary:
 		"rows": rows,
 		# Named, not bare: "payday in 18s · 10" left the 10 to be guessed at,
 		# and the two figures on this line are in different units.
-		"payday_text": "payday in %s  ·  wages %d" % [_format_remaining(remaining), bill],
+		"payday_text": "payday in %s  ·  wages %s" % [_format_remaining(remaining), Money.amount(bill)],
 		"afford_text": afford_text,
 		"afford_warn": shortfall > 0,
 	}
@@ -13775,7 +13752,20 @@ func _config_picker_choices() -> Array:
 		return [RACK_ANY_CHOICE] + _hopper_items + _tank_fluids
 	if _config_kind == SPLITTER_KIND:
 		return SPLITTER_MODES
-	return []
+	return _machine_recipes(_config_kind)
+
+
+## Every recipe a machine of `kind` can be set to, off the simulation
+## (`machine_recipes_json`, `data/recipes.ron` order). Empty for anything that
+## is not a machine, so a non-machine panel never grows a picker. The entries
+## carry their gate exactly as the CONTENTS lists do, and go through the same
+## `_record_choices`, so a recipe the player has not unlocked is padlocked
+## and names its gate (UI_UX §5g) — the sim refuses it either way.
+func _machine_recipes(kind: String) -> Array:
+	if kind == "" or sim == null:
+		return []
+	var parsed = JSON.parse_string(sim.machine_recipes_json(kind))
+	return _record_choices(parsed, _recipe_gates) if parsed is Array else []
 
 
 func _build_config_picker_slot(index: int, item_id: String) -> void:
@@ -13892,7 +13882,26 @@ func _config_picker_icon(choice: String) -> Texture2D:
 		return _icon_for_asset(SPLITTER_MODE_ASSETS.get(choice, SPLITTER_ASSET))
 	if choice == RACK_ANY_CHOICE:
 		return _icon_for_asset(_shop_asset_for(WAREHOUSE_RACK_KIND))
+	if _machine_recipes(_config_kind).has(choice):
+		return _recipe_icon(choice)
 	return _icon_for(choice)
+
+
+## A recipe's picture in a machine's picker: what it makes, when that has a
+## picture of its own (a pail of paste, a bottle, a case), and otherwise the
+## face of the sauce it is a stage of — `bbq_mix` and the finished `mustard`
+## only ever stand in a pipe, and a cardboard box would say nothing. Both
+## answers come off the content (`icon_names_json`, `cookbook_json`).
+func _recipe_icon(recipe: String) -> Texture2D:
+	if _icon_names.has(recipe) or ITEM_MODELS.has(recipe) or FLUID_MODELS.has(recipe):
+		return _icon_for(recipe)
+	var book = JSON.parse_string(sim.cookbook_json())
+	if book is Dictionary:
+		for sauce in book.get("sauces", []):
+			for step in sauce.get("steps", []):
+				if String(step.get("recipe", "")) == recipe and sauce.get("icon") != null:
+					return _icon_for_asset(String(sauce["icon"]))
+	return _icon_for(recipe)
 
 
 func _config_picker_name(choice: String) -> String:
@@ -13979,14 +13988,21 @@ func _open_config_panel(origin: Vector2i, kind: String) -> void:
 	#
 	# A splitter is the fourth: the picker alone, choosing which way it
 	# splits. It holds nothing to fill and has no level.
+	#
+	# A machine of a kind with several recipes carries a picker too: what it
+	# MAKES (2026-10-03). It runs the recipe the player chose and nothing
+	# else, so this is the one place that choice is made.
 	var crewed := _config_can_mothball(origin)
 	var rack := kind == WAREHOUSE_RACK_KIND
 	var splitter := kind == SPLITTER_KIND
+	var chooses_recipe := _machine_recipes(kind).size() > 1
 	_config_picker_box.visible = (
-		kind == HOPPER_KIND or kind == FLUID_TANK_KIND or rack or splitter
+		kind == HOPPER_KIND or kind == FLUID_TANK_KIND or rack or splitter or chooses_recipe
 	)
 	_config_picker_heading.text = (
-		"RESERVED FOR" if rack else ("SPLITS" if splitter else "CONTENTS")
+		"RESERVED FOR" if rack else (
+			"SPLITS" if splitter else ("MAKES" if chooses_recipe else "CONTENTS")
+		)
 	)
 	_config_machine_box.visible = crewed
 	_config_fill_row.visible = not crewed and not splitter
@@ -14341,7 +14357,7 @@ func _with_gate_note(note: String, choices: Array, condensed := false) -> String
 	var by_gate := {}
 	var locked := 0
 	for item in choices:
-		var gate: Dictionary = _ingredient_gates.get(String(item), {})
+		var gate: Dictionary = _choice_gates().get(String(item), {})
 		if gate.is_empty():
 			continue
 		locked += 1
@@ -14376,7 +14392,7 @@ func _gate_line(names: PackedStringArray, parts: PackedStringArray) -> String:
 ## words survive the gate lines folding to one (issue #206). "" for a choice
 ## no gate holds.
 func _gate_line_for(item: String) -> String:
-	var gate: Dictionary = _ingredient_gates.get(item, {})
+	var gate: Dictionary = _choice_gates().get(item, {})
 	if gate.is_empty():
 		return ""
 	return _gate_line(PackedStringArray([_item_display_name(item)]), PackedStringArray([
@@ -14489,6 +14505,13 @@ func _update_config_machine(key: String) -> void:
 		_set_config_level(_machine_progress(key))
 	_config_machine_state.text = _config_machine_state_text(key, mothballed)
 	_apply_config_mothball_state(mothballed)
+	if _config_picker_box.visible:
+		# Re-read every update, as the hopper's list is (#90): a gate that
+		# opens while the panel is up takes its padlocks off there and then.
+		var recipes := _machine_recipes(kind)
+		var recipe = machine.get("recipe")
+		_update_config_picker(String(recipe) if recipe != null else "")
+		_set_config_picker_note(MACHINE_PICKER_NOTE, recipes)
 
 
 ## The dock's version of the same panel (issue #19). It gets the switch for
@@ -14878,7 +14901,8 @@ func _on_config_picker_pressed(index: int) -> void:
 	if not _config_open:
 		return
 	if _config_kind != HOPPER_KIND and _config_kind != FLUID_TANK_KIND \
-			and _config_kind != WAREHOUSE_RACK_KIND and _config_kind != SPLITTER_KIND:
+			and _config_kind != WAREHOUSE_RACK_KIND and _config_kind != SPLITTER_KIND \
+			and _machine_recipes(_config_kind).size() <= 1:
 		return
 	if index < 0 or index >= _config_picker_slots.size():
 		return
@@ -14911,6 +14935,19 @@ func _on_config_picker_pressed(index: int) -> void:
 			"tile": [_config_tile.x, _config_tile.y],
 			"fluid": chosen,
 		})
+	elif _config_kind != HOPPER_KIND and _config_kind != FLUID_TANK_KIND \
+			and _config_kind != WAREHOUSE_RACK_KIND:
+		# A machine's recipe. A world command, not a config one: the chosen
+		# recipe names the pipe runs the machine touches and tints its
+		# product, so the runs and the machine are redrawn. Re-picking the
+		# current recipe is a no-op in the sim — it does not throw a batch
+		# away — so the press goes out whatever the slot shows.
+		_issue_world_command({
+			"type": "set_machine_recipe",
+			"tile": [_config_tile.x, _config_tile.y],
+			"recipe": chosen,
+		})
+		_update_config_panel()
 	elif _config_kind == WAREHOUSE_RACK_KIND:
 		# `null` is the "any" slot: the rack goes back to shared shelving.
 		# Whether the pick fits is the simulation's question, not this one's.
@@ -14946,7 +14983,8 @@ func _config_contents() -> String:
 		return _rack_filter_of(_rack_states.get(key, {}))
 	if _config_kind == SPLITTER_KIND:
 		return _splitter_mode_of(placement)
-	return ""
+	var recipe = _machine_states.get(key, {}).get("recipe")
+	return String(recipe) if recipe != null else ""
 
 
 ## Issues one of the panel's five commands and redraws what they touch.
@@ -15585,9 +15623,9 @@ func _fill_hotbar_tooltip(index: int, owned: int, price: float) -> void:
 	var select_line := ("press %s to select" % key) if key != "" else "click to select"
 	if key != "" and _fp_ctrl_cursor():
 		select_line = "click or press %s to select" % key
-	_hotbar_tooltip_body.text = "%s    ·    %.0f each\n%s    ·    buy in the build menu (E)" % [
+	_hotbar_tooltip_body.text = "%s    ·    %s each\n%s    ·    buy in the build menu (E)" % [
 		("carrying %d" % owned) if owned > 0 else "carrying none",
-		price,
+		Money.amount(price),
 		select_line,
 	]
 
@@ -16417,10 +16455,10 @@ func _placement_prompt_text() -> String:
 func _auto_buy_hint_text() -> String:
 	var price := _price_of(_build_kind)
 	if not _auto_buy_held():
-		return "SHIFT: buy a replacement as you place  (%.0f each)" % price
+		return "SHIFT: buy a replacement as you place  (%s each)" % Money.amount(price)
 	if not _can_afford(_build_kind):
-		return "⚠ SHIFT: cannot afford another  (%.0f)  ·  placing from stock" % price
-	return "⟳ SHIFT: buying a replacement each click  (-%.0f)" % price
+		return "⚠ SHIFT: cannot afford another  (%s)  ·  placing from stock" % Money.amount(price)
+	return "⟳ SHIFT: buying a replacement each click  (%s)" % Money.change(-price)
 
 
 ## The prompt's plate: the scene's near-black HUD panel with its rule
@@ -16734,14 +16772,14 @@ func _fill_payday_confirm(preview: Dictionary) -> void:
 	var subject := String(preview.get("subject", ""))
 	var cost := float(preview.get("cost", 0.0))
 	if cost > 0.0:
-		_payday_confirm_subject.text = "%s — %d" % [_spend_display_name(subject), roundi(cost)]
+		_payday_confirm_subject.text = "%s — %s" % [_spend_display_name(subject), Money.amount(cost)]
 	else:
 		# The hire: it takes nothing out of the balance and adds to every
 		# payday from here on, so quoting a cost of 0 would be a lie of
 		# omission about the one spend whose price is recurring.
-		_payday_confirm_subject.text = "%s — no cost today, %d every payday" % [
+		_payday_confirm_subject.text = "%s — no cost today, %s every payday" % [
 			_spend_display_name(subject),
-			int(preview.get("bill_after", 0)) - int(preview.get("next_bill", 0)),
+			Money.amount(int(preview.get("bill_after", 0)) - int(preview.get("next_bill", 0))),
 		]
 	for child in _payday_confirm_figures.get_children():
 		child.queue_free()
@@ -16749,9 +16787,9 @@ func _fill_payday_confirm(preview: Dictionary) -> void:
 	# snapshot's own payday clock rather than counted here.
 	var due_in := _payday_seconds_away()
 	for row in [
-		["balance after this", "%d" % roundi(float(preview.get("money_after", 0.0)))],
-		["next payday needs", "%d" % int(preview.get("bill_after", 0))],
-		["short by", "%d" % int(preview.get("shortfall_after", 0))],
+		["balance after this", Money.amount(float(preview.get("money_after", 0.0)))],
+		["next payday needs", Money.amount(int(preview.get("bill_after", 0)))],
+		["short by", Money.amount(int(preview.get("shortfall_after", 0)))],
 		["payday in", "%s" % ("%ds" % due_in if due_in >= 0 else "—")],
 	]:
 		_payday_confirm_figures.add_child(_payday_confirm_row(String(row[0]), String(row[1])))
@@ -17558,7 +17596,7 @@ func _update_debug_readout() -> void:
 			int(round(Engine.get_frames_per_second())),
 		],
 		# The same "%.0f" shape every other plate in this HUD shows money in.
-		"money %.0f" % money,
+		"money %s" % Money.amount(money),
 		# One directory rather than two absolute paths: `saves/` and
 		# `settings.cfg` are both `user://`, and the two full paths side by
 		# side made this panel wider than the factory behind it.
@@ -17572,8 +17610,8 @@ func _update_debug_readout() -> void:
 ## unambiguous because the label beside them says GIVE MONEY.
 func _debug_money_caption(amount: int) -> String:
 	if amount >= 1000 and amount % 1000 == 0:
-		return "%dk" % (amount / 1000)
-	return "%d" % amount
+		return "%s%dk" % [Money.SYMBOL, amount / 1000]
+	return Money.amount(amount)
 
 
 ## The directory `user://` resolves to on this machine, with the home
@@ -19904,7 +19942,7 @@ func _update_contract_panel(econ: Dictionary = {}) -> void:
 	if econ.is_empty():
 		econ = _read_economy()
 	var money := float(econ.get("money", 0.0))
-	_contract_money_label.text = "%d" % int(money)
+	_contract_money_label.text = Money.amount(int(money))
 	_flash_money_change(money)
 	_update_money_flyout()
 	_contract_dock_full_label.visible = bool(econ.get("delivery_full", false))
@@ -20104,7 +20142,7 @@ func _flash_money_change(money: float) -> void:
 	var whole := int(round(delta))
 	if whole == 0:
 		return
-	_contract_money_change.text = "+%d" % whole if whole > 0 else "%d" % whole
+	_contract_money_change.text = Money.change(whole)
 	_contract_money_change.label_settings = \
 		_contract_gain_settings if whole > 0 else _contract_spend_settings
 	_contract_money_change_until_msec = _hud_now_msec() + MONEY_FLYOUT_HOLD_MSEC
@@ -20260,7 +20298,7 @@ func _update_contract_card(card: Dictionary, contract: Dictionary, current_tick:
 	var status: Label = card["status_label"]
 	match level:
 		"ready":
-			status.text = "✔ READY — pays +%d at the next check" % int(contract.get("payout", 0))
+			status.text = "✔ READY — pays %s at the next check" % Money.change(float(contract.get("payout", 0)))
 			status.label_settings = _contract_ready_settings
 		"last_chance":
 			status.text = "⚠ LAST CHANCE — %d short; miss this check and it is LOST" % short
@@ -20821,7 +20859,7 @@ func _fire_payout(amount: int, paid_ids: Array, current_tick: int, dock_keys: Ar
 	_money_punch_tick = current_tick
 	_payout_flyout_tick = current_tick
 	if _payout_flyout != null:
-		_payout_flyout.text = "+%d" % amount
+		_payout_flyout.text = Money.change(amount)
 	for id in paid_ids:
 		_payout_stamp_ticks[String(id)] = current_tick
 	_burst_coins(amount, current_tick, dock_keys)
@@ -21093,7 +21131,7 @@ func _update_payout_stamps(current_tick: int) -> void:
 				label.text = "PAID"
 				label.modulate = MONEY_PUNCH_COLOR
 		elif label.text == "PAID":
-			label.text = "+%d" % int(label.get_meta("payout", 0))
+			label.text = Money.change(float(label.get_meta("payout", 0)))
 			label.modulate = Color(1, 1, 1, 1)
 
 

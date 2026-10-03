@@ -411,7 +411,10 @@ func _check_locked(book: Dictionary) -> void:
 	var display: String = main._kind_display_name(id)
 
 	_panel().show_tree()
-	var tree_text := _screen()
+	# A LATER tier's silhouette may name this sauce in its gate line — since
+	# 2026-10-03 BBQ's reads "0 of 100 boxes of Boxed Mustard" — and that is
+	# the gate, not a leak. Every other mention is.
+	var tree_text := _screen().replace("boxes of %s" % display, "")
 	if tree_text.find(display) >= 0:
 		_fail("the tree names the locked sauce %s; it is meant to be a silhouette" % id)
 	var node := _node("Node_%s" % id)
@@ -517,6 +520,9 @@ func _fact_text(book: Dictionary, name: String) -> String:
 				return String(fact.get("text", ""))
 			"kind_id":
 				return main._kind_display_name(String(fact.get("text", "")))
+			"money":
+				# Pounds, like every price in the book (2026-10-03).
+				return "£%d" % int(round(value))
 		if is_equal_approx(value, round(value)):
 			return "%d" % int(round(value))
 		return "%.2f" % value

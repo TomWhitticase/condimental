@@ -221,6 +221,37 @@
 //! loader refuses the older file by number, and
 //! `scripts/migrate-save-v6-to-v7.py` rewrites one outside the game.
 //!
+//! # Version 8: a machine runs the recipe the player chose
+//!
+//! [`SavedMachine::recipe`] kept its shape and changed its meaning
+//! (2026-10-03, `docs/DECISIONS.md`): it used to record which recipe a
+//! machine had picked for itself from its inputs, and now records the one
+//! the player chose — a machine with none makes nothing. A field whose
+//! meaning changes is a bump for the same reason a shape change is: a
+//! version 7 file read as version 8 would be a factory of machines that
+//! each made whatever they last happened to hold.
+//!
+//! The same version changed the mustard content (`data/recipes.ron`):
+//! mustard is no longer cooked, and its vinegar goes in at the mixer, so
+//! `mustard_mash` and `mustard_mix` no longer exist and the crusher makes
+//! a solid `ground_mustard` instead. The progression order swapped with it
+//! (`data/unlocks.ron`): mustard is the second sauce and BBQ the third.
+//!
+//! `scripts/migrate-save-v7-to-v8.py` rewrites a version 7 file outside
+//! the game, as every migration here does. A machine keeps the recipe it
+//! was holding, which on any working line is the one it was running; one
+//! holding none stays unset. A machine on a retired recipe (the wet mustard
+//! crusher, the turmeric-and-mash mixer, the mustard vat) is moved to its
+//! replacement or unset where there is none, its craft in progress
+//! abandoned and any input its new recipe does not take dropped. Every pipe
+//! is emptied — the loader names each run afresh from the chosen recipes,
+//! and fluid standing in a run whose name changed must not come back as
+//! something else; tanks keep theirs. A save that had opened BBQ (a hundred
+//! boxes of ketchup) has its `boxed_mustard` count raised to the hundred BBQ
+//! now waits on, so what the player had earned stays open. The script is
+//! pinned to a real version 7 save by `tests/save_migration.rs` and
+//! `scripts/test_migrate_save_v7_to_v8.py`.
+//!
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -247,7 +278,7 @@ use super::world::{
 /// The save format's version. Bumped whenever the shape below changes;
 /// a file naming any other version is rejected, never migrated — see the
 /// module doc, and every other loader in this crate.
-pub const SAVE_SCHEMA_VERSION: u32 = 7;
+pub const SAVE_SCHEMA_VERSION: u32 = 8;
 
 /// A fixed-point value as its raw `I16F16` bits — see the module doc for why
 /// a save never stores one as decimal text.
@@ -605,19 +636,16 @@ pub struct SavedMachine {
     /// recent refusal.
     #[serde(default)]
     pub refusal_hold: u32,
-    /// Which of its kind's recipes this machine is running
-    /// (`sim::machine::Machine::recipe`). `#[serde(default)]` and added to
-    /// `schema_version` 1 rather than bumping it, like
-    /// `SavedHopper::auto_fill` and `load` above: a save without it loads the
-    /// way a freshly placed machine starts — **undecided** for a kind with
-    /// several recipes, its only recipe for a kind with one — and re-picks
-    /// on its next idle tick. `None` is also what an undecided machine
-    /// writes (2026-10-02), so the two read identically; no format change.
+    /// The recipe the player chose for this machine
+    /// (`sim::machine::Machine::recipe`), or `None` for one with no recipe
+    /// chosen. **Its meaning is what made the format version 8**
+    /// (2026-10-03, see the module doc): until then a machine picked its own
+    /// recipe from its inputs and this recorded the pick; now it records a
+    /// choice, and a machine with `None` makes nothing.
     ///
-    /// A save written mid-craft is the case that needs it. `process` says a
-    /// craft is 30 ticks from done; this says *which* craft, and without it
-    /// a two-recipe kind could finish the reload making something the
-    /// player never started.
+    /// A save written mid-craft still needs it for its old reason too:
+    /// `process` says a craft is 30 ticks from done, and this says *which*
+    /// craft.
     #[serde(default)]
     pub recipe: Option<RecipeId>,
     /// Whether the player had switched this machine OFF
@@ -807,9 +835,14 @@ pub enum SaveError {
         tile: TileCoord,
         raw: Vec<String>,
     },
-    /// A machine whose in-flight craft names a recipe its *kind* cannot
-    /// run — `data/recipes.ron` changed under this save, either dropping
-    /// the recipe or moving it to another machine.
+    /// A machine with a craft in progress and no recipe — a craft that
+    /// could never finish. No build writes one.
+    CraftWithoutRecipe {
+        tile: TileCoord,
+    },
+    /// A machine set to a recipe its *kind* cannot run — `data/recipes.ron`
+    /// changed under this save, either dropping the recipe or moving it to
+    /// another machine.
     UnknownMachineRecipe {
         recipe: String,
         kind: String,
@@ -887,6 +920,12 @@ pub enum SaveError {
 /// development build whose change nobody has to explain any more.
 fn why_the_version_moved(found: u32) -> &'static str {
     match found {
+        7 => {
+            ". Version 8 has the player choose each machine's recipe, and makes \
+             mustard without a cooking vat, its vinegar going in at the mixer. \
+             Nothing you built is lost: scripts/migrate-save-v7-to-v8.py rewrites a \
+             version 7 save with every machine set to the recipe it was running"
+        }
         6 => {
             ". Version 7 lets a splitter split left, right, both ways or three ways, \
              which changed how a splitter is written. Nothing is lost: \
@@ -985,10 +1024,15 @@ impl std::fmt::Display for SaveError {
                 known,
             } => write!(
                 f,
-                "the {kind} at {tile:?} is running recipe '{recipe}', which this build's \
+                "the {kind} at {tile:?} is set to recipe '{recipe}', which this build's \
                  data/recipes.ron does not give that kind (it runs: {}) — the recipe file \
                  changed under this save",
                 known.join(", ")
+            ),
+            SaveError::CraftWithoutRecipe { tile } => write!(
+                f,
+                "the machine at {tile:?} has a craft in progress but no recipe chosen, so the \
+                 craft could never finish — no build of the game writes that"
             ),
             SaveError::UnknownEquipmentKind { kind } => write!(
                 f,
@@ -1411,10 +1455,10 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
                         format!("in the machine buffer at {:?}", placement.tile)
                     })?;
                 }
-                // The saved pick has to still be one this kind can run —
-                // the same list `Machine::choose` picks from, so a restored
-                // machine can never be on a recipe the live sim would not
-                // have chosen for it.
+                // The saved choice has to still be one this kind can run —
+                // the same list the machine's picker offers, so a restored
+                // machine can never be on a recipe the live sim would refuse
+                // to set.
                 if let Some(recipe) = &machine.recipe {
                     let known = world.recipes_for_kind(&placement.kind);
                     if !known.iter().any(|id| id == recipe) {
@@ -1425,6 +1469,14 @@ fn validate(world: &World, data: &SaveData) -> Result<(), SaveError> {
                             known,
                         });
                     }
+                }
+                // A craft in flight with no recipe could never finish. No
+                // build writes one: a machine with none chosen starts
+                // nothing, and switching recipe abandons the craft.
+                if machine.recipe.is_none() && machine.process.is_some() {
+                    return Err(SaveError::CraftWithoutRecipe {
+                        tile: placement.tile,
+                    });
                 }
             }
             SavedBody::Dock(dock) => {
@@ -1712,6 +1764,7 @@ fn replay_placements(world: &mut World, data: &SaveData) -> Result<(), SaveError
                 SavedBody::Hopper(hopper) => Some(hopper.item.clone()),
                 _ => None,
             },
+            recipe: None,
         });
         if world.placement_count() != index + 1 {
             return Err(SaveError::PlacementRefused {
@@ -1752,6 +1805,7 @@ fn rebuild_crossing(world: &mut World, placement: &SavedPlacement) -> Result<(),
             tile: placement.tile,
             direction,
             item: None,
+            recipe: None,
         });
     }
     let assembled = world
@@ -1813,16 +1867,6 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                     placement.tile,
                 )?;
                 let load = restore_load(&saved.load, placement.tile)?;
-                // A craft in flight has to know what it is making. A save
-                // written before `recipe` existed carries none, and back then
-                // every machine held its kind's first recipe — so that is the
-                // craft it was running. Without this, a machine that is
-                // undecided on placement would hold a process it can never
-                // finish.
-                let legacy_craft = match (&saved.recipe, saved.process) {
-                    (None, Some(_)) => world.recipes_for_kind(&placement.kind).into_iter().next(),
-                    _ => None,
-                };
                 // Validated above, so `resolve` finds it; a former id
                 // (`renamed_from`) is stored as the category's current id.
                 let refused_by = saved.refused_by.as_ref().map(|id| {
@@ -1853,9 +1897,9 @@ fn restore_bodies(world: &mut World, data: &SaveData) -> Result<(), SaveError> {
                 machine.mothballed = saved.mothballed;
                 // `validate` already checked this names one of the kind's
                 // recipes; a save without one keeps what the `Place` above
-                // started the machine on — undecided for a kind with a
+                // started the machine on — no recipe for a kind with a
                 // choice to make, its only recipe for one without.
-                if let Some(recipe) = saved.recipe.clone().or(legacy_craft) {
+                if let Some(recipe) = saved.recipe.clone() {
                     machine.recipe = Some(recipe);
                 }
             }

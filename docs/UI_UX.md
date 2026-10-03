@@ -722,6 +722,14 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
 - **Layout**: hotbar along the bottom (§5b); build/recipe menus as icon
   grids; hover tooltips rather than dense always-on text.
 
+**Money is pounds sterling, written with `£`, everywhere a player reads it**
+(owner's rule, 2026-10-03): balances, prices, wages, payouts, the cookbook
+and the BASICS prose. Whole pounds, no separator — "£1200", "+£50",
+"-£30". One helper owns the symbol, `godot_project/money_text.gd`
+(`Money.amount`, `Money.change`); a money figure formatted any other way is
+the bug. The simulation's `Money` stays unit-free: the currency is
+presentation.
+
 ### 5a. Build mode: the ghost, and what the next click will do
 
 The world starts empty and the player places every tile, so "what will this
@@ -1415,9 +1423,10 @@ Showing the shape of a chain the player has not earned would make the
 silhouette decorative, and hiding the node entirely would hide that there is
 anything to earn.
 
-**It shows, it does not select.** There is no "make this" button and there
-never will be: GAMEPLAY §9 is explicit that the layout is the choice and a
-recipe picker is a different game's affordance.
+**It shows, it does not select.** There is no "make this" button: what a
+machine makes is chosen on the machine itself, in its configuration panel's
+MAKES picker (2026-10-03), and the book is the reference, not a remote
+control.
 
 **It does not pause, and it is also on the pause menu.** As a modal it
 behaves exactly like E/M/C/H/P — one at a time, ESC closes it, the factory

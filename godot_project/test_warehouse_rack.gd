@@ -433,7 +433,7 @@ func _run_checks() -> void:
 			item, capacity, base_cap, int(rack.get("bays", 0)), slot_stack, want_capacity,
 		])
 		return
-	var want_stock := "In stock %d / %d\n%.0f each" % [_stock_of(item), capacity, unit_price]
+	var want_stock := "In stock %d / %d\n£%.0f each" % [_stock_of(item), capacity, unit_price]
 	if card["owned_label"].text != want_stock:
 		_fail("the crate reads '%s', expected '%s' — the ceiling is not on the card" % [
 			card["owned_label"].text.replace("\n", " / "), want_stock.replace("\n", " / "),
@@ -476,7 +476,7 @@ func _run_checks() -> void:
 			_stock_of(item), capacity, main._market_room(item), short_of_full,
 		])
 		return
-	var want_crate := "Buy %d  ·  %.0f" % [short_of_full, unit_price * float(short_of_full)]
+	var want_crate := "Buy %d  ·  £%.0f" % [short_of_full, unit_price * float(short_of_full)]
 	if card["price_label"].text != want_crate:
 		_fail("a crate with room for %d still offers '%s', not '%s'" % [
 			short_of_full, card["price_label"].text, want_crate,

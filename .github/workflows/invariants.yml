@@ -44,6 +44,8 @@ jobs:
       # stubs `gh`; it needs no network and no login.
       - name: .claude/hooks test
         run: python3 .claude/hooks/test_require_pr_screenshot.py
+      - name: save migration v7 -> v8 reproduces its fixture
+        run: python3 scripts/test_migrate_save_v7_to_v8.py
 
       # The workflows in this directory have no other test. actionlint also
       # shellchecks every `run:` block.

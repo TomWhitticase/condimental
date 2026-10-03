@@ -438,6 +438,7 @@ fn removing_and_replacing_a_hopper_starts_it_manual_again() {
         tile: TOMATO_HOPPER,
         direction: sim_core::sim::Direction::East,
         item: Some("tomato".to_string()),
+        recipe: None,
     });
 
     assert!(

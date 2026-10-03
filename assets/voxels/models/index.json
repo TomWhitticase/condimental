@@ -104,6 +104,10 @@
   "item_box_mustard": [
     "matte"
   ],
+  "item_ground_mustard": [
+    "matte",
+    "metal"
+  ],
   "item_ketchup_pail": [
     "matte",
     "metal",

@@ -253,6 +253,7 @@ fn a_placement_after_a_load_joins_the_factory() {
                 tile,
                 direction: Direction::East,
                 item: None,
+                recipe: None,
             });
         }
         assert_eq!(
@@ -449,6 +450,7 @@ fn unplaced_inventory_and_bought_stock_survive() {
         tile: (0, 0),
         direction: sim_core::sim::Direction::East,
         item: None,
+        recipe: None,
     });
     let money = world.money();
 
@@ -628,6 +630,20 @@ fn a_save_from_another_build_and_a_file_that_is_not_a_save_are_both_refused() {
         "unhelpful: {error}"
     );
 
+    // A v7 file is every save written while a machine picked its own recipe
+    // and mustard was cooked — refused, naming its script: the script keeps
+    // every machine on the recipe it was running, so nothing a working line
+    // depends on is lost.
+    let from_v7 = text.replace(&current, "schema_version: 7");
+    let Err(error) = World::from_save_ron(&from_v7, recipes()) else {
+        panic!("a save predating chosen recipes must be refused, never migrated");
+    };
+    let error = error.to_string();
+    assert!(
+        error.contains("schema_version 7") && error.contains("migrate-save-v7-to-v8.py"),
+        "unhelpful: {error}"
+    );
+
     // A real old file is a different SHAPE, not just a different number, so
     // the typed parse fails before the version is ever compared — and the
     // refusal must still be the version, not "could not parse". v4 had no
@@ -723,6 +739,7 @@ fn a_forked_line_with_turned_placements_round_trips() {
             tile,
             direction,
             item: item.map(str::to_string),
+            recipe: None,
         });
         assert_eq!(
             world.placement_count(),

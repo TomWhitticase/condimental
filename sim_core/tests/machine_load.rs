@@ -312,11 +312,10 @@ fn the_wire_shape_is_the_one_the_plan_promises() {
     );
 }
 
-/// A machine that has never been fed: starved, and UNDECIDED — it names no
-/// sauce and no ingredient, because nothing has told it which of its kind's
-/// recipes it is running. It used to name the first recipe's first input
-/// ("waiting for Tomato"), which is ketchup's at every stage, so every fresh
-/// machine read as a ketchup machine (owner's request, 2026-10-02).
+/// A machine with no recipe chosen: starved and `undecided`, naming no
+/// sauce and no ingredient (2026-10-03 — it makes nothing until the
+/// player picks one). It used to name its first recipe's first input
+/// ("waiting for Tomato"), ketchup's at every stage.
 #[test]
 fn a_machine_placed_and_never_fed_reads_starved_and_undecided() {
     let mut world = World::with_content_and_money(
@@ -334,6 +333,7 @@ fn a_machine_placed_and_never_fed_reads_starved_and_undecided() {
         tile: (0, 0),
         direction: Direction::East,
         item: None,
+        recipe: None,
     });
     let before = world.machine_load_snapshots();
     assert_eq!(before.len(), 1);
@@ -368,11 +368,10 @@ fn a_machine_placed_and_never_fed_reads_starved_and_undecided() {
 }
 
 /// The fluid-side reason: a recipe that wants a fluid and has no pipe at
-/// all. Since 2026-10-02 a never-fed bottler is `undecided` rather than
-/// short of a ketchup pipe, so the case is built the way a player meets it:
-/// a line that ran ketchup, then lost the pipe tile the bottler drew from.
-/// It keeps the recipe it was running (`Machine::choose`'s rule 3) and
-/// names the pipe that recipe is missing.
+/// Since 2026-10-03 a bottler is set to its recipe, and this case is
+/// built the way a player meets it: a line ran ketchup, then lost the
+/// pipe tile the bottler drew from. The bottler keeps the recipe it was
+/// set to and names the pipe that recipe is missing.
 #[test]
 fn an_unplumbed_machine_names_the_missing_pipe() {
     // Only the bottler: taking up the vat's supply tile also leaves the
@@ -443,6 +442,7 @@ fn a_changing_load_dirties_nothing() {
         tile: (0, 0),
         direction: Direction::East,
         item: None,
+        recipe: None,
     });
     world.tick();
     for _ in 0..50 {

@@ -164,16 +164,21 @@
 //!
 //! # Which recipe a machine runs
 //!
-//! Whichever of its kind's recipes its **current inputs** satisfy, re-picked
-//! on every idle tick and frozen for the length of a craft
-//! ([`super::machine::Machine::choose`]). `data/recipes.ron`'s file order
-//! breaks a tie. There is no player-facing picker and deliberately so: the
-//! plumbing and the hoppers *are* the mechanism, so a mixer on a vinegar
-//! pipe beside a sugar hopper blends ketchup mix and one on a ketchup pipe
-//! beside spice and molasses hoppers blends BBQ mix. Because the pick is
-//! live state rather than a property of the kind, it is saved
-//! ([`super::save::SavedMachine::recipe`]) — a reload mid-craft has to
-//! finish the craft that was started.
+//! **The one the player chose** (2026-10-03, `docs/DECISIONS.md`): at
+//! placement (`PlayerCommand::Place`'s `recipe`) or from the machine's own
+//! picker afterwards (`PlayerCommand::SetMachineRecipe`). A kind with one
+//! recipe is placed holding it; any other machine is placed with none
+//! chosen, and makes nothing, claims no pipe run and takes nothing off a
+//! belt until it has one. The choice is saved
+//! ([`super::save::SavedMachine::recipe`]).
+//!
+//! A machine used to pick its own recipe from whatever its buffers and
+//! pipes held, with `data/recipes.ron`'s order as the tiebreak, and there
+//! was deliberately no picker. That broke the moment two recipes on one kind
+//! drank the same fluid: the resolver below names a run from the recipes
+//! of the machines on it, could not know which one a self-picking machine
+//! would run, and so could not tell a ketchup mixer's vinegar run from a
+//! mustard mixer's (issue #184). A chosen recipe is a fact it can read.
 //!
 //! # Corners, finally
 //!
@@ -422,11 +427,21 @@ pub enum PlayerCommand {
     /// exactly one raw item and is a silent no-op in one that names two, and
     /// naming an item that is not raw at all is likewise refused. For every
     /// other kind the field is ignored.
+    ///
+    /// **`recipe` is a machine's recipe, and is only read for a machine**
+    /// (2026-10-03, `docs/DECISIONS.md`). A machine runs the recipe the
+    /// player chose and nothing else; this is the choice made at placement,
+    /// and [`Self::SetMachineRecipe`] is the same choice made afterwards.
+    /// `None` places a kind with exactly one recipe holding it, and any
+    /// other kind with **no recipe chosen** — it makes nothing until it is
+    /// given one. A recipe that does not run on `kind` is a refusal, not a
+    /// fallback. For every other kind the field is ignored.
     Place {
         kind: String,
         tile: TileCoord,
         direction: Direction,
         item: Option<ItemId>,
+        recipe: Option<RecipeId>,
     },
     /// Picks up whatever occupies `tile` and credits one back to the
     /// player's owned count of its kind.
@@ -607,6 +622,32 @@ pub enum PlayerCommand {
     /// which is a link, and links are only ever rebuilt there. What the
     /// splitter is carrying stays on it.
     SetSplitterMode { tile: TileCoord, mode: SplitMode },
+    /// Sets which recipe the machine at `tile` runs, or clears it with
+    /// `None` (2026-10-03, `docs/DECISIONS.md`) — the machine's own picker,
+    /// as [`Self::SetHopperItem`] is the hopper's. Any tile of the footprint
+    /// works.
+    ///
+    /// A machine never picks a recipe for itself any more. It used to, from
+    /// whatever its buffers and pipes held, and that guess is what the pipe
+    /// resolver could not make once two recipes on one kind drank the same
+    /// fluid (issue #184): a vinegar run between a ketchup mixer and a
+    /// mustard mixer could not be named. A chosen recipe can be read.
+    ///
+    /// **Switching is destructive, like declaring a tank.** The craft in
+    /// progress is abandoned, any input the new recipe does not use is
+    /// discarded, and any pipe run whose fluid the switch renames is
+    /// emptied rather than relabelled (`World::try_set_machine_recipe`).
+    /// The output buffer is kept: it is finished goods, and the belt it
+    /// feeds can still take them away.
+    ///
+    /// A silent no-op on an empty tile, a tile that is not a machine, a
+    /// recipe that does not run on the machine's kind, and the recipe it
+    /// already has — re-selecting the current one must not throw a craft
+    /// away.
+    SetMachineRecipe {
+        tile: TileCoord,
+        recipe: Option<RecipeId>,
+    },
     /// Hires one head into a staff category (the staff pools MVP epic,
     /// GAMEPLAY.md §7). **Free, and never refused for a known category** —
     /// wages are the cost (§5), paid every pay period by `World::tick`, and
@@ -694,7 +735,8 @@ enum PlayerCommandDto {
     /// `{"type": "place", "kind": "crusher", "tile": [4, 0],
     /// "direction": "east"}` — `direction` optional, defaulting to `"east"`.
     /// `item` is optional too and is only read when placing a hopper; see
-    /// [`PlayerCommand::Place`] for when omitting it is a refusal.
+    /// [`PlayerCommand::Place`] for when omitting it is a refusal. `recipe`
+    /// is optional and only read when placing a machine.
     Place {
         kind: String,
         tile: TileCoord,
@@ -702,6 +744,8 @@ enum PlayerCommandDto {
         direction: Direction,
         #[serde(default)]
         item: Option<ItemId>,
+        #[serde(default)]
+        recipe: Option<RecipeId>,
     },
     /// `{"type": "remove", "tile": [4, 0]}`.
     Remove {
@@ -769,6 +813,13 @@ enum PlayerCommandDto {
         tile: TileCoord,
         mode: SplitMode,
     },
+    /// `{"type": "set_machine_recipe", "tile": [4, 0], "recipe": "ketchup"}`
+    /// — `recipe` optional: omitted or `null` clears the choice.
+    SetMachineRecipe {
+        tile: TileCoord,
+        #[serde(default)]
+        recipe: Option<RecipeId>,
+    },
     Hire {
         category: String,
     },
@@ -829,6 +880,7 @@ impl PlayerCommand {
             Self::Fire { .. } => "fire",
             Self::SetRackFilter { .. } => "set_rack_filter",
             Self::SetSplitterMode { .. } => "set_splitter_mode",
+            Self::SetMachineRecipe { .. } => "set_machine_recipe",
             Self::DebugGrantMoney { .. } => "debug_grant_money",
         }
     }
@@ -854,11 +906,13 @@ impl From<PlayerCommandDto> for PlayerCommand {
                 tile,
                 direction,
                 item,
+                recipe,
             } => PlayerCommand::Place {
                 kind,
                 tile,
                 direction,
                 item,
+                recipe,
             },
             PlayerCommandDto::Remove { tile } => PlayerCommand::Remove { tile },
             PlayerCommandDto::Rotate { tile } => PlayerCommand::Rotate { tile },
@@ -883,6 +937,9 @@ impl From<PlayerCommandDto> for PlayerCommand {
             }
             PlayerCommandDto::SetSplitterMode { tile, mode } => {
                 PlayerCommand::SetSplitterMode { tile, mode }
+            }
+            PlayerCommandDto::SetMachineRecipe { tile, recipe } => {
+                PlayerCommand::SetMachineRecipe { tile, recipe }
             }
             PlayerCommandDto::Hire { category } => PlayerCommand::Hire { category },
             PlayerCommandDto::Fire { category } => PlayerCommand::Fire { category },
@@ -968,6 +1025,9 @@ enum PlacePlan {
         footprint: Footprint,
         tiles: Vec<TileCoord>,
         hopper_item: Option<ItemId>,
+        /// The recipe a machine is placed running — `None` for any other
+        /// kind, and for a machine with no recipe chosen yet.
+        machine_recipe: Option<RecipeId>,
     },
 }
 
@@ -979,6 +1039,8 @@ enum PlaceRefusal {
     NotBuildable,
     /// A hopper with no item named where one is needed, or a non-raw one.
     HopperItem,
+    /// A machine named a recipe that does not run on its kind.
+    Recipe,
     /// A belt and a pipe that would cross, but run the same way.
     Parallel,
     /// The footprint overlaps something already placed.
@@ -1173,10 +1235,9 @@ pub struct MachineSnapshot {
     pub kind: String,
     pub direction: Direction,
     pub footprint: Footprint,
-    /// What it is making, or `null` while it is **undecided** — placed but
-    /// not yet handed anything that names a sauce (`Machine::choose`'s rule
-    /// 4). Godot draws an undecided machine as handling any sauce: neutral
-    /// tint, no sauce named.
+    /// The recipe the player chose for it, or `null` while none is chosen
+    /// — a machine with no recipe makes nothing. Godot draws one as
+    /// handling any sauce: neutral tint, no sauce named.
     pub recipe: Option<RecipeId>,
     /// (start_tick, required_ticks) — Godot derives progress from this plus
     /// the current tick count rather than needing a snapshot every tick.
@@ -1251,19 +1312,14 @@ impl MachineLoadSnapshot {
 /// {"kind": "staff",          "item": "manufacturing"} // refused its crew; item = category id
 /// {"kind": "unnameable_pipe","item": "liquid_smoke"} // a run is here, nothing can name it
 /// {"kind": "ambiguous_pipe", "item": "liquid_smoke"} // a run is here, it could be several fluids
-/// {"kind": "undecided",      "item": ""}         // nothing fed yet names a sauce
+/// {"kind": "undecided",      "item": ""}         // no recipe chosen yet
 /// ```
 ///
-/// `undecided` (2026-10-02) is a machine that has not been handed anything
-/// that picks one of its kind's recipes ([`MachineSnapshot::recipe`] is
-/// `null`). It used to report the first recipe's first input — a fresh
-/// mixer was "waiting for Tomato Paste" — which named ketchup about a
-/// machine that could make any sauce. `item` is empty: no one ingredient is
-/// the missing one. An undecided machine still reports two pipe-side kinds,
-/// also with an EMPTY `item`: a faulted draw run, and `no_supply_pipe` when
-/// it has no draw pipe at all and every recipe of its kind drinks a fluid
-/// (today the mixer, the vat and the bottler — a lone one could never be
-/// fed, so it names the fix).
+/// `undecided` is a machine with **no recipe chosen** ([`MachineSnapshot::recipe`]
+/// is `null`): it makes nothing until the player picks one, so there is no
+/// ingredient to name and `item` is empty. It is reported ahead of every
+/// pipe and ingredient kind, because such a machine claims no run and
+/// takes nothing off a belt — nothing upstream can be why it is idle.
 ///
 /// The last two are issue #54's, and they replace a *wrong* answer rather
 /// than filling a silence: a machine on a run the naming pass could not
@@ -1317,8 +1373,10 @@ pub enum StallKind {
     /// meaningful supply state and "waiting for Tomato" about one is a lie
     /// the player then has to debug.
     Mothballed,
-    /// Nothing it has been fed picks a recipe yet — see [`Stall`]. `item`
-    /// is empty.
+    /// No recipe chosen yet: the machine makes nothing until the player
+    /// picks one (`PlayerCommand::SetMachineRecipe`). `item` is empty.
+    /// The wire name is the older one, from when a machine picked its own
+    /// recipe and this meant "nothing fed in has decided it yet".
     Undecided,
 }
 
@@ -1730,7 +1788,7 @@ pub struct StorageSnapshot {
 pub struct FluidTapSnapshot {
     /// Origin tile of the machine on this end of the network.
     pub machine_tile: TileCoord,
-    /// `null` for an undecided machine — see [`MachineSnapshot::recipe`].
+    /// `null` for a machine with no recipe chosen — see [`MachineSnapshot::recipe`].
     pub machine_recipe: Option<RecipeId>,
     /// How much the recipe moves per craft — consumed for a tap in `taps`,
     /// deposited for one in `producers`.
@@ -1868,7 +1926,7 @@ pub enum TileSnapshot {
         direction: Direction,
         footprint: Footprint,
         origin_tile: TileCoord,
-        /// `null` while undecided — see [`MachineSnapshot::recipe`].
+        /// `null` while no recipe is chosen — see [`MachineSnapshot::recipe`].
         recipe: Option<RecipeId>,
         process: Option<(u64, u64)>,
         load: MachineLoadSnapshot,
@@ -2227,7 +2285,7 @@ pub struct PlacementSnapshot {
     pub footprint: Footprint,
     pub occupies: Vec<TileCoord>,
     /// The recipe a machine is making — `null` for every placement that is
-    /// not a machine, **and for a machine that is still undecided** (see
+    /// not a machine, **and for a machine with no recipe chosen** (see
     /// [`MachineSnapshot::recipe`]). So `recipe != null` does not say "this
     /// is a machine"; [`Self::machine`] does.
     pub recipe: Option<RecipeId>,
@@ -2248,7 +2306,7 @@ pub struct PlacementSnapshot {
     pub split_mode: Option<SplitMode>,
     /// `true` on a recipe-running machine and **absent** on every other
     /// kind, `split_mode`'s rule. It exists because `recipe` stopped being
-    /// the answer to "is this a machine": an undecided machine carries a
+    /// the answer to "is this a machine": a machine with no recipe chosen carries a
     /// `null` recipe exactly like a belt (2026-10-02).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub machine: bool,
@@ -3255,6 +3313,91 @@ impl World {
         }
     }
 
+    /// Whether `kind` is a machine kind — one some recipe runs on — rather
+    /// than one of the fixed building kinds.
+    fn is_machine_kind(&self, kind: &str) -> bool {
+        !matches!(
+            kind,
+            BELT_KIND
+                | PIPE_KIND
+                | SPLITTER_KIND
+                | DOCK_KIND
+                | FLUID_TANK_KIND
+                | WAREHOUSE_RACK_KIND
+                | HOPPER_KIND
+                | CROSSING_KIND
+        ) && self.recipes.for_machine(kind).next().is_some()
+    }
+
+    /// Whether recipe `id` runs on machine `kind`.
+    fn recipe_runs_on(&self, kind: &str, id: &str) -> bool {
+        self.recipes
+            .get(id)
+            .is_some_and(|recipe| recipe.machine == kind)
+    }
+
+    /// The shut gate holding recipe `id` back, or `None` when a machine may
+    /// be set to it now (2026-10-03). A recipe is locked while any raw it
+    /// needs — directly, or through the recipes upstream that make its other
+    /// inputs — is behind a gate that has not opened; the gate reported is
+    /// the LAST such in `data/unlocks.ron`'s order, the one whose opening
+    /// releases the recipe. So in a new game a mixer offers Mustard and BBQ
+    /// Mix padlocked, the CONTENTS pickers' rule (UI_UX §5g), and
+    /// `SetMachineRecipe` refuses them the way `SetHopperItem` refuses a
+    /// locked ingredient.
+    pub fn recipe_gate(&self, id: &str) -> Option<super::unlocks::GateProgress> {
+        let mut raws = BTreeSet::new();
+        self.raws_behind(id, &mut BTreeSet::new(), &mut raws);
+        let order: Vec<String> = self
+            .economy
+            .unlocks()
+            .ordered()
+            .iter()
+            .map(|gate| gate.name.clone())
+            .collect();
+        raws.iter()
+            .filter_map(|raw| self.economy.ingredient_gate(raw))
+            .max_by_key(|gate| order.iter().position(|name| *name == gate.name))
+    }
+
+    /// Every raw recipe `id` needs, through the recipes that make its made
+    /// inputs. `seen` guards a cycle, which content cannot have but this
+    /// walk must not hang on.
+    fn raws_behind(&self, id: &str, seen: &mut BTreeSet<String>, raws: &mut BTreeSet<String>) {
+        if !seen.insert(id.to_string()) {
+            return;
+        }
+        let Some(recipe) = self.recipes.get(id) else {
+            return;
+        };
+        for (input, _) in recipe.inputs.iter().chain(&recipe.fluid_inputs) {
+            let maker = self.recipes.ordered().iter().find(|r| {
+                r.outputs
+                    .iter()
+                    .chain(&r.fluid_outputs)
+                    .any(|(out, _)| out == input)
+            });
+            match maker {
+                Some(maker) => {
+                    let maker = maker.id.clone();
+                    self.raws_behind(&maker, seen, raws);
+                }
+                None => {
+                    raws.insert(input.clone());
+                }
+            }
+        }
+    }
+
+    /// The recipe a `kind` with exactly one recipe is placed holding —
+    /// there is nothing for the player to choose — and `None` for a kind
+    /// with several, which is placed with none chosen.
+    fn only_recipe_of(&self, kind: &str) -> Option<RecipeId> {
+        let mut candidates = self.recipes.for_machine(kind);
+        let only = candidates.next().map(|recipe| recipe.id.clone());
+        only.filter(|_| candidates.next().is_none())
+    }
+
     /// Which item a hopper being placed will hold, given what the player
     /// asked for (if anything). `None` means "refuse the placement".
     ///
@@ -3318,6 +3461,7 @@ impl World {
         tile: TileCoord,
         direction: Direction,
         item: Option<&str>,
+        recipe: Option<&str>,
     ) -> Result<PlacePlan, PlaceRefusal> {
         if !self.can_construct(kind) {
             return Err(PlaceRefusal::NotBuildable);
@@ -3329,6 +3473,22 @@ impl World {
             match self.hopper_item_for(item) {
                 Some(resolved) => Some(resolved),
                 None => return Err(PlaceRefusal::HopperItem),
+            }
+        } else {
+            None
+        };
+        // A machine's recipe, likewise resolved before anything spawns: a
+        // named one must run on this kind, and an omitted one is the kind's
+        // only recipe when it has exactly one, and no recipe otherwise.
+        let machine_recipe = if self.is_machine_kind(kind) {
+            match recipe {
+                // Not gated, deliberately, for `hopper_item_for`'s reason: the
+                // player never places with a recipe (the picker is
+                // `SetMachineRecipe`, which IS gated), and a layout fixture
+                // names one to build a factory to photograph.
+                Some(id) if self.recipe_runs_on(kind, id) => Some(id.to_string()),
+                Some(_) => return Err(PlaceRefusal::Recipe),
+                None => self.only_recipe_of(kind),
             }
         } else {
             None
@@ -3346,6 +3506,7 @@ impl World {
                 footprint,
                 tiles,
                 hopper_item,
+                machine_recipe,
             },
         };
         if self.shop.owned.count(kind) == 0 {
@@ -3368,7 +3529,7 @@ impl World {
         direction: Direction,
         plan: PlacePlan,
     ) -> Entity {
-        let (footprint, tiles, hopper_item) = match plan {
+        let (footprint, tiles, hopper_item, machine_recipe) = match plan {
             PlacePlan::Crossing { occupant, tiles } => {
                 self.assemble_crossing(occupant, kind, direction);
                 let taken = self.shop.owned.take_one(kind);
@@ -3385,7 +3546,8 @@ impl World {
                 footprint,
                 tiles,
                 hopper_item,
-            } => (footprint, tiles, hopper_item),
+                machine_recipe,
+            } => (footprint, tiles, hopper_item, machine_recipe),
         };
 
         let placement = Placement {
@@ -3467,25 +3629,15 @@ impl World {
                 WarehouseRack::default(),
             )),
             machine_kind => {
-                // A freshly placed machine is UNDECIDED when its kind has a
-                // choice to make: it names no sauce until its inputs pick
-                // one (`Machine::choose`'s rule 4). It used to start on the
-                // kind's first recipe in file order — ketchup's, at every
-                // stage — so every fresh line read as a ketchup line until
-                // something else was fed in (owner's request, 2026-10-02).
-                // A kind with exactly one recipe has nothing to decide and
-                // holds it from the start, so its stall readout can still
-                // name the raw it is waiting for.
-                let mut candidates = self.recipes.for_machine(machine_kind);
-                let only = candidates.next().map(|recipe| recipe.id.clone());
-                let recipe = only.filter(|_| candidates.next().is_none());
+                // The recipe `plan_place` resolved: the one the player
+                // named, the kind's only one, or none chosen yet.
                 self.ecs.spawn((
                     position,
                     placement,
                     BodyKind::Machine,
                     Machine::new(
                         machine_kind,
-                        recipe,
+                        machine_recipe,
                         MACHINE_INPUT_CAPACITY,
                         MACHINE_OUTPUT_CAPACITY,
                     ),
@@ -4304,7 +4456,8 @@ impl World {
             // Whether this kind plumbs at all is a property of the *kind*,
             // not of whichever recipe it happens to be running: a machine
             // that can draw a fluid under any of its recipes gets its taps,
-            // so switching recipe never has to rebuild the topology.
+            // so switching recipe never changes which runs it touches —
+            // only what the resolver below names them.
             let (mut draws, mut deposits) = (false, false);
             for recipe in self.recipes.for_machine(&kind) {
                 draws |= !recipe.fluid_inputs.is_empty();
@@ -4378,8 +4531,14 @@ impl World {
                 }
             }
 
+            let recipe = self
+                .ecs
+                .get::<&Machine>(machine)
+                .ok()
+                .and_then(|body| body.recipe.clone());
             plumbing.push(Plumbing {
                 kind,
+                recipe,
                 output: output_network,
                 inputs: input_networks,
             });
@@ -4997,7 +5156,7 @@ impl World {
         };
         let has_room = {
             let body = self.ecs.get::<&Machine>(machine).unwrap();
-            body.input.has_room_for(&item_id, 1)
+            body.takes(&item_id, &self.recipes)
         };
         if !has_room {
             return false;
@@ -5360,11 +5519,14 @@ impl World {
                 tile,
                 direction,
                 item,
+                recipe,
             } => {
                 // Planned here, applied there: `apply_place` cannot refuse,
                 // so every refusal `Place` has is one `plan_place` makes —
                 // the same call `preview_command` makes.
-                if let Ok(plan) = self.plan_place(&kind, tile, direction, item.as_deref()) {
+                if let Ok(plan) =
+                    self.plan_place(&kind, tile, direction, item.as_deref(), recipe.as_deref())
+                {
                     self.apply_place(&kind, tile, direction, plan);
                 }
             }
@@ -5401,6 +5563,9 @@ impl World {
             }
             PlayerCommand::SetSplitterMode { tile, mode } => {
                 self.try_set_splitter_mode(tile, mode);
+            }
+            PlayerCommand::SetMachineRecipe { tile, recipe } => {
+                self.try_set_machine_recipe(tile, recipe);
             }
             // Neither dirties a chunk: a head is not a tile. Both are silent
             // about an unknown category, and `Fire` about an empty pool —
@@ -5467,7 +5632,9 @@ impl World {
                 tile,
                 direction,
                 item,
-            } => match self.plan_place(kind, *tile, *direction, item.as_deref()) {
+                recipe,
+            } => match self.plan_place(kind, *tile, *direction, item.as_deref(), recipe.as_deref())
+            {
                 Ok(PlacePlan::Crossing { .. }) => PreviewResult::accepted(CROSSING_KIND),
                 Ok(PlacePlan::Fresh { .. }) => PreviewResult::accepted(kind),
                 Err(refusal) => PreviewResult::refused(self.place_refusal_reason(
@@ -5513,6 +5680,7 @@ impl World {
             }
             PlaceRefusal::Parallel => "A belt can only cross a pipe at right angles.".to_string(),
             PlaceRefusal::Occupied => "That space is already taken.".to_string(),
+            PlaceRefusal::Recipe => format!("{name} cannot make that."),
             PlaceRefusal::NoneOwned => format!("You own no {name} to place."),
         }
     }
@@ -5721,6 +5889,92 @@ impl World {
             splitter.set_mode(mode);
         }
         self.recompute_topology();
+        self.mark_placement_dirty(entity);
+        true
+    }
+
+    /// [`PlayerCommand::SetMachineRecipe`]. Silent no-op on an empty tile,
+    /// a tile that is not a machine, a recipe that does not run on the
+    /// machine's kind, and the recipe it already has.
+    ///
+    /// A switch abandons the craft in progress and discards any input the
+    /// new recipe does not take — a mustard mixer has no use for the sugar
+    /// a ketchup one was handed, and holding it would only fill the buffer.
+    /// Nothing is credited back, for [`Self::try_set_tank_fluid`]'s reason:
+    /// a choice that destroys things is said up front by the picker.
+    ///
+    /// A chosen recipe seeds [`resolve_network_fluids`], so the topology is
+    /// recomputed. **Fluid whose run the switch renames is destroyed, not
+    /// relabelled** — the rule `try_set_tank_fluid` learned the hard way:
+    /// the recompute carries pipe volumes across by tile, so a vat switched
+    /// from ketchup to BBQ would otherwise turn the ketchup standing in its
+    /// outlet run into BBQ nobody cooked. Every run whose tiles carried a
+    /// named fluid before the switch and carry a different one (or none)
+    /// after it is emptied.
+    fn try_set_machine_recipe(&mut self, tile: TileCoord, recipe: Option<RecipeId>) -> bool {
+        let Some(&entity) = self.topology.grid.get(&tile) else {
+            return false;
+        };
+        let kind = match self.ecs.get::<&Machine>(entity) {
+            Ok(machine) => machine.kind.clone(),
+            Err(_) => return false,
+        };
+        if let Some(id) = &recipe
+            && (!self.recipe_runs_on(&kind, id) || self.recipe_gate(id).is_some())
+        {
+            return false;
+        }
+        {
+            let mut machine = self
+                .ecs
+                .get::<&mut Machine>(entity)
+                .expect("checked above that this is a machine");
+            if machine.recipe == recipe {
+                return false;
+            }
+            let takes: BTreeSet<ItemId> = recipe
+                .as_ref()
+                .and_then(|id| self.recipes.get(id))
+                .map(|r| r.inputs.iter().map(|(item, _)| item.clone()).collect())
+                .unwrap_or_default();
+            let held: Vec<(ItemId, u32)> = machine.input.iter().cloned().collect();
+            for (item, quantity) in held {
+                if !takes.contains(&item) {
+                    machine.input.remove(&item, quantity);
+                }
+            }
+            machine.process = None;
+            machine.recipe = recipe;
+        }
+        let before: BTreeMap<TileCoord, FluidId> = self
+            .topology
+            .networks
+            .iter()
+            .filter_map(|network| network.fluid.as_ref().map(|fluid| (network, fluid)))
+            .flat_map(|(network, fluid)| {
+                network
+                    .segments()
+                    .iter()
+                    .map(move |segment| (segment.tile, fluid.clone()))
+            })
+            .collect();
+        self.recompute_topology();
+        let mut drained: Vec<TileCoord> = Vec::new();
+        for network in &mut self.topology.networks {
+            let renamed = network.segments().iter().any(|segment| {
+                before
+                    .get(&segment.tile)
+                    .is_some_and(|old| network.fluid.as_ref() != Some(old))
+            });
+            if renamed && network.purge() > Fx::ZERO {
+                drained.extend(network.segments().iter().map(|segment| segment.tile));
+            }
+        }
+        for tile in drained {
+            if let Some(&pipe) = self.topology.grid.get(&tile) {
+                self.mark_placement_dirty(pipe);
+            }
+        }
         self.mark_placement_dirty(entity);
         true
     }
@@ -6423,7 +6677,7 @@ impl World {
             Some(BodyKind::Machine) => self
                 .ecs
                 .get::<&Machine>(target)
-                .is_ok_and(|body| body.input.has_room_for(item, 1)),
+                .is_ok_and(|body| body.takes(item, &self.recipes)),
             Some(BodyKind::Dock) => self
                 .ecs
                 .get::<&Dock>(target)
@@ -6500,39 +6754,13 @@ impl World {
                 .map(|&(_, network, segment)| (network, segment))
                 .collect()
         };
-        // An undecided machine is waiting for SOMETHING to be fed in, but
-        // has no recipe to name a missing ingredient from. What it can still
-        // say, in this order:
-        //
-        // 1. A faulted run on its draw side (issue #54's rule: a run the sim
-        //    cannot make sense of says so) — it is why nothing has arrived.
-        // 2. No draw pipe at all, on a kind every one of whose recipes
-        //    drinks a fluid: it can never be fed, so it says the fix — "no
-        //    supply pipe" — with no fluid named, since none is chosen yet.
-        // 3. Otherwise `undecided`: waiting for ingredients, naming none.
-        //
-        // Deliberately NOT "waiting for <the run's fluid>" off a run that is
-        // named but still empty: on a correctly plumbed line that has not
-        // filled yet that would put "Ketchup Mix" back on every fresh vat,
-        // which is the readout the owner asked to be rid of (2026-10-02).
+        // A machine with no recipe chosen makes nothing until the player
+        // picks one (2026-10-03), and that is the only thing to say about
+        // it: it claims no pipe run and takes nothing off a belt, so no
+        // ingredient or pipe fault can be its stall.
         let Some(held) = body.recipe.as_ref() else {
-            let taps = taps_of(&self.topology.machine_taps);
-            let fault = taps
-                .iter()
-                .map(|&(network, _)| self.topology.networks[network].naming())
-                .find(|naming| naming.is_fault());
-            let needs_a_pipe = self
-                .recipes
-                .for_machine(&body.kind)
-                .all(|r| !r.fluid_inputs.is_empty());
-            let kind = match fault {
-                Some(PipeNaming::Ambiguous) => StallKind::AmbiguousPipe,
-                Some(_) => StallKind::UnnameablePipe,
-                None if taps.is_empty() && needs_a_pipe => StallKind::NoSupplyPipe,
-                None => StallKind::Undecided,
-            };
             return Some(Stall {
-                kind,
+                kind: StallKind::Undecided,
                 item: String::new(),
             });
         };
@@ -7091,23 +7319,45 @@ impl World {
         self.footprint_for(kind)
     }
 
-    /// Every solid item id this world's recipes mention, consumed or
-    /// produced, sorted and deduplicated. There is no `items.ron`, so this
-    /// is the closest thing to an item registry the crate has — and it is
-    /// what [`super::save`] checks a loaded belt, buffer, dock or delivery
-    /// pool against, since an item id that no recipe names any more is a
-    /// content change the save cannot survive.
+    /// [`Self::recipes_for_kind`] as a machine's picker draws it: each recipe
+    /// with its lock, in the same shape the CONTENTS pickers' choices take
+    /// ([`super::ingredients::ContentsChoice`]), so one padlock path in Godot
+    /// serves all of them.
+    pub fn machine_recipe_choices(&self, kind: &str) -> Vec<super::ingredients::ContentsChoice> {
+        self.recipes_for_kind(kind)
+            .into_iter()
+            .map(|id| {
+                let gate = self.recipe_gate(&id);
+                super::ingredients::ContentsChoice {
+                    locked: gate.is_some(),
+                    unlock_name: gate.as_ref().map_or_else(String::new, |g| g.name.clone()),
+                    unlock_item: gate.as_ref().map_or_else(String::new, |g| g.item.clone()),
+                    unlock_boxes: gate.as_ref().map_or(0, |g| g.required),
+                    unlock_sold: gate.as_ref().map_or(0, |g| g.sold),
+                    id,
+                }
+            })
+            .collect()
+    }
+
     /// Every recipe id a machine of `kind` can run, in `data/recipes.ron`
-    /// order — the list [`super::machine::Machine::choose`] picks from, and
+    /// order — the list a machine's picker offers (`SimBridge::machine_recipes_json`),
+    /// the list `PlayerCommand::SetMachineRecipe` chooses from, and
     /// what [`super::save`] checks a saved in-flight craft against. Empty
     /// for a kind no recipe names, which is a kind that cannot be placed.
-    pub(super) fn recipes_for_kind(&self, kind: &str) -> Vec<String> {
+    pub fn recipes_for_kind(&self, kind: &str) -> Vec<String> {
         self.recipes
             .for_machine(kind)
             .map(|recipe| recipe.id.clone())
             .collect()
     }
 
+    /// Every solid item id this world's recipes mention, consumed or
+    /// produced, sorted and deduplicated. There is no `items.ron`, so this
+    /// is the closest thing to an item registry the crate has — and it is
+    /// what [`super::save`] checks a loaded belt, buffer, dock or delivery
+    /// pool against, since an item id that no recipe names any more is a
+    /// content change the save cannot survive.
     pub(super) fn recipe_item_ids(&self) -> Vec<String> {
         let mut ids: Vec<String> = self
             .recipes
@@ -7313,21 +7563,49 @@ fn validate_chain(
 /// different questions.
 struct Plumbing {
     kind: String,
+    /// The recipe the player chose for this machine, if any — the only one
+    /// [`resolve_network_fluids`] lets it claim a run with.
+    recipe: Option<RecipeId>,
     output: Option<usize>,
     inputs: Vec<usize>,
+}
+
+impl Plumbing {
+    /// The machine's chosen recipe as an iterator of zero or one — what
+    /// steps 1 and 2 of [`resolve_network_fluids`] read. A machine with no
+    /// recipe chosen claims nothing for any run it touches.
+    fn chosen<'r>(&self, recipes: &'r RecipeRegistry) -> impl Iterator<Item = &'r Recipe> {
+        self.recipe
+            .as_deref()
+            .and_then(|id| recipes.get(id))
+            .into_iter()
+    }
 }
 
 /// Decides what fluid each network carries, for the whole graph at once.
 ///
 /// This is the subtlest thing in this file; the *why* is in the module doc
-/// under "What a pipe run carries". In short: a machine kind may run
-/// several recipes, so a run's id can no longer be read off the one recipe
-/// a machine at its end was assigned. It is derived instead, by narrowing:
+/// under "What a pipe run carries". In short: a run's id is not stored on
+/// the run; it is derived from the machines at its ends, by narrowing.
+///
+/// **A machine speaks only for the recipe the player chose for it**
+/// (2026-10-03). Until then every machine claimed for every recipe its
+/// *kind* could run, because the machine picked its own recipe from its
+/// inputs and the resolver could not know which it would pick. That made
+/// two recipes on one kind that drank the same fluid impossible to tell
+/// apart — a vinegar run between a ketchup mixer and a mustard mixer stayed
+/// ambiguous forever, since the solid inputs that differed were invisible
+/// here (issue #184). With a chosen recipe there is nothing to tell apart,
+/// and a machine with none chosen claims nothing. The steps below say
+/// "recipes" because the sets they build are still sets; for a machine
+/// each holds zero or one.
+///
+/// It is derived, by narrowing:
 ///
 /// 1. **What could reach it.** Each run starts with the set of fluids that
 ///    can physically get into it. A run a tank discharges into can hold a
 ///    raw fluid — nothing else enters the graph from outside. A run off a
-///    machine's outlet face can hold anything that kind's recipes make.
+///    machine's outlet face can hold what that machine's chosen recipe makes.
 ///    Every other run starts empty, which is why a length of pipe joined to
 ///    nothing stays unnamed. A run whose tank **declares** what it holds
 ///    (`PlayerCommand::SetTankFluid`, issue #43) starts as that one id and
@@ -7392,7 +7670,7 @@ fn resolve_network_fluids(
     let mut filled_by: Vec<BTreeSet<FluidId>> = vec![BTreeSet::new(); networks.len()];
     let mut drawn_by: Vec<BTreeSet<FluidId>> = vec![BTreeSet::new(); networks.len()];
     for machine in plumbing {
-        for recipe in recipes.for_machine(&machine.kind) {
+        for recipe in machine.chosen(recipes) {
             if let Some(network) = machine.output {
                 for (fluid, _) in &recipe.fluid_outputs {
                     filled_by[network].insert(fluid.clone());
@@ -7446,9 +7724,9 @@ fn resolve_network_fluids(
     for _ in 0..=bound {
         let mut narrowed = possible.clone();
         for machine in plumbing {
-            let feasible: Vec<Vec<(usize, FluidId)>> = recipes
-                .for_machine(&machine.kind)
-                .filter_map(|recipe| feasible_naming(recipe, machine, &possible))
+            let feasible: Vec<Vec<(usize, FluidId)>> = machine
+                .chosen(recipes)
+                .flat_map(|recipe| feasible_namings(recipe, machine, &possible))
                 .collect();
             if feasible.is_empty() {
                 continue;
@@ -7467,7 +7745,14 @@ fn resolve_network_fluids(
                 let used_by_all = feasible
                     .iter()
                     .all(|naming| naming.iter().any(|&(used, _)| used == network));
-                if used_by_all {
+                // Two tanks declaring different fluids into one run are two
+                // things the player said, and narrowing must not pick one:
+                // a tank discharges whatever it holds into the run it faces,
+                // so a run named for one declaration would relabel the other
+                // tank's fluid as it poured. It stays ambiguous until the
+                // player resolves it (2026-10-03: with chosen recipes a
+                // machine's single recipe would otherwise always narrow it).
+                if used_by_all && declared[network].len() <= 1 {
                     narrowed[network].retain(|fluid| ids.contains(fluid));
                 }
             }
@@ -7534,7 +7819,11 @@ fn resolve_network_fluids(
         .iter()
         .map(|network| network.segments().iter().any(|segment| segment.is_source))
         .collect();
-    for machine in plumbing {
+    // A machine with no recipe chosen is not plumbed to anything yet, as far
+    // as a run is concerned: it claims nothing, so a run only it touches is
+    // the ordinary state of a line the player has not finished setting up,
+    // not a fault to mark on every tile.
+    for machine in plumbing.iter().filter(|machine| machine.recipe.is_some()) {
         if let Some(network) = machine.output {
             attached[network] = true;
         }
@@ -7547,40 +7836,74 @@ fn resolve_network_fluids(
     }
 }
 
-/// Which runs `recipe` would put which fluid into, if the machine plumbed
-/// as `machine` ran it — or `None` when it could not run at all as this
-/// machine is plumbed, and so has nothing to say about these runs.
+/// Every way `recipe` could put fluids into runs, if the machine plumbed as
+/// `machine` ran it — empty when it could not run at all as this machine is
+/// plumbed, and so has nothing to say about these runs.
 ///
-/// The input matching is the same first-fit, one-run-per-input rule
-/// [`super::machine::Machine::tick`] uses to actually draw, so a naming
-/// this produces is a naming the tick can honour.
-fn feasible_naming(
+/// **Every** matching of its fluid inputs to distinct touching runs that
+/// could hold them, not just the first one found (2026-10-03). While every
+/// recipe of a kind claimed, a machine drawing two raw fluids from two
+/// undeclared tank runs was kept ambiguous by its kind's other recipes;
+/// with one chosen recipe, a single first-fit matching would name the two
+/// runs by tile order — a guess about which drum is which, which is exactly
+/// what issue #43 says only the player can settle. Offering every matching
+/// makes each run claim both fluids, so it stays ambiguous until declared.
+/// A recipe draws a handful of fluids from a handful of runs, so the
+/// enumeration is tiny.
+fn feasible_namings(
     recipe: &Recipe,
     machine: &Plumbing,
     possible: &[BTreeSet<FluidId>],
-) -> Option<Vec<(usize, FluidId)>> {
-    let mut naming = Vec::with_capacity(recipe.fluid_inputs.len() + recipe.fluid_outputs.len());
+) -> Vec<Vec<(usize, FluidId)>> {
+    let mut outlet = Vec::with_capacity(recipe.fluid_outputs.len());
     for (fluid, _) in &recipe.fluid_outputs {
         // No pipe off the outlet face means this recipe cannot run here at
         // all, so it does not get to narrow this machine's input runs
         // either.
-        let network = machine.output?;
+        let Some(network) = machine.output else {
+            return Vec::new();
+        };
         if !possible[network].contains(fluid) {
-            return None;
+            return Vec::new();
         }
-        naming.push((network, fluid.clone()));
+        outlet.push((network, fluid.clone()));
     }
-    let mut claimed: Vec<usize> = Vec::new();
-    for (fluid, _) in &recipe.fluid_inputs {
-        let supplier = machine
-            .inputs
-            .iter()
-            .copied()
-            .find(|network| !claimed.contains(network) && possible[*network].contains(fluid))?;
-        claimed.push(supplier);
-        naming.push((supplier, fluid.clone()));
+    let mut found = Vec::new();
+    let mut claimed = Vec::new();
+    match_inputs(recipe, 0, machine, possible, &mut claimed, &mut |inputs| {
+        let mut naming = outlet.clone();
+        naming.extend_from_slice(inputs);
+        found.push(naming);
+    });
+    found
+}
+
+/// One run and the fluid a recipe would put into it, or draw from it.
+type RunClaim = (usize, FluidId);
+
+/// Depth-first over `recipe`'s fluid inputs from `index`: each takes a
+/// distinct run from `machine.inputs` that could hold it, and every complete
+/// assignment is handed to `emit`.
+fn match_inputs(
+    recipe: &Recipe,
+    index: usize,
+    machine: &Plumbing,
+    possible: &[BTreeSet<FluidId>],
+    claimed: &mut Vec<RunClaim>,
+    emit: &mut dyn FnMut(&[RunClaim]),
+) {
+    let Some((fluid, _)) = recipe.fluid_inputs.get(index) else {
+        emit(claimed);
+        return;
+    };
+    for &network in &machine.inputs {
+        if claimed.iter().any(|&(used, _)| used == network) || !possible[network].contains(fluid) {
+            continue;
+        }
+        claimed.push((network, fluid.clone()));
+        match_inputs(recipe, index + 1, machine, possible, claimed, emit);
+        claimed.pop();
     }
-    Some(naming)
 }
 
 /// Several distinct networks out of one `Vec`, as mutable borrows, in the

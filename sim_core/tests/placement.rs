@@ -145,6 +145,7 @@ fn place_holding(
         tile,
         direction,
         item: item.map(str::to_string),
+        recipe: None,
     });
 }
 
@@ -286,6 +287,7 @@ fn an_unbuildable_kind_is_refused_even_when_owned() {
         tile: (0, 0),
         direction: Direction::East,
         item: None,
+        recipe: None,
     });
     assert_eq!(world.placement_count(), 0);
 }
@@ -861,6 +863,10 @@ fn two_disconnected_pipe_runs_are_two_networks() {
     build(&mut world, "pipe", (1, 1), Direction::East);
     build(&mut world, "pipe", (2, 1), Direction::East);
     build(&mut world, "mixer", (3, 0), Direction::East);
+    world.issue_command(PlayerCommand::SetMachineRecipe {
+        tile: (3, 0),
+        recipe: Some("ketchup_mix".to_string()),
+    });
     // Run B, three tiles away and tapped by nothing.
     build(&mut world, "fluid_tank", (0, 5), Direction::East);
     build(&mut world, "pipe", (1, 5), Direction::East);
@@ -938,6 +944,10 @@ fn placing_a_pipe_between_two_runs_merges_them_without_losing_fluid() {
     // ingredients cost money a tank plumbed to an unnamed run cannot be
     // filled at all — there is nothing to charge the player for.
     build(&mut world, "mixer", (1, 1), Direction::East);
+    world.issue_command(PlayerCommand::SetMachineRecipe {
+        tile: (1, 1),
+        recipe: Some("ketchup_mix".to_string()),
+    });
     assert_eq!(world.fluid_snapshots().len(), 2, "a gap at (2, 0)");
 
     world.issue_command(PlayerCommand::FillFluidTank {

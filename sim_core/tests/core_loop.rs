@@ -551,10 +551,8 @@ fn query_tile_reflects_every_stage_belt_and_machine_position() {
     );
 
     for (placement, recipe) in machines.iter().zip(ordered.iter()) {
-        // One tick in, only the head of the line has been handed anything:
-        // every machine further down is still UNDECIDED (`recipe: None`,
-        // `Machine::choose`'s rule 4) rather than on its kind's first
-        // recipe. Whatever it does name has to be its own stage's.
+        // Every machine is placed set to its stage's recipe (2026-10-03),
+        // so whatever name a machine carries is its own stage's.
         assert!(
             placement.recipe.is_none() || placement.recipe.as_deref() == Some(recipe.id.as_str()),
             "machine order must follow recipes.ron order: {:?} at {:?} is not {}",

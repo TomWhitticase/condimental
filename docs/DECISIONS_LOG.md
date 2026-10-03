@@ -18,6 +18,37 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-03 **Money is shown in pounds, with `£`.** Every money figure a
+  player reads — balance, prices, wages, payouts, the Cookbook, the BASICS
+  prose — goes through `godot_project/money_text.gd` (`Money.amount` for
+  "£1200", `Money.change` for "+£50"/"-£30"), the one place the symbol
+  lives. Whole pounds, no thousands separator. The sim stays unit-free.
+  (Owner's request; UI_UX §5.)
+
+- 2026-10-03 **The player chooses each machine's recipe; mustard is ground
+  and mixed, and comes second.** (Owner's call.) A machine runs
+  `Machine::recipe` and nothing else, set at placement (`PlayerCommand::Place`'s
+  `recipe`) or from the MAKES picker in its configuration panel
+  (`PlayerCommand::SetMachineRecipe`) — which padlocks, and refuses, a
+  recipe whose raws (through its upstream stages) are still gated
+  (`World::recipe_gate`), the CONTENTS pickers' rule; `Place`'s `recipe` is
+  not gated, for `Place`'s `item`'s reason. A kind with one recipe is placed
+  holding it, and a machine with none makes nothing, takes nothing off a belt
+  (`Machine::takes`) and claims no pipe run. Switching abandons the craft,
+  drops inputs the new recipe does not take, and empties any run whose name
+  changes (`World::try_set_machine_recipe`). `resolve_network_fluids` reads
+  only each machine's chosen recipe, and offers every matching of its fluid
+  inputs to runs, so two undeclared raw runs into one machine stay ambiguous
+  until a tank is declared; two tanks declaring different fluids into one run
+  stay ambiguous too. Two recipes on one kind MAY now drink the same raw
+  fluid — the 2026-09-26 one-raw-fluid rule and its fence test are gone, and
+  issue #184 is closed by this rather than by teaching the resolver about
+  solids. Mustard: crusher grinds seed to `ground_mustard` (a belt solid),
+  the mixer takes it with turmeric and vinegar and makes `mustard`; no vat.
+  The unlock order is ketchup → mustard (100 boxes of ketchup) → BBQ (100
+  boxes of mustard); a contract naming mustard and BBQ waits on BBQ's gate.
+  Save format v8; `scripts/migrate-save-v7-to-v8.py` converts v7 files.
+
 - 2026-10-02 **The balance is its own plate; the contracts plate lists
   soonest due first.** `_build_money_panel` puts the one money figure (and
   its `+N`/`-N` flyout) on a BALANCE plate level with the contracts plate
@@ -45,7 +76,9 @@ See [WORKFLOW.md](WORKFLOW.md).
   row (`_contract_list_hard`), and every plate line is one line no wider than
   the column — no autowrap. Full record in `docs/DECISIONS.md`.
 
-- 2026-10-02 **A machine nothing has fed is undecided, not ketchup.** A
+- 2026-10-02 **A machine nothing has fed is undecided, not ketchup.**
+  *(Superseded 2026-10-03: nothing it is fed decides it — the player does.
+  The null `recipe` on the wire and the `machine` layout flag stand.)* A
   kind with several recipes is placed with `Machine::recipe = None` and
   keeps it until something it is HANDED picks one: any amount of a recipe's
   solid in its buffer, or fluid of that id in a touching run, counts
@@ -464,7 +497,10 @@ See [WORKFLOW.md](WORKFLOW.md).
   > Full record in `docs/DECISIONS.md`.
 
 - 2026-09-26 **At most one RAW fluid may enter a machine kind, and at most one
-  recipe on that kind may drink it.** A new sauce whose fluid wants into a kind
+  recipe on that kind may drink it.**
+  *(Superseded 2026-10-03: a machine's recipe is the player's choice now,
+  and the resolver reads only that, so two recipes on one kind may drink one
+  raw fluid; mustard drinks its vinegar at the mixer.)* A new sauce whose fluid wants into a kind
   that already drinks a bought fluid must take it as a *derived* fluid, made a
   stage earlier by a machine of another kind — or get a kind of its own.
   `World::resolve_network_fluids` names a pipe run by narrowing on FLUIDS
@@ -728,6 +764,8 @@ See [WORKFLOW.md](WORKFLOW.md).
   PR template and `CLAUDE.md` point at it.
 - 2026-09-21 **A machine kind may name several recipes, and a placed machine
   runs whichever one its inputs satisfy — there is never a picker.**
+  *(Superseded 2026-10-03: the player picks, in the machine's panel. The
+  in-flight recipe is still saved.)*
   `recipes.ron` stopped being one line per kind in the BBQ epic;
   `RecipeRegistry::for_machine` hands a kind's recipes back in file order and
   `Machine::choose` starts the **first fully-satisfied** one, so file order is

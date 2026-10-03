@@ -138,6 +138,7 @@ fn a_structural_change_makes_the_delta_the_whole_chunk() {
         tile: (5, 20),
         direction: Direction::East,
         item: None,
+        recipe: None,
     });
     assert_eq!(
         world

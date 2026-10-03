@@ -69,6 +69,9 @@
 ## signal, not a hit test against a rectangle nobody measured.
 extends RefCounted
 
+## How money is written — the `£` and nothing else (2026-10-03).
+const Money = preload("res://money_text.gd")
+
 ## The plate's accent and inks — `settings_panel.gd`'s four, which are
 ## `menu.gd`'s `PLATE_ACCENT` and `main.gd`'s border colour. One hazard
 ## yellow, everywhere.
@@ -595,9 +598,9 @@ func _fact_text(name: String) -> String:
 			return String(fact.get("text", ""))
 		"kind_id":
 			return _name(String(fact.get("text", "")))
-	# `money` and `count` are both "a number a player reads": the panel prints
-	# a price as a bare number everywhere else, so a currency mark here would
-	# be the only one in the book.
+		"money":
+			# Pounds, like every other price in the book (2026-10-03).
+			return Money.amount(value)
 	return _quantity(value)
 
 
@@ -847,7 +850,7 @@ func _build_sauce_page(id: String) -> void:
 	process.add_child(_process_chain(entry))
 
 	var numbers := _section("THE NUMBERS", "")
-	_line(numbers, "Cost", "%.0f per case, in ingredients" % float(entry.get("cost_per_unit", 0.0)))
+	_line(numbers, "Cost", "%s per case, in ingredients" % Money.amount(float(entry.get("cost_per_unit", 0.0))))
 	_line(numbers, "Contracts pay", _pay_text(entry))
 
 	var contracts: Array = entry.get("contracts", [])
@@ -893,8 +896,8 @@ func _pay_text(entry: Dictionary) -> String:
 	if low == null or high == null:
 		return "nothing on the board asks for it yet"
 	if float(low) == float(high):
-		return "%.0f per case" % float(low)
-	return "%.0f to %.0f per case, by contract" % [float(low), float(high)]
+		return "%s per case" % Money.amount(float(low))
+	return "%s to %s per case, by contract" % [Money.amount(float(low)), Money.amount(float(high))]
 
 
 ## One ingredient line. The whole row is the button, so the click target is
@@ -1081,7 +1084,7 @@ func _build_machine_page(id: String) -> void:
 	var facts := _section("THE MACHINE", "")
 	_line(facts, "Footprint", "%d × %d tiles" % [int(entry.get("width_tiles", 1)), int(entry.get("height_tiles", 1))])
 	var price = entry.get("price")
-	_line(facts, "Price", "not for sale" if price == null else "%.0f" % float(price))
+	_line(facts, "Price", "not for sale" if price == null else Money.amount(float(price)))
 	var crew: Array = entry.get("crew", [])
 	if crew.is_empty():
 		_line(facts, "Crew", "none — it runs unattended")
@@ -1112,7 +1115,7 @@ func _build_ingredient_page(id: String) -> void:
 	_title_row(id, _text(entry.get("icon")), _name(id), "", locked)
 
 	var facts := _section("THE INGREDIENT", "")
-	_line(facts, "Price", "%.0f each" % float(entry.get("price", 0.0)))
+	_line(facts, "Price", "%s each" % Money.amount(float(entry.get("price", 0.0))))
 	_line(facts, "Arrives by", "pipe" if bool(entry.get("fluid", false)) else "belt")
 	if locked:
 		_line(facts, "🔒 Locked", _gate_line(entry.get("gate")))

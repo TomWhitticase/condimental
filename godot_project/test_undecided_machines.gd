@@ -1,43 +1,36 @@
-# Headless proof that a machine nothing has fed is drawn as handling ANY
-# sauce — not as a ketchup machine (owner's request, 2026-10-02).
+# Headless proof that a machine with NO RECIPE CHOSEN is drawn as making
+# nothing yet — not as a ketchup machine — and that the configuration panel's
+# MAKES picker is how a recipe is chosen (owner's rulings of 2026-10-02 and
+# 2026-10-03).
 #
 # Run with:
 #   godot --headless --path godot_project --script test_undecided_machines.gd
 #
-# The simulation used to place every machine of a multi-recipe kind on the
-# first recipe `data/recipes.ron` lists for it, which is ketchup's at every
-# stage, so a freshly built line named ketchup in every hover and every
-# configuration panel and painted every product mesh ketchup red until some
-# other sauce's ingredients arrived. Now such a machine is UNDECIDED —
-# `recipe: null` on the wire — and this checks each surface draws that:
+# A machine runs the recipe the player set on it and nothing else; one placed
+# without a recipe is `recipe: null` on the wire and makes nothing, however
+# it is fed. Checks, for every machine kind with more than one recipe:
 #
-#   1. HOVER: titled by the machine's kind plus MACHINE_UNDECIDED_TEXT, and
-#      naming none of the recipes its kind can run; its load line says it is
-#      waiting for ingredients rather than for one sauce's raw.
-#   2. PANEL: the configuration panel's title says the same.
-#   3. TINT: the product mesh (vat, bottler, packer) carries no override, so
-#      it shows the voxel's own neutral pale.
-#   4. A LONE bottler — no pipe, and every bottler recipe needs a fluid, so
-#      it can never be fed — says plain "no supply pipe" rather than
-#      "waiting for ingredients" forever, and names no sauce (the review of
-#      PR #232). The rule covers every such kind (today the mixer, vat and
-#      bottler); `sim_core/tests/undecided.rs` checks all three.
-#   5. And the decision still lands: fed, the vat names its recipe in the
-#      hover and its product mesh takes a tint.
+#   1. HOVER: titled with the machine's kind plus MACHINE_UNDECIDED_TEXT,
+#      naming none of the recipes the kind can run; the load line says no
+#      recipe is chosen and how to choose one.
+#   2. PANEL: the configuration panel's title says the same, and it carries
+#      a MAKES picker with one slot per recipe of the kind, none ticked.
+#   3. TINT: a product mesh (vat, bottler, packer) carries no override, so it
+#      shows the voxel's own neutral pale.
+#   4. CHOOSING: pressing a slot in the vat's picker sets that recipe — the
+#      tick moves to it, the hover leads with it, the product mesh takes its
+#      tint — and the change survives a re-read of the wire.
 #
-# The recipe names a machine must not show are read from `cookbook_json`'s
-# steps, never listed here, so a fourth sauce is covered without an edit.
+# The recipes each kind can run are read from `machine_recipes_json`, never
+# listed here, so a fourth sauce is covered without an edit.
 extends SceneTree
 
 const Layouts = preload("res://test_layouts.gd")
 
-## Where the lone, unplumbed bottler stands: well clear of the reference
-## line and anything it lays.
-const LONE_BOTTLER := Vector2i(0, 12)
-
-## How long the fed line may take to get the vat cooking. Measured at about
-## 600 ticks; the margin is for a slow shared machine, not the line.
-const DECIDE_TICKS := 4000
+## Where the machines under test stand: one per multi-recipe kind, spaced
+## wide enough that no footprint touches another.
+const ROW_Y := 0
+const SPACING := 6
 
 var main
 var _ran := false
@@ -69,69 +62,109 @@ func _repoll() -> void:
 	main._poll_machine_load()
 
 
-## kind -> every recipe display name that kind can run, from the cookbook.
-func _recipe_names_by_kind() -> Dictionary:
-	var names := {}
-	var book = JSON.parse_string(main.sim.cookbook_json())
-	for sauce in book.get("sauces", []):
-		for step in sauce.get("steps", []):
-			var kind := String(step.get("machine", ""))
-			if not names.has(kind):
-				names[kind] = []
-			names[kind].append(main._item_display_name(String(step.get("recipe", ""))))
-	return names
+## Every recipe a machine of `kind` can be set to, off the wire, as ids.
+func _recipes_of(kind: String) -> Array:
+	var ids := []
+	var parsed = JSON.parse_string(main.sim.machine_recipes_json(kind))
+	for entry in (parsed if parsed is Array else []):
+		ids.append(String(entry.get("id", "")))
+	return ids
 
 
-func _machines() -> Array:
-	var out := []
-	for placement in JSON.parse_string(main.sim.world_layout_json()):
-		if bool(placement.get("machine", false)):
-			out.append(placement)
-	return out
+## The recipes of `kind` the wire says are behind a shut gate.
+func _locked_recipes_of(kind: String) -> Array:
+	var ids := []
+	var parsed = JSON.parse_string(main.sim.machine_recipes_json(kind))
+	for entry in (parsed if parsed is Array else []):
+		if bool(entry.get("locked", false)):
+			ids.append(String(entry.get("id", "")))
+	return ids
 
 
 func _run_checks() -> void:
-	Layouts.build_reference_line(main.sim)
+	# Every machine kind the content gives a choice, placed with none chosen.
+	var kinds: Array = []
+	for kind in ["crusher", "mixer", "cooking_vat", "bottler", "packer"]:
+		if _recipes_of(kind).size() > 1:
+			kinds.append(kind)
+	if kinds.size() < 4:
+		_fail("only %s offer a choice of recipe; the shipped content gives one at the crusher, mixer, vat, bottler and packer" % str(kinds))
+		return
+	var origins := {}
+	for i in range(kinds.size()):
+		var origin := Vector2i(i * SPACING, ROW_Y)
+		Layouts.place(main.sim, kinds[i], origin, "east")
+		origins[kinds[i]] = origin
+	main.sim.tick()
 	main._rebuild_world()
 	_repoll()
 
-	var names := _recipe_names_by_kind()
-	var machines := _machines()
-	if machines.size() < 5:
-		_fail("the reference line placed %d machines, expected five" % machines.size())
-		return
 	var tinted_kinds := 0
-	for placement in machines:
-		var kind := String(placement["kind"])
-		var origin: Vector2i = main._placement_origin(placement)
+	for kind in kinds:
+		var origin: Vector2i = origins[kind]
 		var key: String = main._tile_key(origin)
-		if placement.get("recipe") != null:
-			_fail("a fresh %s reports recipe '%s' before anything fed it" % [kind, placement["recipe"]])
+		var placement: Dictionary = main._placement_at_tile(origin)
+		if String(placement.get("kind", "")) != kind:
+			_fail("the %s at %s did not place" % [kind, str(origin)])
 			return
-		if (names.get(kind, []) as Array).size() < 2:
-			continue # one recipe: nothing to decide, so not this test's subject
+		if placement.get("recipe") != null:
+			_fail("a %s placed with no recipe reports '%s'" % [kind, placement["recipe"]])
+			return
+		var recipe_names: Array = []
+		for recipe in _recipes_of(kind):
+			recipe_names.append(main._item_display_name(String(recipe)))
 
 		# 1. Hover.
 		var hover: String = main._hover_text_at_tile(origin)
 		var expected_title := "%s  ·  %s" % [main._kind_display_name(kind), main.MACHINE_UNDECIDED_TEXT]
 		if not hover.begins_with(expected_title):
-			_fail("a fresh %s's hover opens '%s', expected '%s'" % [kind, hover.get_slice("\n", 0), expected_title])
+			_fail("an unset %s's hover opens '%s', expected '%s'" % [kind, hover.get_slice("\n", 0), expected_title])
 			return
-		for recipe_name in names[kind]:
+		for recipe_name in recipe_names:
 			if hover.contains(String(recipe_name)):
-				_fail("a fresh %s's hover names '%s', a sauce nothing has fed it:\n%s" % [kind, recipe_name, hover])
+				_fail("an unset %s's hover names '%s', a recipe nobody chose:\n%s" % [kind, recipe_name, hover])
 				return
-		if not hover.contains("waiting for ingredients"):
-			_fail("a fresh %s's hover does not say it is waiting for ingredients:\n%s" % [kind, hover])
+		if not hover.contains("no recipe chosen"):
+			_fail("an unset %s's hover does not say no recipe is chosen:\n%s" % [kind, hover])
 			return
 
-		# 2. Configuration panel.
+		# 2. Configuration panel, and its picker.
 		main._open_config_panel(origin, kind)
 		main._update_config_panel()
 		var title: String = main._config_title.text
+		var picker_shown: bool = main._config_picker_box.visible
+		var heading: String = main._config_picker_heading.text
+		var slots: Array = main._config_picker_slots.duplicate()
+		var ticked := 0
+		var padlocked := []
+		for slot in slots:
+			if slot["mark"].visible:
+				ticked += 1
+			if slot["lock"].visible:
+				padlocked.append(String(slot["item"]))
 		main._close_config_panel()
 		if title != "%s — %s" % [main._kind_display_name(kind), main.MACHINE_UNDECIDED_TEXT]:
-			_fail("a fresh %s's panel is titled '%s'" % [kind, title])
+			_fail("an unset %s's panel is titled '%s'" % [kind, title])
+			return
+		if not picker_shown or heading != "MAKES":
+			_fail("an unset %s's panel has no MAKES picker (shown %s, heading '%s')" % [kind, picker_shown, heading])
+			return
+		if slots.size() != _recipes_of(kind).size():
+			_fail("the %s's picker has %d slots for %d recipes" % [kind, slots.size(), _recipes_of(kind).size()])
+			return
+		if ticked != 0:
+			_fail("an unset %s's picker ticks %d slot(s)" % [kind, ticked])
+			return
+		# A new game has opened no gate, so every recipe the wire calls
+		# locked wears a padlock, and nothing else does (UI_UX §5g).
+		padlocked.sort()
+		var want_locked := _locked_recipes_of(kind)
+		want_locked.sort()
+		if padlocked != want_locked:
+			_fail("the %s's picker padlocks %s; the wire locks %s" % [kind, str(padlocked), str(want_locked)])
+			return
+		if kind == "mixer" and want_locked.size() < 2:
+			_fail("a new game's mixer should offer mustard and BBQ mix locked, got %s" % str(want_locked))
 			return
 
 		# 3. Tint.
@@ -139,63 +172,44 @@ func _run_checks() -> void:
 		if mesh != null:
 			tinted_kinds += 1
 			if mesh.get_surface_override_material(0) != null:
-				_fail("a fresh %s's product mesh is tinted — it should show the neutral pale" % kind)
+				_fail("an unset %s's product mesh is tinted — it should show the neutral pale" % kind)
 				return
 	if tinted_kinds < 3:
-		_fail("only %d fresh machines carry a product mesh; the vat, bottler and packer all should — \
+		_fail("only %d machines carry a product mesh; the vat, bottler and packer all should — \
 the voxels are not staged (run cargo xtask)" % tinted_kinds)
 		return
 
-	# 4. A bottler with no pipe names the missing pipe, and no sauce.
-	var bare: String = main._stall_reason_text({"kind": "no_supply_pipe", "item": ""})
-	if bare != "no supply pipe":
-		_fail("an empty no_supply_pipe item reads '%s', expected plain 'no supply pipe'" % bare)
-		return
-	Layouts.place(main.sim, "bottler", LONE_BOTTLER, "east")
-	main.sim.tick()
-	main._rebuild_world()
-	_repoll()
-	if String(main._placement_at_tile(LONE_BOTTLER).get("kind", "")) != "bottler":
-		_fail("the lone bottler at %s did not place" % str(LONE_BOTTLER))
-		return
-	var lone: String = main._hover_text_at_tile(LONE_BOTTLER)
-	if not lone.contains("no supply pipe") or lone.contains("no supply pipe for"):
-		_fail("a lone bottler should say plain 'no supply pipe':\n%s" % lone)
-		return
-	for recipe_name in names["bottler"]:
-		if lone.contains(String(recipe_name)):
-			_fail("a lone bottler names '%s':\n%s" % [recipe_name, lone])
-			return
-
-	# 5. Fed, the vat decides — and every surface follows it.
-	var vat_placement: Dictionary = {}
-	for placement in machines:
-		if String(placement["kind"]) == "cooking_vat":
-			vat_placement = placement
-	var vat: Vector2i = main._placement_origin(vat_placement)
+	# 4. Choosing, through the panel's own picker, as a click does.
+	var vat: Vector2i = origins["cooking_vat"]
 	var vat_key: String = main._tile_key(vat)
-	Layouts.stock_larder(main.sim)
-	var decided := ""
-	for _i in range(DECIDE_TICKS):
-		main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper", "amount": 64}))
-		main.sim.issue_command_json(JSON.stringify({"type": "fill_fluid_tank", "amount": 100}))
-		main.sim.tick()
-		var parsed = JSON.parse_string(main.sim.query_tile_json(vat.x, vat.y))
-		if parsed != null and parsed.get("recipe") != null:
-			decided = String(parsed["recipe"])
-			break
-	if decided == "":
-		_fail("the fed vat never decided in %d ticks" % DECIDE_TICKS)
+	var choice := String(_recipes_of("cooking_vat")[0])
+	main._open_config_panel(vat, "cooking_vat")
+	var index := -1
+	for i in range(main._config_picker_slots.size()):
+		if String(main._config_picker_slots[i]["item"]) == choice:
+			index = i
+	if index < 0:
+		_fail("the vat's picker has no slot for '%s'" % choice)
+		return
+	main._on_config_picker_pressed(index)
+	main._update_config_panel()
+	if not main._config_picker_slots[index]["mark"].visible:
+		_fail("pressing '%s' did not tick it in the vat's picker" % choice)
+		return
+	main._close_config_panel()
+	var parsed = JSON.parse_string(main.sim.query_tile_json(vat.x, vat.y))
+	if not (parsed is Dictionary) or String(parsed.get("recipe", "")) != choice:
+		_fail("pressing '%s' left the vat's recipe at %s on the wire" % [choice, str(parsed)])
 		return
 	_repoll()
-	var fed_hover: String = main._hover_text_at_tile(vat)
-	if not fed_hover.begins_with(main._item_display_name(decided)):
-		_fail("the fed vat's hover opens '%s', expected its recipe '%s'" % [fed_hover.get_slice("\n", 0), decided])
+	var set_hover: String = main._hover_text_at_tile(vat)
+	if not set_hover.begins_with(main._item_display_name(choice)):
+		_fail("the set vat's hover opens '%s', expected its recipe '%s'" % [set_hover.get_slice("\n", 0), choice])
 		return
 	var vat_mesh: MeshInstance3D = main._machine_products.get(vat_key, null)
 	if vat_mesh == null or vat_mesh.get_surface_override_material(0) == null:
-		_fail("the fed vat's product mesh took no tint")
+		_fail("the set vat's product mesh took no tint")
 		return
 
-	print("UNDECIDED_OK")
+	print("UNDECIDED_OK: %d machine kinds placed with no recipe name none and offer a MAKES picker of their own recipes, the not-yet-unlocked ones padlocked; choosing '%s' in the vat's picker set it, ticked it, titled it and tinted it" % [kinds.size(), choice])
 	quit(0)

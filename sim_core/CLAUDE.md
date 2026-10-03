@@ -30,8 +30,8 @@ the plan is `docs/ARCHITECTURE.md` §3/§4/§6/§10.
 - **`World::new` builds nothing** — empty grid and graph, `STARTING_MONEY`.
   Everything arrives via real `Purchase` + `Place` commands.
 - **`recompute_topology` runs only when the factory changes, never per tick**:
-  on `Place`/`Remove`/`Rotate`, a splitter's mode and a tank's fluid (which
-  change what a link carries), and twice in a load — once after the bulk
+  on `Place`/`Remove`/`Rotate`, a splitter's mode, a tank's fluid and a
+  machine's recipe (which change what a link carries), and twice in a load — once after the bulk
   placement (`World::begin_bulk_place`, which skips it per `Place`) and once
   after the restore. A full single-threaded rebuild of occupancy, hand-off
   links and fluid networks (volumes carried across by tile).
@@ -52,29 +52,25 @@ the plan is `docs/ARCHITECTURE.md` §3/§4/§6/§10.
 - **`machines.rs` owns the footprint origin convention** — min-X/min-Y corner,
   occupying `[x, x+width) × [y, y+height)`, and the tile a belt feeds into.
   Read its module doc before touching rotation.
-- **A kind may name several recipes; the machine's *inputs* pick one.**
-  `Machine::choose` starts the first fully-satisfied recipe
-  `RecipeRegistry::for_machine` offers, so `recipes.ron` file order is the
-  tiebreak; with none satisfied it holds the closest, which is what makes the
-  stall readout name a raw the machine is really waiting for. **A machine
-  nothing has fed is undecided** (`recipe: None`, the `undecided` stall —
-  or an item-less `no_supply_pipe` for a pipe-fed kind with no pipe,
-  2026-10-02): a kind with several recipes is placed with none, and a zero
-  tie never hands it the first in the file — only what it is handed
-  (`Machine::fed`) decides it. "Is this a machine" is the layout's
-  `machine` flag, not `recipe != null`. **There is no
-  player-facing picker and no command that sets a recipe** — do not add one.
-  The in-flight recipe *is* saved (`SavedMachine::recipe`): a craft under way
-  has already eaten the inputs it would be re-derived from.
-- **At most one RAW fluid may enter a kind, drunk by at most one of its
-  recipes.** `resolve_network_fluids` names a run by narrowing on fluids alone
-  and `for_machine` is not gate-aware, so a second recipe on one kind drinking
-  a bought fluid makes a tank run ambiguous — unfillable, since `tank_fluid`
-  returns `None` — in a new game where that content is still locked. A new
-  sauce takes its fluid derived, a stage earlier (mustard's vinegar enters at
-  the crusher). Fenced by `recipe.rs`'s
-  `at_most_one_raw_fluid_enters_any_machine_kind`; full record 2026-09-26 in
-  `docs/DECISIONS_LOG.md`.
+- **A kind may name several recipes; the PLAYER picks one** (2026-10-03).
+  A machine runs `Machine::recipe` and nothing else — set by `Place`'s
+  `recipe` or `SetMachineRecipe` (the machine panel's MAKES picker), never by
+  `Machine::tick`. `SetMachineRecipe` refuses a recipe whose raws are still
+  gated (`World::recipe_gate`; the picker padlocks it); `Place`'s `recipe`
+  deliberately does not. A kind with one recipe is placed holding it; any other is
+  placed with none and makes nothing, takes nothing off a belt
+  (`Machine::takes`) and claims no pipe run (the `undecided` stall). A
+  switch abandons the craft, drops inputs the new recipe does not take and
+  EMPTIES any run whose name changes (`try_set_machine_recipe`, the
+  `try_set_tank_fluid` lesson). "Is this a machine" is the layout's
+  `machine` flag, not `recipe != null`. The recipe is saved
+  (`SavedMachine::recipe`, the field that made the format v8).
+- **`resolve_network_fluids` reads only each machine's chosen recipe**, so
+  two recipes on one kind may drink the same raw fluid (the old
+  one-raw-fluid-per-kind rule is gone). It offers every matching of a
+  recipe's fluid inputs to runs (`feasible_namings`), so two undeclared raw
+  runs into one machine stay ambiguous until a tank is declared, and a run
+  two tanks declare differently is never narrowed to one of them.
 - **A recipe may draw N fluid networks, matched by fluid id; it deposits into
   exactly one.** `validate_fluid_scope` refuses a recipe that names one fluid
   twice (that is one input with the units added up) and still caps

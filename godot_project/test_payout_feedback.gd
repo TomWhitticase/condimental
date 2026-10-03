@@ -205,8 +205,8 @@ func _initialize() -> void:
 		if int(coin["start_tick"]) >= 0 and (coin["origin"] as Vector3) != paid_anchor:
 			_fail("a coin left from %s, not the paying dock at %s" % [coin["origin"], paid_anchor])
 			return
-	if main._payout_flyout.text != "+%d" % expected_payout:
-		_fail("the flyout reads '%s', expected '+%d'" % [main._payout_flyout.text, expected_payout])
+	if main._payout_flyout.text != "+£%d" % expected_payout:
+		_fail("the flyout reads '%s', expected '+£%d'" % [main._payout_flyout.text, expected_payout])
 		return
 	if int(main._audio.plays.get(main._audio.PAYOUT, 0)) != 1:
 		_fail("expected exactly one payout chime, got %d"
@@ -252,7 +252,7 @@ func _initialize() -> void:
 		_fail("the paid docket's payout figure reads '%s', expected 'PAID'" % stamped_label.text)
 		return
 	main._update_payout_stamps(payout_tick + main.PAYOUT_STAMP_TICKS)
-	if stamped_label.text != "+%d" % expected_payout:
+	if stamped_label.text != "+£%d" % expected_payout:
 		_fail("after %d ticks the stamp should revert to '+%d', reads '%s'"
 			% [main.PAYOUT_STAMP_TICKS, expected_payout, stamped_label.text])
 		return

@@ -112,9 +112,9 @@
 # (9,3), (6,3) for left) to judge one junction.
 #
 # Pass --fluid-gallery to build the FLUID GALLERY (test_layouts.gd's
-# `build_fluid_gallery`): all NINE fluids standing in nine full runs in one
-# frame — vinegar, ketchup mix, ketchup, BBQ mix, liquid smoke, BBQ, mustard
-# mash, mustard mix and mustard — so
+# `build_fluid_gallery`): all SEVEN fluids standing in full runs in one
+# frame — vinegar, ketchup mix, ketchup, BBQ mix, liquid smoke, BBQ and
+# mustard — so
 # main.gd's FLUID_TINTS can be judged whole rather than three at a time,
 # which is all the shipped line or the BBQ fixture ever shows (issue #72).
 # It does not tick and does not need to: a run is NAMED by the recipes at
@@ -155,24 +155,21 @@
 # orders read.
 #
 # Pass --mustard to build the MUSTARD LINE (test_layouts.gd's
-# `build_mustard_line`): the third sauce, and the first that is a whole
-# SECOND line from raw rather than a branch off an existing one — seed hopper
-# and vinegar tank into a crusher that discharges a FLUID, turmeric joining
-# at the mixer, then vat, bottler, packer and its own dock — funded, fully
-# crewed, auto-filled and run 15 000 ticks, so cases are shipping when the
-# shutter opens. It implies --populate. It is the one fixture whose middle is
-# entirely wet: mustard_mash and mustard_mix exist only in pipes, so this is
-# the only frame that can show whether the three stages of one sauce are
-# three colours. Add --closeup 7,0,14 to fill the frame with the piped half.
+# `build_mustard_line`): the second sauce, and the first whole SECOND line
+# from raw rather than a branch off an existing one — seed hopper into a
+# crusher, ground mustard and turmeric on two belts into a mixer drinking
+# vinegar, then bottler, packer and its own dock — funded, fully crewed,
+# auto-filled and run 15 000 ticks, so cases are shipping when the shutter
+# opens. It implies --populate. Mustard is not cooked: no vat stands on it.
 #
 # Pass --stalled-run to build the STALLED RUN (test_layouts.gd's
-# `build_stalled_pipe_run`): the BBQ branch with its liquid-smoke tank turned
-# off its own run — issue #54's own mistake — so that run is one the
-# simulation cannot name and every machine on it waits forever. It is the
-# frame that shows a DEAD run (hazard clamps along it) beside the merely
-# EMPTY runs either side of it, which used to look identical, with the cursor
-# on the dead run so the hover gives the reason. Deliberately NOT populated:
-# a factory run forward has no empty runs left to compare against.
+# `build_stalled_pipe_run`): the BBQ branch with a second tank, declared
+# vinegar, pouring into the run the liquid-smoke tank feeds, so that run is
+# one the simulation will not name and every machine on it waits forever. It
+# is the frame that shows a DEAD run (hazard clamps along it) beside the
+# merely EMPTY runs either side of it, which used to look identical, with
+# the cursor on the dead run so the hover gives the reason. Deliberately NOT
+# populated: a factory run forward has no empty runs left to compare against.
 #
 # Pass --bottleneck to build the BOTTLENECK LINE (test_layouts.gd's
 # `build_bottleneck_line`): the whole shipped line with its hoppers and tank

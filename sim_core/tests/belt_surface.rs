@@ -77,6 +77,7 @@ fn build(world: &mut World, kind: &str, tile: TileCoord, direction: Direction) {
         tile,
         direction,
         item: None,
+        recipe: None,
     });
     assert!(
         world.query_tile(tile).is_some(),

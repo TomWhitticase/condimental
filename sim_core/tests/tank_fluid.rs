@@ -151,6 +151,7 @@ fn place(world: &mut World, kind: &str, tile: (i32, i32), direction: Direction) 
         tile,
         direction,
         item: None,
+        recipe: None,
     });
     assert!(
         world.query_tile(tile).is_some(),
@@ -171,7 +172,16 @@ fn ambiguous_line() -> World {
     for &(kind, tile, direction) in LAYOUT {
         place(&mut world, kind, tile, direction);
     }
+    set_mixer(&mut world, "sweet_brine");
     world
+}
+
+/// Sets the mixer to `recipe`, as its picker does.
+fn set_mixer(world: &mut World, recipe: &str) {
+    world.issue_command(PlayerCommand::SetMachineRecipe {
+        tile: MIXER,
+        recipe: Some(recipe.to_string()),
+    });
 }
 
 /// The same line with both tanks declared — the fix applied, and the state
@@ -203,6 +213,7 @@ fn shipped_single_tank_line() -> World {
         }
         place(&mut world, kind, tile, direction);
     }
+    set_mixer(&mut world, "ketchup_mix");
     world
 }
 

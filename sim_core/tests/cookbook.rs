@@ -82,7 +82,7 @@ fn raw<'a>(book: &'a CookbookSnapshot, id: &str) -> &'a sim_core::sim::cookbook:
 /// being told which is which: the tier is the depth of the recipe graph, so a
 /// sauce that starts at a hopper of its own is tier 0 however late it was
 /// added, and only a sauce that drinks another one is deeper. Mustard is the
-/// third sauce and the second tier-0 one — the proof that the difference
+/// second sauce and the second tier-0 one — the proof that the difference
 /// between "a second line" and "a branch" is content rather than a flag.
 #[test]
 fn the_shipped_content_makes_three_sauces_and_only_one_of_them_is_a_branch() {
@@ -292,7 +292,7 @@ fn lockedness_is_derived_from_the_ingredient_gates_rather_than_declared() {
         Some(boxes - 1),
         "and the page carries the progress, so the padlock can show it"
     );
-    let wrong = book_after(&[("boxed_mustard", boxes * 10)]);
+    let wrong = book_after(&[("boxed_bbq", boxes * 10)]);
     assert!(
         sauce(&wrong, "boxed_bbq").locked,
         "boxes of another product are not this gate's"
@@ -340,7 +340,11 @@ fn every_machine_kind_has_a_page_and_the_line_reads_in_chain_order() {
         .expect("the vat has a page");
     assert_eq!((vat.width_tiles, vat.height_tiles), (2, 2));
     assert_eq!(vat.price, Some(200.0));
-    assert_eq!(vat.makes, vec!["ketchup", "bbq", "mustard"]);
+    assert_eq!(
+        vat.makes,
+        vec!["ketchup", "bbq"],
+        "mustard is not cooked (2026-10-03)"
+    );
     assert_eq!(vat.crew.len(), 1);
     assert_eq!(vat.crew[0].category, "manufacturing");
     assert_eq!(
@@ -371,11 +375,11 @@ fn every_bought_ingredient_has_a_page_saying_what_it_is_for() {
             "tomato",
             "sugar",
             "vinegar",
+            "mustard_seed",
+            "turmeric",
             "spice_mix",
             "molasses",
-            "liquid_smoke",
-            "mustard_seed",
-            "turmeric"
+            "liquid_smoke"
         ],
         "data/ingredients.ron's own order — the market lists them in it too"
     );
@@ -387,12 +391,12 @@ fn every_bought_ingredient_has_a_page_saying_what_it_is_for() {
     }
 
     // THE ONE INGREDIENT TWO SAUCES BUY. Every other raw on the shelf feeds
-    // one product; vinegar goes into the ketchup mixer and the mustard
-    // crusher — mustard mills its seed WET, which is how the two sauces stay
-    // off one another's machine kind (`docs/DECISIONS.md`, 2026-09-26) — so
-    // its page names two sauces and a player reading it learns that the two
-    // lines compete in the shop. Derived from `data/recipes.ron`, so this is
-    // also what fails if mustard ever stops drinking it.
+    // one product; vinegar goes into the ketchup mixer and the mustard mixer
+    // — two recipes on one kind drinking one raw, which the player choosing
+    // each machine's recipe made possible (2026-10-03) — so its page names
+    // two sauces and a player reading it learns that the two lines compete
+    // in the shop. Derived from `data/recipes.ron`, so this is also what
+    // fails if mustard ever stops drinking it.
     let vinegar = raw(&book, "vinegar");
     assert!(vinegar.fluid, "vinegar is a tank, not a hopper");
     assert_eq!(vinegar.used_in, vec!["boxed_ketchup", "boxed_mustard"]);
@@ -403,12 +407,12 @@ fn every_bought_ingredient_has_a_page_saying_what_it_is_for() {
     assert!(smoke.locked);
     assert_eq!(
         smoke.gate.as_ref().map(|g| (g.item.as_str(), g.required)),
-        Some(("boxed_ketchup", 100)),
-        "the BBQ tier's raws wait on cases of the tier below"
+        Some(("boxed_mustard", 100)),
+        "the BBQ tier's raws wait on cases of the tier below — mustard, since 2026-10-03"
     );
 
     // Mustard's raws are solids, they belong to one sauce, and they wait on a
-    // different product from BBQ's — the gate is in `data/unlocks.ron` and the
+    // different product from BBQ's (ketchup, where BBQ's wait on mustard) — the gate is in `data/unlocks.ron` and the
     // page only reports it. WHICH raws those are is derived from `used_in`,
     // not from a slice of the shelf: a raw that feeds nothing but mustard is
     // mustard's, whether it is the two shipped today or a third tomorrow.
@@ -435,8 +439,8 @@ fn every_bought_ingredient_has_a_page_saying_what_it_is_for() {
         );
         assert_eq!(
             page.gate.as_ref().map(|g| (g.item.as_str(), g.required)),
-            Some(("boxed_bbq", 100)),
-            "'{}' is held back by a gate other than mustard_sauce's hundred cases of BBQ",
+            Some(("boxed_ketchup", 100)),
+            "'{}' is held back by a gate other than mustard_sauce's hundred cases of ketchup",
             page.id
         );
     }

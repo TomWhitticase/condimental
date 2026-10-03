@@ -147,15 +147,15 @@ func _run_checks() -> void:
 		_fail("tile %s should resolve to the crusher, got %s" % [str(resolved_tile), str(placement)])
 		return
 
-	# Nothing has been fed to the demo line's crusher, so it is UNDECIDED and
-	# the tooltip names its kind and "any sauce" rather than a recipe it has
-	# not been given (2026-10-02 — it used to read "Tomato Paste", the first
-	# crusher recipe in the file). Once fed, the recipe's display name leads,
-	# which `test_undecided_machines.gd` checks.
+	# The demo line places its crusher set to crush tomatoes, as a player
+	# picks a recipe for every machine (2026-10-03), so the tooltip leads with
+	# that recipe's display name. A machine with no recipe chosen leads with
+	# its kind and the words that say how to choose one, which
+	# `test_undecided_machines.gd` checks.
 	var hover_text: String = main._hover_text_at_tile(resolved_tile)
-	var undecided_title := "%s  ·  %s" % [main._kind_display_name("crusher"), main.MACHINE_UNDECIDED_TEXT]
-	if hover_text == "" or not hover_text.begins_with(undecided_title):
-		_fail("hover text over the unfed crusher should start with '%s', got: %s" % [undecided_title, hover_text])
+	var set_title := "%s  ·  " % main._item_display_name("tomato_paste")
+	if hover_text == "" or not hover_text.begins_with(set_title):
+		_fail("hover text over the demo crusher should start with '%s', got: %s" % [set_title, hover_text])
 		return
 	# Which way it faces is a fact only placement created, and one the player
 	# can change — so the tooltip has to carry it.

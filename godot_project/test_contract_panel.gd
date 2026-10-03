@@ -177,7 +177,7 @@ func _initialize() -> void:
 	if board_hint == null or not board_hint.text.begins_with("C:"):
 		_fail("the contracts plate's heading should name its key, like STOCK's 'M: market' and CREW's 'H: hire'")
 		return
-	if String(main._contract_money_label.text) != "%d" % int(float(econ.get("money", 0.0))):
+	if String(main._contract_money_label.text) != main.Money.amount(int(float(econ.get("money", 0.0)))):
 		_fail("the balance should read the wire's money, got '%s'" % main._contract_money_label.text)
 		return
 

@@ -13,19 +13,19 @@
 # working and waiting for its first fill.
 #
 # Verifies, against `test_layouts.gd`'s `build_stalled_pipe_run` (the BBQ
-# branch with the liquid-smoke tank turned off its own run — #54's own
-# mistake, not a synthetic one):
+# branch with a second tank, declared vinegar, pouring into the run the
+# liquid-smoke tank feeds — two declarations the simulation will not choose
+# between):
 #   * the simulation calls that run `ambiguous` and its neighbours `carries`,
 #     so everything below is read against a real fault,
-#   * a hazard clamp stands on EVERY tile the simulation calls dead — the
-#     smoke run and the vat's outlet run it takes down with it — and on NO
-#     tile of the empty run beside them, each rendering a real imported mesh,
-#   * the clamps come DOWN again when the player turns the tank back, which
-#     is the fix the tooltip tells them to make,
+#   * a hazard clamp stands on EVERY tile the simulation calls dead and on
+#     NO tile of the empty run beside them, each rendering a real imported
+#     mesh,
+#   * the clamps come DOWN again when the player removes the second tank,
 #   * hovering the dead run says DEAD RUN and names every fluid it could
 #     carry; hovering an equally empty run beside it says neither,
-#   * the vat on the dead run reports the run as its reason rather than "no
-#     supply pipe" about a pipe the player has laid,
+#   * the vat on the dead run never reports "no supply pipe" about a pipe
+#     the player has laid,
 #   * `_pipe_fault_text` is driven by the wire's `naming` alone — an unnamed
 #     run that is merely `unplumbed` raises nothing, which is what every run
 #     looks like while it is still being laid.
@@ -96,7 +96,7 @@ func _run_checks() -> void:
 		_fail("no run covers %s" % str(Layouts.STALLED_RUN_TILE))
 		return
 	if String(dead.get("naming", "")) != "ambiguous":
-		_fail("the tank was turned off its run, so the run should be ambiguous, not '%s'" % \
+		_fail("two tanks declared two fluids into the run, so it should be ambiguous, not '%s'" % \
 			str(dead.get("naming")))
 		return
 	if Array(dead.get("candidates", [])) != Layouts.STALLED_RUN_CANDIDATES:
@@ -112,11 +112,8 @@ func _run_checks() -> void:
 		return
 
 	# --- a clamp on every tile of every dead run, and on nothing else -----
-	# Every dead run, not only the one the tank pinned: with the smoke run
-	# unnameable the vat can no longer be told which sauce it cooks, so its
-	# OUTLET run narrows to several as well. That knock-on is the simulation's
-	# own answer and the marking follows it exactly — which is the whole
-	# point of reading `naming` off the wire instead of guessing here.
+	# Every run the simulation calls dead, read off `naming` on the wire
+	# rather than guessed here — the marking follows the simulation exactly.
 	var dead_tiles: Array = []
 	for network in main._last_fluid:
 		if not main.PIPE_FAULT_NAMINGS.has(String(network.get("naming", ""))):
@@ -158,12 +155,12 @@ func _run_checks() -> void:
 		_fail("the empty run should still report its level, got: %s" % alive_text)
 		return
 
-	# --- the machine on the dead run blames the run ------------------------
+	# --- the machine on the dead run never denies the pipe -----------------
+	# Its first fluid, the BBQ mix, is honestly empty in an unrun branch, so
+	# that is what it waits on first; what it must never do is call the laid,
+	# confused run a missing pipe.
 	main._poll_machine_load()
 	var vat_text: String = main._hover_text_at_tile(Vector2i(17, -3))
-	if not vat_text.contains("more than one fluid"):
-		_fail("the vat on the dead run should blame the run, got: %s" % vat_text)
-		return
 	if vat_text.contains("no supply pipe"):
 		_fail("the vat's supply pipe is laid; claiming it is missing is the wrong answer #54 is about")
 		return
@@ -179,19 +176,19 @@ func _run_checks() -> void:
 		return
 
 	# --- and the clamps come down when the mistake is undone ---------------
-	# Three more quarter turns is the player's own fix: the tank faces its
-	# run again, the run is pinned to liquid smoke, and nothing about it is
-	# marked any more.
-	for _turn in range(3):
-		main._issue_world_command({"type": "rotate", "tile": [Layouts.STALLED_TANK.x, Layouts.STALLED_TANK.y]})
+	# Removing the second tank is the player's own fix: one declaration is
+	# left, the run is liquid smoke, and nothing about it is marked any more.
+	main._issue_world_command({
+		"type": "remove", "tile": [Layouts.STALLED_SECOND_TANK.x, Layouts.STALLED_SECOND_TANK.y],
+	})
 	main._update_fluid_network()
 	var fixed := _run_at(Layouts.STALLED_RUN_TILE)
 	if String(fixed.get("naming", "")) != "carries":
-		_fail("turning the tank back should name the run again, got '%s'" % str(fixed.get("naming")))
+		_fail("removing the second tank should name the run again, got '%s'" % str(fixed.get("naming")))
 		return
 	if not main._pipe_fault_nodes.is_empty():
 		_fail("%d clamps are still standing on a run that is fixed" % main._pipe_fault_nodes.size())
 		return
 
-	print("PIPE_FAULT_OK: %d dead tiles flagged and no named run marked, the tooltip names every fluid the run could carry, the vat blames the run, and every clamp comes down when the tank is turned back" % dead_tiles.size())
+	print("PIPE_FAULT_OK: %d dead tiles flagged and no named run marked, the tooltip names every fluid the run could carry, the vat never denies the pipe, and every clamp comes down when the second tank is removed" % dead_tiles.size())
 	quit(0)

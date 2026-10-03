@@ -41,7 +41,8 @@
 //! # The trigger
 //!
 //! **Lifetime boxes of a named product sold** — a hundred `boxed_ketchup`
-//! opens BBQ, a hundred `boxed_bbq` opens mustard
+//! opens mustard, a hundred `boxed_mustard` opens BBQ (the order since
+//! 2026-10-03; it was BBQ then mustard)
 //! ([`super::economy::Economy::lifetime_boxes_sold`]). "Sold" means shipped
 //! as part of a *satisfied* delivery window, because a dock being paid is
 //! what selling is in this game: a missed window sells nothing, and a lost
@@ -58,7 +59,7 @@
 //! of them had actually made. Boxes of a named product do say it, and they
 //! say something the old trigger could not express at all: each tier now
 //! waits on **the line before it running**, not on any line running.
-//! Mustard waits on BBQ boxes, so the second sauce has to be a going
+//! BBQ waits on mustard boxes, so the second sauce has to be a going
 //! concern before the third one arrives.
 //!
 //! # What is saved
@@ -1194,35 +1195,36 @@ mod tests {
     }
 
     /// The shipped gates, pinned: the owner's rule of 2026-09-26 is a
-    /// hundred boxes of the tier below, and the second gate's product is the
-    /// first gate's output.
+    /// hundred boxes of the tier below, the second gate's product is the
+    /// first gate's output, and since 2026-10-03 the order is ketchup, then
+    /// mustard, then BBQ.
     #[test]
     fn the_shipped_gates_are_the_owners_rule() {
         let unlocks = UnlockRegistry::bundled();
-        let bbq = unlocks.get("bbq_sauce").expect("the BBQ gate must ship");
-        assert_eq!(bbq.name, "BBQ Sauce");
-        assert_eq!(bbq.after_sold.item, "boxed_ketchup");
-        assert_eq!(bbq.after_sold.boxes, 100);
-        assert_eq!(bbq.ingredients, ["spice_mix", "molasses", "liquid_smoke"]);
-        assert_eq!(
-            bbq.contracts,
-            [
-                "rib_shack",
-                "smokehouse_trial",
-                "picnic_caterer",
-                "grill_pub",
-                "steakhouse_group",
-                "roadhouse_group",
-                "smokehouse_wholesale",
-                "bbq_festival",
-                "county_fair"
-            ]
-        );
         let mustard = unlocks
             .get("mustard_sauce")
             .expect("the mustard gate must ship");
-        assert_eq!(mustard.after_sold.item, "boxed_bbq");
+        assert_eq!(mustard.name, "Mustard");
+        assert_eq!(mustard.after_sold.item, "boxed_ketchup");
         assert_eq!(mustard.after_sold.boxes, 100);
+        assert_eq!(mustard.ingredients, ["mustard_seed", "turmeric"]);
+        assert_eq!(
+            mustard.contracts,
+            [
+                "pretzel_cart",
+                "deli_counter",
+                "hot_dog_stand",
+                "ballpark_vendor",
+                "deli_chain",
+                "sandwich_franchise",
+                "charcuterie_supplier"
+            ]
+        );
+        let bbq = unlocks.get("bbq_sauce").expect("the BBQ gate must ship");
+        assert_eq!(bbq.name, "BBQ Sauce");
+        assert_eq!(bbq.after_sold.item, "boxed_mustard");
+        assert_eq!(bbq.after_sold.boxes, 100);
+        assert_eq!(bbq.ingredients, ["spice_mix", "molasses", "liquid_smoke"]);
         // The ladder: each gate's product is the sauce the gate below it
         // released, so the tiers are in the file's order for a reason.
         assert_eq!(
@@ -1231,7 +1233,7 @@ mod tests {
                 .iter()
                 .map(|u| u.after_sold.item.as_str())
                 .collect::<Vec<_>>(),
-            vec!["boxed_ketchup", "boxed_bbq"]
+            vec!["boxed_ketchup", "boxed_mustard"]
         );
     }
 }

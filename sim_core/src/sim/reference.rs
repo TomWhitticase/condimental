@@ -161,6 +161,9 @@ struct Order {
     /// Which raw item a hopper holds. `None` for everything else — see
     /// [`PlayerCommand::Place`].
     item: Option<&'static str>,
+    /// The recipe a machine is placed running — the choice a player makes
+    /// in its picker. `None` for everything else.
+    recipe: Option<&'static str>,
 }
 
 impl Order {
@@ -172,6 +175,23 @@ impl Order {
             tile,
             direction: Direction::East,
             item: None,
+            recipe: None,
+        }
+    }
+
+    /// A machine on the line, facing east, set to run `recipe`.
+    fn machine(kind: &'static str, tile: TileCoord, recipe: &'static str) -> Self {
+        Self {
+            recipe: Some(recipe),
+            ..Self::east(kind, tile)
+        }
+    }
+
+    /// A hopper facing east, holding `item`.
+    fn hopper(tile: TileCoord, item: &'static str) -> Self {
+        Self {
+            item: Some(item),
+            ..Self::east(HOPPER_KIND, tile)
         }
     }
 }
@@ -303,6 +323,7 @@ fn build(
             tile: order.tile,
             direction: order.direction,
             item: order.item.map(str::to_string),
+            recipe: order.recipe.map(str::to_string),
         });
     }
 
@@ -367,7 +388,23 @@ pub fn linear_prefix(recipes: &RecipeRegistry) -> &[Recipe] {
 /// readable in one place. See this module's doc for that rule stated in
 /// prose.
 fn plan(recipes: &RecipeRegistry, machines: &MachineRegistry) -> Vec<Order> {
-    let ordered = linear_prefix(recipes);
+    plan_line(
+        recipes,
+        machines,
+        linear_prefix(recipes).iter(),
+        CHAIN_ROW_Y,
+    )
+}
+
+/// [`plan`]'s layout rule for any linear line — `ordered` is its recipes
+/// head to tail, and `row_y` the row its machines sit on. Each machine is
+/// placed set to the recipe it is laid out for.
+fn plan_line<'r>(
+    recipes: &RecipeRegistry,
+    machines: &MachineRegistry,
+    ordered: impl Iterator<Item = &'r Recipe>,
+    row_y: i32,
+) -> Vec<Order> {
     let raw = raw_ingredient_ids(recipes);
     let is_raw = |id: &str| raw.iter().any(|r| r == id);
     let mut orders = Vec::new();
@@ -391,7 +428,7 @@ fn plan(recipes: &RecipeRegistry, machines: &MachineRegistry) -> Vec<Order> {
         let belt_start_x = cursor_x;
         if !recipe.inputs.is_empty() {
             for (index, (item, _)) in recipe.inputs.iter().enumerate() {
-                let lane_y = CHAIN_ROW_Y + index as i32;
+                let lane_y = row_y + index as i32;
                 for dx in 0..STAGE_BELT_TILES {
                     orders.push(Order::east(BELT_KIND, (belt_start_x + dx, lane_y)));
                 }
@@ -399,19 +436,21 @@ fn plan(recipes: &RecipeRegistry, machines: &MachineRegistry) -> Vec<Order> {
                 // it gets a hopper at the lane's head.
                 if is_raw(item) {
                     let hopper_width = footprint_width(machines, HOPPER_KIND);
-                    orders.push(Order {
-                        kind: HOPPER_KIND,
-                        tile: (belt_start_x - hopper_width, lane_y),
-                        direction: Direction::East,
-                        item: Some(leak(item)),
-                    });
+                    orders.push(Order::hopper(
+                        (belt_start_x - hopper_width, lane_y),
+                        leak(item),
+                    ));
                 }
             }
             cursor_x += STAGE_BELT_TILES;
         }
 
-        let machine_origin = (cursor_x, CHAIN_ROW_Y);
-        orders.push(Order::east(leak(&recipe.machine), machine_origin));
+        let machine_origin = (cursor_x, row_y);
+        orders.push(Order::machine(
+            leak(&recipe.machine),
+            machine_origin,
+            leak(&recipe.id),
+        ));
         cursor_x += footprint.width_tiles;
 
         // A raw fluid input (vinegar) needs a tank and its own run, on the
@@ -441,7 +480,7 @@ fn plan(recipes: &RecipeRegistry, machines: &MachineRegistry) -> Vec<Order> {
         // east is what connects this stage to the next one.
         if !recipe.fluid_outputs.is_empty() {
             for n in 0..MACHINE_PIPE_RUN_TILES {
-                orders.push(Order::east(PIPE_KIND, (cursor_x + n, CHAIN_ROW_Y)));
+                orders.push(Order::east(PIPE_KIND, (cursor_x + n, row_y)));
             }
             cursor_x += MACHINE_PIPE_RUN_TILES;
         }
@@ -450,12 +489,9 @@ fn plan(recipes: &RecipeRegistry, machines: &MachineRegistry) -> Vec<Order> {
     // The exit: one more ordinary belt run past the last machine, and the
     // dock at the end of it.
     for dx in 0..STAGE_BELT_TILES {
-        orders.push(Order::east(BELT_KIND, (cursor_x + dx, CHAIN_ROW_Y)));
+        orders.push(Order::east(BELT_KIND, (cursor_x + dx, row_y)));
     }
-    orders.push(Order::east(
-        DOCK_KIND,
-        (cursor_x + STAGE_BELT_TILES, CHAIN_ROW_Y),
-    ));
+    orders.push(Order::east(DOCK_KIND, (cursor_x + STAGE_BELT_TILES, row_y)));
 
     orders
 }
@@ -564,43 +600,28 @@ pub fn open_every_gate(world: &mut World) {
     world.restore_boxes_sold(every_gate_open());
 }
 
-/// The **mustard line**: the reference chain, plus the third sauce's own five
-/// stages on rows of their own — the fixture that proves a `boxed_mustard` can
-/// be made and shipped by a player who only ever issues `Purchase` and
-/// `Place`, in a world where the ketchup line is running beside it.
+/// The **mustard line**: the reference chain, plus the second sauce's own
+/// line on rows of its own — the fixture that proves a `boxed_mustard` can be
+/// made and shipped by a player who only ever issues `Purchase` and `Place`,
+/// in a world where the ketchup line is running beside it.
 ///
 /// ```text
 ///   y=0..2  ...the shipped ketchup line, untouched...
-///   y=4     [tank]--pipes------v vinegar
-///   y=5     [seed]--belts-->[crusher]==mash==>[ mixer ]==mix==>[ vat ]==mustard==>[bottler]--belts-->[packer]--belts-->[dock]
-///   y=6              [turmeric]--belts-------->^ (1x2)         (2x2)
+///   y=5     [seed]--belts-->[crusher]--belts-->[ mixer ]==mustard==>[bottler]--belts-->[packer]--belts-->[dock]
+///   y=6              [turmeric]--belts-------->[ (1x2) ]
+///   y=7                               [tank]--pipes--^ vinegar
 /// ```
 ///
-/// Two things are worth reading twice, because each is a tile that cannot move:
+/// Since mustard lost its cook and drinks its vinegar at the mixer
+/// (2026-10-03) it is a linear line again, so it is laid out by [`plan`]'s
+/// own rule rather than drawn by hand: [`plan_line`] over mustard's recipes,
+/// on a row two clear tiles south of the deepest thing on the ketchup line.
 ///
-/// 1. **The vinegar run approaches the crusher from the row SOUTH of the line**
-///    rather than the row north of it, which is where [`plan`] would put it.
-///    North is where the mustard mixer's turmeric lane has to run — the mixer
-///    is 1x2 and its northern inlet tile is taken by the mash pipe — so the two
-///    would collide. Nothing joins a belt to a pipe, so a belt lane crossing
-///    the line's own row is harmless; two pipe runs on one row are not.
-/// 2. **The mash run is two tiles and the mixer sits at the end of it.** This
-///    is the joint [`plan`]'s west-to-east rule cannot express, and the reason
-///    this fixture is drawn by hand like [`bbq_branch`] rather than laid out by
-///    that rule: a stage fed BOTH a pipe from the machine behind it and a belt
-///    of its own raw would have its feed lane push it four tiles east, away
-///    from the pipe run that is supposed to reach it. Mustard's crusher-to-
-///    mixer hand-off is the first of those in the shipped content.
-///
-/// **The vinegar tap is on the crusher, and that is the point of this world.**
-/// Mustard is milled wet, so the raw fluid two sauces compete for enters this
-/// line one machine earlier than it enters the ketchup line, and the mustard
-/// mixer drinks the derived `mustard_mash`. Put it on the mixer instead and
-/// every mixer in the game has two raw fluids it could be drinking: a tank run
-/// touching one narrows to neither, goes ambiguous, and cannot even be filled.
-/// `sim::recipe::tests::at_most_one_raw_fluid_enters_any_machine_kind` fences
-/// the rule in the data; `tests/mustard_line.rs` runs this factory to show it
-/// holds in a world.
+/// **Both mixers drink vinegar from tanks of their own**, and that is the
+/// point of this world: two recipes on one machine kind drinking one raw
+/// fluid, which the pipe resolver could not name until each machine's recipe
+/// was the player's choice (issue #184). `tests/mustard_line.rs` runs this
+/// factory to show both lines resolve and ship.
 ///
 /// Every progression gate is open, for the reason [`bbq_branch`]'s doc gives:
 /// mustard's two raws are gated, and a factory holding them belongs to a
@@ -621,78 +642,51 @@ pub fn mustard_line(recipes: RecipeRegistry, budget: u32) -> World {
 /// thing on the ketchup line (its vinegar run, on row 2), so that no run of one
 /// line is ever edge-adjacent to a run of the other.
 const MUSTARD_ROW_Y: i32 = 5;
-/// The row mustard's vinegar run sits on: south of the machines. See
-/// [`mustard_line`], point 1.
-const MUSTARD_TANK_ROW_Y: i32 = 4;
-/// The row mustard's turmeric lane sits on: north of the machines, feeding the
-/// mixer's northern inlet tile.
-const MUSTARD_LANE_ROW_Y: i32 = 6;
+
+/// The recipes of the line that ends in `product`, head to tail: the recipe
+/// that makes it, then the one that makes its one made input, and so on back
+/// to raws. Panics on a line that is not linear — a recipe with two made
+/// inputs is a branch, which [`plan_line`] cannot lay out.
+fn line_ending_in<'r>(recipes: &'r RecipeRegistry, product: &str) -> Vec<&'r Recipe> {
+    let raw = raw_ingredient_ids(recipes);
+    let made_by = |id: &str| {
+        recipes.ordered().iter().find(|recipe| {
+            recipe.outputs.iter().any(|(out, _)| out == id)
+                || recipe.fluid_outputs.iter().any(|(out, _)| out == id)
+        })
+    };
+    let mut line = Vec::new();
+    let mut wanted = product.to_string();
+    while let Some(recipe) = made_by(&wanted) {
+        line.push(recipe);
+        let made: Vec<&str> = recipe
+            .inputs
+            .iter()
+            .chain(&recipe.fluid_inputs)
+            .map(|(id, _)| id.as_str())
+            .filter(|id| !raw.iter().any(|r| r == id))
+            .collect();
+        match made.as_slice() {
+            [] => break,
+            [one] => wanted = one.to_string(),
+            several => panic!("'{}' takes several made inputs {several:?}", recipe.id),
+        }
+    }
+    line.reverse();
+    line
+}
 
 /// [`plan`] for the mustard line: the ketchup line as it always was, then
-/// mustard's five stages drawn out tile by tile. See [`mustard_line`] for the
-/// picture and for why this is a hand-drawn table rather than a rule.
+/// mustard's own line by the same rule on [`MUSTARD_ROW_Y`].
 fn mustard_plan(recipes: &RecipeRegistry, machines: &MachineRegistry) -> Vec<Order> {
     let mut orders = plan(recipes, machines);
-    let row = MUSTARD_ROW_Y;
-
-    // Seed off a hopper, milled wet: the crusher's own feed lane, laid exactly
-    // as the ketchup crusher's is.
-    orders.push(Order {
-        kind: HOPPER_KIND,
-        tile: (-1, row),
-        direction: Direction::East,
-        item: Some("mustard_seed"),
-    });
-    for dx in 0..STAGE_BELT_TILES {
-        orders.push(Order::east(BELT_KIND, (dx, row)));
-    }
-    orders.push(Order::east("crusher", (4, row)));
-
-    // The vinegar the two sauces compete for, arriving from the south so the
-    // turmeric lane can have the north. The run's last tile is edge-adjacent to
-    // the crusher; the tank faces east into the run's head.
-    orders.push(Order::east(FLUID_TANK_KIND, (0, MUSTARD_TANK_ROW_Y)));
-    for n in 0..PIPE_RUN_TILES {
-        orders.push(Order::east(PIPE_KIND, (1 + n, MUSTARD_TANK_ROW_Y)));
-    }
-
-    // crusher -> mixer, off the crusher's outlet face: the derived mash.
-    for n in 0..MACHINE_PIPE_RUN_TILES {
-        orders.push(Order::east(PIPE_KIND, (5 + n, row)));
-    }
-    orders.push(Order::east("mixer", (7, row)));
-
-    // Turmeric into the mixer's northern inlet tile, since the mash pipe has
-    // the southern one.
-    orders.push(Order {
-        kind: HOPPER_KIND,
-        tile: (2, MUSTARD_LANE_ROW_Y),
-        direction: Direction::East,
-        item: Some("turmeric"),
-    });
-    for dx in 0..STAGE_BELT_TILES {
-        orders.push(Order::east(BELT_KIND, (3 + dx, MUSTARD_LANE_ROW_Y)));
-    }
-
-    // mixer -> vat -> bottler, then the ordinary solid tail, all spaced as the
-    // ketchup line spaces them.
-    for n in 0..MACHINE_PIPE_RUN_TILES {
-        orders.push(Order::east(PIPE_KIND, (8 + n, row)));
-    }
-    orders.push(Order::east("cooking_vat", (10, row)));
-    for n in 0..MACHINE_PIPE_RUN_TILES {
-        orders.push(Order::east(PIPE_KIND, (12 + n, row)));
-    }
-    orders.push(Order::east("bottler", (14, row)));
-    for dx in 0..STAGE_BELT_TILES {
-        orders.push(Order::east(BELT_KIND, (15 + dx, row)));
-    }
-    orders.push(Order::east("packer", (19, row)));
-    for dx in 0..STAGE_BELT_TILES {
-        orders.push(Order::east(BELT_KIND, (20 + dx, row)));
-    }
-    orders.push(Order::east(DOCK_KIND, (24, row)));
-
+    let mustard = line_ending_in(recipes, "boxed_mustard");
+    orders.extend(plan_line(
+        recipes,
+        machines,
+        mustard.into_iter(),
+        MUSTARD_ROW_Y,
+    ));
     orders
 }
 
@@ -717,17 +711,12 @@ fn bbq_plan(recipes: &RecipeRegistry, machines: &MachineRegistry) -> Vec<Order> 
     // shared belt.
     for (lane, item) in [(0, "spice_mix"), (1, "molasses")] {
         let lane_y = row + lane;
-        orders.push(Order {
-            kind: HOPPER_KIND,
-            tile: (9, lane_y),
-            direction: Direction::East,
-            item: Some(item),
-        });
+        orders.push(Order::hopper((9, lane_y), item));
         for dx in 0..STAGE_BELT_TILES {
             orders.push(Order::east(BELT_KIND, (10 + dx, lane_y)));
         }
     }
-    orders.push(Order::east("mixer", (14, row)));
+    orders.push(Order::machine("mixer", (14, row), "bbq_mix"));
 
     // The branch itself: one pipe, touching the ketchup run below it and the
     // mixer above it. See [`bbq_branch`], joint 1.
@@ -737,7 +726,7 @@ fn bbq_plan(recipes: &RecipeRegistry, machines: &MachineRegistry) -> Vec<Order> 
     for n in 0..MACHINE_PIPE_RUN_TILES {
         orders.push(Order::east(PIPE_KIND, (15 + n, row)));
     }
-    orders.push(Order::east("cooking_vat", (17, row)));
+    orders.push(Order::machine("cooking_vat", (17, row), "bbq"));
 
     // Liquid smoke: the reference chain's own tank arrangement -- a
     // `PIPE_RUN_TILES` run on the row north of the machine's footprint with
@@ -754,11 +743,11 @@ fn bbq_plan(recipes: &RecipeRegistry, machines: &MachineRegistry) -> Vec<Order> 
     for n in 0..MACHINE_PIPE_RUN_TILES {
         orders.push(Order::east(PIPE_KIND, (19 + n, row)));
     }
-    orders.push(Order::east("bottler", (21, row)));
+    orders.push(Order::machine("bottler", (21, row), "bottled_bbq"));
     for dx in 0..STAGE_BELT_TILES {
         orders.push(Order::east(BELT_KIND, (22 + dx, row)));
     }
-    orders.push(Order::east("packer", (26, row)));
+    orders.push(Order::machine("packer", (26, row), "boxed_bbq"));
     for dx in 0..STAGE_BELT_TILES {
         orders.push(Order::east(BELT_KIND, (27 + dx, row)));
     }

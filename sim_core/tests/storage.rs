@@ -84,6 +84,7 @@ fn build_rack(world: &mut World, tile: (i32, i32)) {
         tile,
         direction: Direction::East,
         item: None,
+        recipe: None,
     });
     assert_eq!(
         world.placement_count(),
@@ -475,6 +476,7 @@ fn a_rack_beside_a_running_belt_never_touches_it() {
             tile: (lonely.0 + dx, lonely.1),
             direction: Direction::East,
             item: None,
+            recipe: None,
         });
     }
     let cap = world.stock_cap_for("tomato");

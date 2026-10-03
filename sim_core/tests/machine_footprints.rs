@@ -54,8 +54,8 @@ fn the_network(world: &World) -> Option<FluidSnapshot> {
 /// just if they are in the wrong place.
 #[derive(Debug, Clone)]
 struct StageView {
-    /// `None` on a line nothing has been fed into yet — every machine of a
-    /// kind with several recipes starts undecided.
+    /// The recipe each machine was placed set to (2026-10-03); `None` for
+    /// a machine of a kind with several recipes placed with none chosen.
     recipe: Option<String>,
     machine_kind: String,
     machine_tile: (i32, i32),
@@ -306,7 +306,11 @@ fn every_tile_of_the_shipped_cooking_vat_resolves_to_the_cooking_vat() {
             }) => {
                 assert_eq!(machine_kind, "cooking_vat", "at {tile:?}");
                 assert_eq!(origin_tile, origin, "at {tile:?}");
-                assert_eq!(*recipe, None, "never fed, so undecided — at {tile:?}");
+                assert_eq!(
+                    recipe.as_deref(),
+                    Some("ketchup"),
+                    "the fixture places the vat set to cook ketchup — at {tile:?}"
+                );
                 assert_eq!(
                     (footprint.width_tiles, footprint.height_tiles),
                     (2, 2),
@@ -342,11 +346,13 @@ fn every_shipped_stage_reports_the_machine_kind_its_recipe_names() {
     let recipes = shipped_recipes();
     let world = reference_chain(shipped_recipes());
     for (stage, recipe) in stages(&world).iter().zip(recipes.ordered()) {
-        // Built and never fed, so no machine has been told its sauce yet.
+        // Each placed set to the recipe it was laid out for.
         assert_eq!(
-            stage.recipe, None,
+            stage.recipe.as_deref(),
+            Some(recipe.id.as_str()),
             "{} at {:?}",
-            recipe.id, stage.machine_tile
+            recipe.id,
+            stage.machine_tile
         );
         assert_eq!(stage.machine_kind, recipe.machine);
     }
@@ -367,8 +373,9 @@ fn the_shipped_pipe_run_feeds_the_mixer() {
     assert_eq!(tap.machine_tile, (9, 0));
     assert_eq!(tap.segment_index, 3);
     assert_eq!(
-        tap.machine_recipe, None,
-        "never fed, so the mixer is undecided"
+        tap.machine_recipe.as_deref(),
+        Some("ketchup_mix"),
+        "the fixture places the mixer set to blend ketchup mix"
     );
 
     // ...and the machine at that tile really is the mixer, not some other

@@ -193,6 +193,7 @@ fn the_establishment_tracks_what_is_placed_and_never_the_tick() {
         tile: (12, 12),
         direction: Direction::East,
         item: None,
+        recipe: None,
     });
     assert_eq!(
         required(&world, "manufacturing"),
@@ -508,9 +509,8 @@ fn an_understaffed_machine_stays_understaffed() {
     let vat = tile_of(&world, "cooking_vat");
     fire(&mut world, "manufacturing");
 
-    // Short from the start, but nothing has reached the vat yet: it is
-    // waiting for its input — so far any sauce's (`undecided`) — which a
-    // hire would not fix.
+    // Short from the start, and nothing has reached the vat yet: it is
+    // waiting for its input, which a hire would not fix.
     assert!(matches!(
         stall_of(&world, vat),
         Some((
@@ -619,6 +619,7 @@ fn a_running_machine_short_on_paper_is_not_understaffed() {
         tile: spare,
         direction: Direction::East,
         item: None,
+        recipe: None,
     });
     let vat = tile_of(&world, "cooking_vat");
     let entry = |world: &World, tile| {
@@ -698,6 +699,8 @@ fn a_short_vat_on_a_shared_pipe_keeps_its_marker() {
                 tile,
                 direction: Direction::East,
                 item: None,
+                // The extra vats cook what the shipped one cooks.
+                recipe: (kind == "cooking_vat").then(|| "ketchup".to_string()),
             });
         }
     }
@@ -1598,8 +1601,8 @@ fn a_staff_stall_never_masks_an_input_shortfall() {
     let crusher = tile_of(&world, "crusher");
     assert_eq!(
         stall_of(&world, crusher).map(|(k, _)| k),
-        Some(StallKind::Undecided),
-        "an unfed crusher wants ingredients — any sauce's — not people"
+        Some(StallKind::Input),
+        "an unfed crusher wants ingredients, not people"
     );
     for c in &world.staff_snapshot().categories {
         assert_eq!(
