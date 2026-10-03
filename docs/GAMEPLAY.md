@@ -76,8 +76,9 @@ machines are the ones the ketchup line already has — so neither gate above cou
 and the game would have handed a new player the whole two-sauce board in their
 first minute. What gates it is a **progression gate**: a count of boxes of a
 named product SOLD that releases a group of ingredients and contracts
-(`data/unlocks.ron`, §9). Each tier counts the tier below it — BBQ opens at 100
-boxes of ketchup, mustard at 100 boxes of BBQ — so a sauce is earned by the
+(`data/unlocks.ron`, §9). Each tier counts the tier below it — mustard opens at
+100 boxes of ketchup, BBQ at 100 boxes of mustard (since 2026-10-03; it was BBQ
+then mustard) — so a sauce is earned by the
 line before it actually running, not by time passed or money banked. It is not a third *design* axis so much as the
 admission that a tier which costs no capital still needs a reason to arrive
 later than the first minute. See `docs/DECISIONS.md`, 2026-09-21, and
@@ -274,11 +275,14 @@ implementation history (epics, tickets, balancing passes) behind each one.
   Both are enforced in the simulation, not the panel: buying or signing a
   gated id is refused. A held-back contract is still LISTED on the board,
   padlocked with its gate and progress, so the next tier is visible before
-  it opens (2026-09-29). **No recipe is ever locked** — a gated sauce's recipes
-  sit in `recipes.ron` from a new game and are merely unbuildable and
-  unsellable — which keeps progression entirely off the tick path. The gate
+  it opens (2026-09-29). **No recipe is locked on the tick path** — a gated
+  sauce's recipes sit in `recipes.ron` from a new game and are merely
+  unbuildable and unsellable, so progression costs the tick nothing. A
+  machine's MAKES picker padlocks a recipe whose raws are still gated and
+  `SetMachineRecipe` refuses it (2026-10-03), the CONTENTS pickers' rule. The gate
   announces itself by name when it opens, which is the point of having one.
-  Two gates ship: BBQ at 100 boxes of ketchup, mustard at 100 boxes of BBQ.
+  Two gates ship: mustard at 100 boxes of ketchup, BBQ at 100 boxes of
+  mustard (2026-10-03).
   Gating a tier on the tier below it is what makes the chain a chain; a third
   sauce behind a fourth product is a data edit and nothing else. The trigger
   counted delivery windows until 2026-09-26 — windows are blind to both the

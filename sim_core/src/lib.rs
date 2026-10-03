@@ -336,7 +336,7 @@ impl SimBridge {
     /// ```
     ///
     /// **`recipe: null` does not mean "not a machine"** (2026-10-02): a
-    /// machine nothing has fed yet is *undecided* and carries `null` too.
+    /// machine with no recipe chosen carries `null` too (2026-10-03).
     /// `machine: true`, present on machines only, is the test.
     ///
     /// **Unlike `chain_layout_json` this is not static** — call it again
@@ -1047,14 +1047,15 @@ impl SimBridge {
     /// wire is titled; a second title-caser in Rust would be a second thing
     /// to keep in step (`godot_project/CLAUDE.md`'s one rule). Likewise a
     /// step carries `time_ticks` and the panel divides by `TICK_HZ`.
-    /// Every recipe a machine of `kind` can be set to, as a JSON array of
-    /// recipe ids in `data/recipes.ron` order — what the machine's picker
-    /// lists (`PlayerCommand::SetMachineRecipe`). `[]` for a kind no recipe
-    /// runs on.
+    /// Every recipe a machine of `kind` can be set to, in `data/recipes.ron`
+    /// order — what the machine's picker lists (`PlayerCommand::SetMachineRecipe`)
+    /// — as `{"id", "locked", "unlock_name", "unlock_item", "unlock_boxes",
+    /// "unlock_sold"}` entries, the CONTENTS pickers' shape. `[]` for a kind
+    /// no recipe runs on.
     #[func]
     fn machine_recipes_json(&self, kind: GString) -> GString {
-        let ids = self.world.recipes_for_kind(&kind.to_string());
-        let json = serde_json::to_string(&ids).expect("recipe ids must serialize");
+        let choices = self.world.machine_recipe_choices(&kind.to_string());
+        let json = serde_json::to_string(&choices).expect("recipe choices must serialize");
         GString::from(json.as_str())
     }
 

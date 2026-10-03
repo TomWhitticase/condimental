@@ -605,6 +605,15 @@ impl Economy {
             .contract_available(id, &self.lifetime_boxes_sold)
     }
 
+    /// The shut gate holding raw ingredient `id` back, or `None` when the
+    /// market sells it now — `contract_gate`'s twin for an ingredient.
+    pub fn ingredient_gate(&self, id: &str) -> Option<GateProgress> {
+        self.unlocks
+            .gate_for_ingredient(id)
+            .filter(|gate| !gate.is_open(&self.lifetime_boxes_sold))
+            .map(|gate| gate.progress(&self.lifetime_boxes_sold))
+    }
+
     /// The shut gate holding `id` back from being signed, or `None` when it
     /// may be signed now — the one question behind both `contract_unlocked`
     /// and a board row's padlock, so the two cannot disagree.

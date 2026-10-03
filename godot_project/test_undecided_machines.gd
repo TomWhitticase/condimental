@@ -62,10 +62,23 @@ func _repoll() -> void:
 	main._poll_machine_load()
 
 
-## Every recipe a machine of `kind` can be set to, off the wire.
+## Every recipe a machine of `kind` can be set to, off the wire, as ids.
 func _recipes_of(kind: String) -> Array:
+	var ids := []
 	var parsed = JSON.parse_string(main.sim.machine_recipes_json(kind))
-	return parsed if parsed is Array else []
+	for entry in (parsed if parsed is Array else []):
+		ids.append(String(entry.get("id", "")))
+	return ids
+
+
+## The recipes of `kind` the wire says are behind a shut gate.
+func _locked_recipes_of(kind: String) -> Array:
+	var ids := []
+	var parsed = JSON.parse_string(main.sim.machine_recipes_json(kind))
+	for entry in (parsed if parsed is Array else []):
+		if bool(entry.get("locked", false)):
+			ids.append(String(entry.get("id", "")))
+	return ids
 
 
 func _run_checks() -> void:
@@ -123,9 +136,12 @@ func _run_checks() -> void:
 		var heading: String = main._config_picker_heading.text
 		var slots: Array = main._config_picker_slots.duplicate()
 		var ticked := 0
+		var padlocked := []
 		for slot in slots:
 			if slot["mark"].visible:
 				ticked += 1
+			if slot["lock"].visible:
+				padlocked.append(String(slot["item"]))
 		main._close_config_panel()
 		if title != "%s — %s" % [main._kind_display_name(kind), main.MACHINE_UNDECIDED_TEXT]:
 			_fail("an unset %s's panel is titled '%s'" % [kind, title])
@@ -138,6 +154,17 @@ func _run_checks() -> void:
 			return
 		if ticked != 0:
 			_fail("an unset %s's picker ticks %d slot(s)" % [kind, ticked])
+			return
+		# A new game has opened no gate, so every recipe the wire calls
+		# locked wears a padlock, and nothing else does (UI_UX §5g).
+		padlocked.sort()
+		var want_locked := _locked_recipes_of(kind)
+		want_locked.sort()
+		if padlocked != want_locked:
+			_fail("the %s's picker padlocks %s; the wire locks %s" % [kind, str(padlocked), str(want_locked)])
+			return
+		if kind == "mixer" and want_locked.size() < 2:
+			_fail("a new game's mixer should offer mustard and BBQ mix locked, got %s" % str(want_locked))
 			return
 
 		# 3. Tint.
@@ -184,5 +211,5 @@ the voxels are not staged (run cargo xtask)" % tinted_kinds)
 		_fail("the set vat's product mesh took no tint")
 		return
 
-	print("UNDECIDED_OK: %d machine kinds placed with no recipe name none and offer a MAKES picker of their own recipes; choosing '%s' in the vat's picker set it, ticked it, titled it and tinted it" % [kinds.size(), choice])
+	print("UNDECIDED_OK: %d machine kinds placed with no recipe name none and offer a MAKES picker of their own recipes, the not-yet-unlocked ones padlocked; choosing '%s' in the vat's picker set it, ticked it, titled it and tinted it" % [kinds.size(), choice])
 	quit(0)

@@ -1042,3 +1042,55 @@ fn pipe_naming_is_independent_of_placement_order() {
         "the naming is a property of the graph, not of the order it was built in"
     );
 }
+
+/// A recipe behind a shut gate is padlocked in the machine's picker and
+/// refused by it, the CONTENTS pickers' rule (UI_UX §5g): in a new game the
+/// mixer offers Mustard and BBQ Mix locked, each naming the gate whose
+/// opening releases it, and `SetMachineRecipe` will not set either. A BBQ
+/// mixer's own raws are BBQ's, but its ketchup comes off the ketchup line —
+/// the walk upstream still finds no locked raw there, so only BBQ's gate
+/// counts. Once every gate is open, both are offered and accepted.
+#[test]
+fn a_recipe_behind_a_shut_gate_is_locked_in_the_picker_and_refused() {
+    let shipped = RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
+        .expect("data/recipes.ron must parse");
+    let mut world = World::with_content_and_money(
+        shipped,
+        MachineRegistry::bundled(),
+        ContractRegistry::bundled(),
+        Money::from_num(10_000),
+    );
+    place(&mut world, "mixer", (0, 0), Direction::East);
+    let choices = world.machine_recipe_choices("mixer");
+    let lock = |id: &str| {
+        choices
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| (c.locked, c.unlock_item.clone()))
+            .unwrap_or_else(|| panic!("the mixer offers no '{id}'"))
+    };
+    assert_eq!(lock("ketchup_mix"), (false, String::new()));
+    assert_eq!(lock("mustard"), (true, "boxed_ketchup".to_string()));
+    assert_eq!(lock("bbq_mix"), (true, "boxed_mustard".to_string()));
+
+    for locked in ["mustard", "bbq_mix"] {
+        world.issue_command(PlayerCommand::SetMachineRecipe {
+            tile: (0, 0),
+            recipe: Some(locked.to_string()),
+        });
+        assert_eq!(
+            recipe_of(&world, (0, 0)),
+            "",
+            "'{locked}' is still behind its gate"
+        );
+    }
+
+    sim_core::sim::reference::open_every_gate(&mut world);
+    assert!(
+        world
+            .machine_recipe_choices("mixer")
+            .iter()
+            .all(|c| !c.locked)
+    );
+    set(&mut world, (0, 0), "mustard");
+}

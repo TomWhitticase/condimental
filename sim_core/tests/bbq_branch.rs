@@ -304,16 +304,13 @@ fn recipe_at(world: &World, tile: (i32, i32)) -> String {
 
 /// **A BBQ machine that runs dry stays a BBQ machine.**
 ///
-/// `Machine::choose` re-picks an idle machine's recipe every tick from what
-/// its buffers and taps hold, and when nothing is satisfied it holds the
-/// closest. A bottler that has drained its tap and emptied its buffer
-/// satisfies *nothing*, so every candidate ties at zero — and the tie used
-/// to go to whichever came first in `data/recipes.ron`, which is
-/// `bottled_ketchup`. The BBQ bottler therefore reported ketchup the moment
-/// it caught up with its supply, which is a lie in two visible places: the
-/// stall readout said it was waiting for ketchup it has never touched, and
-/// the machine drew a row of ketchup bottles (`PRODUCT_TINTS` in
-/// `godot_project/main.gd`, 2026-09-21).
+/// A machine runs the recipe the player set it to (2026-10-03) and never
+/// re-picks. Before that, a bottler that had drained its tap tied every
+/// candidate at zero and went back to the first in `data/recipes.ron`,
+/// `bottled_ketchup`, so a BBQ bottler reported ketchup and drew ketchup
+/// bottles the moment it caught up with its supply (`PRODUCT_TINTS` in
+/// `godot_project/main.gd`, 2026-09-21). The guard stays: a chosen recipe
+/// must survive the line running dry.
 ///
 /// Asserted on a bottler AND a packer because they starve differently — one
 /// is fed by a pipe and one by a belt — and against a run long enough for

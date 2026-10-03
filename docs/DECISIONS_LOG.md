@@ -29,7 +29,10 @@ See [WORKFLOW.md](WORKFLOW.md).
   and mixed, and comes second.** (Owner's call.) A machine runs
   `Machine::recipe` and nothing else, set at placement (`PlayerCommand::Place`'s
   `recipe`) or from the MAKES picker in its configuration panel
-  (`PlayerCommand::SetMachineRecipe`); a kind with one recipe is placed
+  (`PlayerCommand::SetMachineRecipe`) — which padlocks, and refuses, a
+  recipe whose raws (through its upstream stages) are still gated
+  (`World::recipe_gate`), the CONTENTS pickers' rule; `Place`'s `recipe` is
+  not gated, for `Place`'s `item`'s reason. A kind with one recipe is placed
   holding it, and a machine with none makes nothing, takes nothing off a belt
   (`Machine::takes`) and claims no pipe run. Switching abandons the craft,
   drops inputs the new recipe does not take, and empties any run whose name

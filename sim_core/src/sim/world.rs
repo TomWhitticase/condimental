@@ -3336,6 +3336,59 @@ impl World {
             .is_some_and(|recipe| recipe.machine == kind)
     }
 
+    /// The shut gate holding recipe `id` back, or `None` when a machine may
+    /// be set to it now (2026-10-03). A recipe is locked while any raw it
+    /// needs — directly, or through the recipes upstream that make its other
+    /// inputs — is behind a gate that has not opened; the gate reported is
+    /// the LAST such in `data/unlocks.ron`'s order, the one whose opening
+    /// releases the recipe. So in a new game a mixer offers Mustard and BBQ
+    /// Mix padlocked, the CONTENTS pickers' rule (UI_UX §5g), and
+    /// `SetMachineRecipe` refuses them the way `SetHopperItem` refuses a
+    /// locked ingredient.
+    pub fn recipe_gate(&self, id: &str) -> Option<super::unlocks::GateProgress> {
+        let mut raws = BTreeSet::new();
+        self.raws_behind(id, &mut BTreeSet::new(), &mut raws);
+        let order: Vec<String> = self
+            .economy
+            .unlocks()
+            .ordered()
+            .iter()
+            .map(|gate| gate.name.clone())
+            .collect();
+        raws.iter()
+            .filter_map(|raw| self.economy.ingredient_gate(raw))
+            .max_by_key(|gate| order.iter().position(|name| *name == gate.name))
+    }
+
+    /// Every raw recipe `id` needs, through the recipes that make its made
+    /// inputs. `seen` guards a cycle, which content cannot have but this
+    /// walk must not hang on.
+    fn raws_behind(&self, id: &str, seen: &mut BTreeSet<String>, raws: &mut BTreeSet<String>) {
+        if !seen.insert(id.to_string()) {
+            return;
+        }
+        let Some(recipe) = self.recipes.get(id) else {
+            return;
+        };
+        for (input, _) in recipe.inputs.iter().chain(&recipe.fluid_inputs) {
+            let maker = self.recipes.ordered().iter().find(|r| {
+                r.outputs
+                    .iter()
+                    .chain(&r.fluid_outputs)
+                    .any(|(out, _)| out == input)
+            });
+            match maker {
+                Some(maker) => {
+                    let maker = maker.id.clone();
+                    self.raws_behind(&maker, seen, raws);
+                }
+                None => {
+                    raws.insert(input.clone());
+                }
+            }
+        }
+    }
+
     /// The recipe a `kind` with exactly one recipe is placed holding —
     /// there is nothing for the player to choose — and `None` for a kind
     /// with several, which is placed with none chosen.
@@ -3429,6 +3482,10 @@ impl World {
         // only recipe when it has exactly one, and no recipe otherwise.
         let machine_recipe = if self.is_machine_kind(kind) {
             match recipe {
+                // Not gated, deliberately, for `hopper_item_for`'s reason: the
+                // player never places with a recipe (the picker is
+                // `SetMachineRecipe`, which IS gated), and a layout fixture
+                // names one to build a factory to photograph.
                 Some(id) if self.recipe_runs_on(kind, id) => Some(id.to_string()),
                 Some(_) => return Err(PlaceRefusal::Recipe),
                 None => self.only_recipe_of(kind),
@@ -5863,7 +5920,7 @@ impl World {
             Err(_) => return false,
         };
         if let Some(id) = &recipe
-            && !self.recipe_runs_on(&kind, id)
+            && (!self.recipe_runs_on(&kind, id) || self.recipe_gate(id).is_some())
         {
             return false;
         }
@@ -7273,6 +7330,27 @@ impl World {
     /// the list `PlayerCommand::SetMachineRecipe` chooses from, and
     /// what [`super::save`] checks a saved in-flight craft against. Empty
     /// for a kind no recipe names, which is a kind that cannot be placed.
+    /// [`Self::recipes_for_kind`] as a machine's picker draws it: each recipe
+    /// with its lock, in the same shape the CONTENTS pickers' choices take
+    /// ([`super::ingredients::ContentsChoice`]), so one padlock path in Godot
+    /// serves all of them.
+    pub fn machine_recipe_choices(&self, kind: &str) -> Vec<super::ingredients::ContentsChoice> {
+        self.recipes_for_kind(kind)
+            .into_iter()
+            .map(|id| {
+                let gate = self.recipe_gate(&id);
+                super::ingredients::ContentsChoice {
+                    locked: gate.is_some(),
+                    unlock_name: gate.as_ref().map_or_else(String::new, |g| g.name.clone()),
+                    unlock_item: gate.as_ref().map_or_else(String::new, |g| g.item.clone()),
+                    unlock_boxes: gate.as_ref().map_or(0, |g| g.required),
+                    unlock_sold: gate.as_ref().map_or(0, |g| g.sold),
+                    id,
+                }
+            })
+            .collect()
+    }
+
     pub fn recipes_for_kind(&self, kind: &str) -> Vec<String> {
         self.recipes
             .for_machine(kind)

@@ -337,11 +337,9 @@ have needed naming in data"
 		)
 		return
 
-	# THE PLUMBING IS THE PICKER. Checked here rather than at placement time
-	# because a machine's recipe is live state, re-picked every idle tick from
-	# what its inputs currently satisfy: a machine nothing has reached yet
-	# is undecided (no recipe at all), so asking before the line has turned
-	# over would say nothing.
+	# THE RECIPE IS THE PLAYER'S CHOICE (2026-10-03): the fixture places each
+	# machine set to its recipe, so every one reads its own sauce from the
+	# first tick, whatever has reached it.
 	if _placement_recipe(Vector2i(9, 0)) != "ketchup_mix":
 		_fail("the ketchup mixer must run ketchup_mix, not '%s'" % _placement_recipe(Vector2i(9, 0)))
 		return
@@ -356,11 +354,10 @@ have needed naming in data"
 	# product is the `liquid` mesh now, tinted from the live recipe
 	# (main.gd's PRODUCT_TINTS), and this asserts that join end to end.
 	#
-	# **Against what each machine was SEEN making, not what it is making
-	# now.** `_sampled_recipes` watches all six while the factory is
-	# working. (A machine that has run its stock down keeps the recipe it
-	# last ran since 2026-09-21's rule 3, and one never fed is undecided
-	# since 2026-10-02 — neither reads the file order back any more.)
+	# **Against what a machine was SEEN making, not what it makes now.**
+	# `_sampled_recipes` watches all six while the factory is working. Each
+	# machine runs the recipe the fixture set it to (2026-10-03), so none
+	# can read file order back any more.)
 	for pair in PRODUCT_MACHINE_PAIRS:
 		var tints := {}
 		for entry in pair:

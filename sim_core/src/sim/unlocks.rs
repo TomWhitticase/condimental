@@ -41,7 +41,8 @@
 //! # The trigger
 //!
 //! **Lifetime boxes of a named product sold** — a hundred `boxed_ketchup`
-//! opens BBQ, a hundred `boxed_bbq` opens mustard
+//! opens mustard, a hundred `boxed_mustard` opens BBQ (the order since
+//! 2026-10-03; it was BBQ then mustard)
 //! ([`super::economy::Economy::lifetime_boxes_sold`]). "Sold" means shipped
 //! as part of a *satisfied* delivery window, because a dock being paid is
 //! what selling is in this game: a missed window sells nothing, and a lost
@@ -58,7 +59,7 @@
 //! of them had actually made. Boxes of a named product do say it, and they
 //! say something the old trigger could not express at all: each tier now
 //! waits on **the line before it running**, not on any line running.
-//! Mustard waits on BBQ boxes, so the second sauce has to be a going
+//! BBQ waits on mustard boxes, so the second sauce has to be a going
 //! concern before the third one arrives.
 //!
 //! # What is saved

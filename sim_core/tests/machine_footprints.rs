@@ -54,8 +54,8 @@ fn the_network(world: &World) -> Option<FluidSnapshot> {
 /// just if they are in the wrong place.
 #[derive(Debug, Clone)]
 struct StageView {
-    /// `None` on a line nothing has been fed into yet — every machine of a
-    /// kind with several recipes starts undecided.
+    /// The recipe each machine was placed set to (2026-10-03); `None` for
+    /// a machine of a kind with several recipes placed with none chosen.
     recipe: Option<String>,
     machine_kind: String,
     machine_tile: (i32, i32),

@@ -72,7 +72,12 @@ matches what code comments and data files cite.
   its buffer with stock it will never use. `PlayerCommand::Place` gained an
   optional `recipe` (refused if the kind cannot run it); a kind with one
   recipe is placed holding it. `PlayerCommand::SetMachineRecipe` is the
-  picker: it abandons the craft in progress, drops inputs the new recipe does
+  picker. It refuses a recipe whose raws, through its upstream stages, are
+  still behind a shut gate (`World::recipe_gate`), and the picker shows
+  such a recipe padlocked with its gate — UI_UX §5g's rule for the CONTENTS
+  pickers, added after review found a fresh game's mixer offering Mustard
+  and BBQ Mix as if they were open. `Place`'s `recipe` is not gated, for the
+  reason `Place`'s hopper `item` is not. A switch abandons the craft in progress, drops inputs the new recipe does
   not take, recomputes the topology and EMPTIES any run whose name changed —
   `try_set_tank_fluid`'s lesson, since volumes carry across a rebuild by
   tile and would otherwise be relabelled. In `resolve_network_fluids` a

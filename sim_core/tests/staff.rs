@@ -509,9 +509,8 @@ fn an_understaffed_machine_stays_understaffed() {
     let vat = tile_of(&world, "cooking_vat");
     fire(&mut world, "manufacturing");
 
-    // Short from the start, but nothing has reached the vat yet: it is
-    // waiting for its input — so far any sauce's (`undecided`) — which a
-    // hire would not fix.
+    // Short from the start, and nothing has reached the vat yet: it is
+    // waiting for its input, which a hire would not fix.
     assert!(matches!(
         stall_of(&world, vat),
         Some((

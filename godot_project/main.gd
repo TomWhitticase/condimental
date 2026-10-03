@@ -389,8 +389,8 @@ const FLUID_TINT_FALLBACK := Color(0.60, 0.79, 0.86)
 ## writes one mesh per material class, so a machine's product arrives in
 ## Godot as a child node named `liquid` that can be tinted on its own, and
 ## the tint comes from the recipe the simulation says the machine is
-## RUNNING (`MachineSnapshot.recipe` — `Machine::choose`'s live answer,
-## which follows the inputs). One voxel model therefore serves every sauce:
+## RUNNING (`MachineSnapshot.recipe` — the recipe the player chose for it,
+## 2026-10-03). One voxel model therefore serves every sauce:
 ## a new sauce needs a row in this table and nothing else — no new asset, no
 ## machine kind, no generator change, no branch anywhere in this file.
 ##
@@ -4745,8 +4745,8 @@ func _fluid_material_for(fluid_id: String) -> StandardMaterial3D:
 ## A machine with no `liquid` mesh (every kind that shows no product) is a
 ## no-op rather than a warning — the ordinary case, not a mistake.
 ##
-## A NULL recipe is an UNDECIDED machine — placed, but nothing fed to it yet
-## names a sauce (`Machine::choose`'s rule 4). It is drawn as handling ANY
+## A NULL recipe is a machine with NO RECIPE CHOSEN — placed, and not yet
+## told what to make (2026-10-03). It is drawn as handling ANY
 ## sauce: no override at all, so the product mesh keeps the voxel's own
 ## neutral `fluid_pale` — the same pale an untinted pipe run shows. It used
 ## to be drawn as ketchup, because the sim placed every such machine on its
@@ -13738,12 +13738,15 @@ func _config_picker_choices() -> Array:
 
 ## Every recipe a machine of `kind` can be set to, off the simulation
 ## (`machine_recipes_json`, `data/recipes.ron` order). Empty for anything that
-## is not a machine, so a non-machine panel never grows a picker.
+## is not a machine, so a non-machine panel never grows a picker. The entries
+## carry their gate exactly as the CONTENTS lists do, and go through the same
+## `_record_choices`, so a recipe the player has not unlocked is padlocked
+## and names its gate (UI_UX §5g) — the sim refuses it either way.
 func _machine_recipes(kind: String) -> Array:
 	if kind == "" or sim == null:
 		return []
 	var parsed = JSON.parse_string(sim.machine_recipes_json(kind))
-	return parsed if parsed is Array else []
+	return _record_choices(parsed) if parsed is Array else []
 
 
 func _build_config_picker_slot(index: int, item_id: String) -> void:
@@ -14484,9 +14487,12 @@ func _update_config_machine(key: String) -> void:
 	_config_machine_state.text = _config_machine_state_text(key, mothballed)
 	_apply_config_mothball_state(mothballed)
 	if _config_picker_box.visible:
+		# Re-read every update, as the hopper's list is (#90): a gate that
+		# opens while the panel is up takes its padlocks off there and then.
+		var recipes := _machine_recipes(kind)
 		var recipe = machine.get("recipe")
 		_update_config_picker(String(recipe) if recipe != null else "")
-		_set_config_picker_note(MACHINE_PICKER_NOTE, [])
+		_set_config_picker_note(MACHINE_PICKER_NOTE, recipes)
 
 
 ## The dock's version of the same panel (issue #19). It gets the switch for

@@ -55,7 +55,9 @@ the plan is `docs/ARCHITECTURE.md` §3/§4/§6/§10.
 - **A kind may name several recipes; the PLAYER picks one** (2026-10-03).
   A machine runs `Machine::recipe` and nothing else — set by `Place`'s
   `recipe` or `SetMachineRecipe` (the machine panel's MAKES picker), never by
-  `Machine::tick`. A kind with one recipe is placed holding it; any other is
+  `Machine::tick`. `SetMachineRecipe` refuses a recipe whose raws are still
+  gated (`World::recipe_gate`; the picker padlocks it); `Place`'s `recipe`
+  deliberately does not. A kind with one recipe is placed holding it; any other is
   placed with none and makes nothing, takes nothing off a belt
   (`Machine::takes`) and claims no pipe run (the `undecided` stall). A
   switch abandons the craft, drops inputs the new recipe does not take and

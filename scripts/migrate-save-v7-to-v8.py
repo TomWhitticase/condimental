@@ -34,9 +34,13 @@ each:
    EVERY PIPE IS EMPTIED (tanks keep what they hold). The loader names each
    run afresh from the machines' recipes, and a run whose name changed would
    otherwise carry its old fluid across under the new name — mash relabelled
-   as vinegar, never bought. Emptying all of them rather than only the
-   renamed ones is the cautious answer, and costs a few units of fluid that
-   the tanks and machines refill within seconds.
+   as vinegar, never bought. A save file does not say which fluid a run held
+   (that is derived on load), so this script cannot tell a renamed run from
+   an unchanged one, and empties them all. That is NOT free: on a big
+   factory it is thousands of units, much of it finished sauce standing
+   between a vat and a bottler. The report prints the total destroyed, so
+   the player knows before choosing `--apply`; the lines refill it, but the
+   cases it would have become are not shipped.
 
    The production ledger forgets `mustard_mash` and `mustard_mix`, which no
    longer exist.
@@ -110,12 +114,21 @@ def migrate_machine(line, report):
     return line
 
 
+FX_ONE = 65536  # `volume_bits` are I16F16 fixed point (`sim::save::FxBits`)
+
+
 def empty_pipes(line):
+    """Returns the line with its pipe emptied, and the units destroyed (None
+    for a line that is not a pipe)."""
     if "body: Pipe(" in line:
-        return re.sub(r"volume_bits: -?\d+", "volume_bits: 0", line, count=1), True
-    if "body: Crossing(" in line:
-        return re.sub(r"pipe: \(volume_bits: -?\d+", "pipe: (volume_bits: 0", line, count=1), True
-    return line, False
+        pattern, replacement = r"volume_bits: (-?\d+)", "volume_bits: 0"
+    elif "body: Crossing(" in line:
+        pattern, replacement = r"pipe: \(volume_bits: (-?\d+)", "pipe: (volume_bits: 0"
+    else:
+        return line, None
+    found = re.search(pattern, line)
+    units = int(found.group(1)) / FX_ONE if found else 0.0
+    return re.sub(pattern, replacement, line, count=1), units
 
 
 def drop_ledger_entries(text, report):
@@ -177,14 +190,19 @@ def migrate(save_path, apply):
         return report + [f"  skipped: schema_version {version}, not {FROM_VERSION}"], None
 
     out = re.sub(r"schema_version:\s*\d+", f"schema_version: {TO_VERSION}", text, count=1)
-    lines, pipes = [], 0
+    lines, pipes, destroyed = [], 0, 0.0
     for line in out.split("\n"):
         line = migrate_machine(line, report)
-        line, was_pipe = empty_pipes(line)
-        pipes += was_pipe
+        line, units = empty_pipes(line)
+        if units is not None:
+            pipes += 1
+            destroyed += units
         lines.append(line)
     out = "\n".join(lines)
-    report.append(f"  {pipes} pipe tile(s) emptied; every machine keeps its recipe unless listed above")
+    report.append(
+        f"  {pipes} pipe tile(s) emptied, destroying {destroyed:.1f} units of fluid standing in "
+        "them (tanks keep theirs); every machine keeps its recipe unless listed above"
+    )
     out = drop_ledger_entries(out, report)
     out = keep_bbq_open(out, report)
 

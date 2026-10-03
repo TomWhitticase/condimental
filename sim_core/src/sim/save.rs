@@ -835,14 +835,14 @@ pub enum SaveError {
         tile: TileCoord,
         raw: Vec<String>,
     },
-    /// A machine whose in-flight craft names a recipe its *kind* cannot
-    /// run — `data/recipes.ron` changed under this save, either dropping
-    /// the recipe or moving it to another machine.
     /// A machine with a craft in progress and no recipe — a craft that
     /// could never finish. No build writes one.
     CraftWithoutRecipe {
         tile: TileCoord,
     },
+    /// A machine set to a recipe its *kind* cannot run — `data/recipes.ron`
+    /// changed under this save, either dropping the recipe or moving it to
+    /// another machine.
     UnknownMachineRecipe {
         recipe: String,
         kind: String,
