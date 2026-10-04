@@ -71,11 +71,11 @@ outpace the ingredients and the wage bill.
 <td width="50%"><img src="docs/media/build-mode.png" alt="Build mode with a placement ghost"><br><sub><b>Build mode</b> — a translucent ghost, a facing, and a prompt that says <code>✔ PLACE</code> or why it will not.</sub></td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/media/build-menu.png" alt="Build menu"><br><sub><b>Build menu (E)</b> — all eleven buildable kinds, each with its price and the crew it will ask for.</sub></td>
-<td width="50%"><img src="docs/media/ingredient-market.png" alt="Ingredient market"><br><sub><b>Market (M)</b> — all six raws, bought by the crate. A new game sees the first three; spice mix, molasses and liquid smoke arrive with the BBQ unlock.</sub></td>
+<td width="50%"><img src="docs/media/build-menu.png" alt="Build menu"><br><sub><b>Build menu (E)</b> — every buildable kind, each with its price and the crew it will ask for.</sub></td>
+<td width="50%"><img src="docs/media/ingredient-market.png" alt="Ingredient market"><br><sub><b>Market (M)</b> — every raw, bought by the crate. A new game sees tomato, sugar and vinegar; each sauce's own raws arrive with its unlock. (Shot before mustard, so its two raws are not in this frame.)</sub></td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/media/contracts-board.png" alt="Contracts board showing mixed-sauce orders"><br><sub><b>Contracts board (C)</b> — thirteen offers, from a corner shop to a barbecue festival. The mixed ones name both sauces and pay nothing until both are on the dock.</sub></td>
+<td width="50%"><img src="docs/media/contracts-board.png" alt="Contracts board showing mixed-sauce orders"><br><sub><b>Contracts board (C)</b> — offers from a corner shop to a barbecue festival. A mixed order names more than one sauce and pays nothing until all of them are on the dock. (Shot before mustard joined the board.)</sub></td>
 <td width="50%"><img src="docs/media/staff-panel.png" alt="Staff panel"><br><sub><b>Staff (H)</b> — hired against asked-for, per category, with the machines doing the asking, the wage bill and the payday countdown.</sub></td>
 </tr>
 <tr>
