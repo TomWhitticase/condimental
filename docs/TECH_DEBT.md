@@ -1,10 +1,11 @@
 # CONDIMENTAL — Tech debt
 
-**Changes since last overview audit: 26** · **Debt total: 0 points**
+**Changes since last overview audit: 1** · **Debt total: 0 points**
 
 Feature freeze: **off** — set by `scripts/tech-debt-status.sh --write`.
-Last audit: none yet (the counter started 2026-10-01).
-Audit baseline: `cb7d24e` — the `main` commit the change count runs from.
+Last audit: 2026-10-04 — docs against code and content (README's sauce order, chain and
+save text were stale; fixed). No structural debt found.
+Audit baseline: `10cafdd` — the `main` commit the change count runs from.
 
 | Gauge | Threshold | What happens |
 |---|---|---|
