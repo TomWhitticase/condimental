@@ -208,6 +208,138 @@ func _press_key(keycode: Key) -> void:
 	main._unhandled_input(event)
 
 
+## A snapshot of two docks, one of them full: 34 of 64 places taken, and
+## the two products a contract can draw on. Two more ids than fit at 1280x720
+## are added for the fit check.
+const DOCKS_ECON := {
+	"delivery_capacity": 64,
+	"delivery_used": 34,
+	"delivery_full": true,
+	"delivery_stock": [["boxed_ketchup", 32], ["boxed_bbq", 2]],
+}
+const DOCKS_MANY_ECON := {
+	"delivery_capacity": 192,
+	"delivery_used": 40,
+	"delivery_full": false,
+	"delivery_stock": [
+		["boxed_ketchup", 5], ["boxed_bbq", 5], ["boxed_mustard", 5],
+		["bottled_ketchup", 5], ["bottled_bbq", 5], ["bottled_mustard", 5],
+		["tomato_paste", 5], ["ground_mustard", 5],
+	],
+}
+
+
+## The DOCKS plate, bottom-left: its figures are the wire's, it is absent
+## with no dock, it never lands on the legend, the hotbar or the mode tab at
+## either shipped size, it says how many rows it dropped when it drops any,
+## and it steps aside for the F3 tool.
+func _check_docks_plate() -> bool:
+	if main._docks_panel == null:
+		_fail("there is no DOCKS plate")
+		return false
+	var state: Dictionary = main._docks_plate_state(DOCKS_ECON)
+	if not bool(state["visible"]):
+		_fail("the DOCKS plate is hidden with two docks placed")
+		return false
+	var rows: Array = state["rows"]
+	if rows.size() != 2 or String(rows[0]["id"]) != "boxed_ketchup" or String(rows[0]["count_text"]) != "32":
+		_fail("the DOCKS rows are not delivery_stock in the wire's order: %s" % str(rows))
+		return false
+	if String(rows[1]["name"]) == "boxed_bbq" or String(rows[1]["name"]) == "":
+		_fail("a DOCKS row prints the wire id, not the display name ('%s')" % rows[1]["name"])
+		return false
+	# delivery_used, not the sum of the rows (34, not 32 + 2 = 34 by luck —
+	# so the check uses a held case the rows do not show).
+	var held: Dictionary = DOCKS_ECON.duplicate(true)
+	held["delivery_used"] = 40
+	var held_state: Dictionary = main._docks_plate_state(held)
+	if String(held_state["places_text"]) != "⚠ FULL  40 / 64":
+		_fail("the DOCKS bar does not read delivery_used against delivery_capacity: '%s'" % held_state["places_text"])
+		return false
+	if absf(float(held_state["fraction"]) - 40.0 / 64.0) > 0.0001:
+		_fail("the DOCKS bar's fill is %f for 40 of 64 places" % float(held_state["fraction"]))
+		return false
+	var calm: Dictionary = DOCKS_ECON.duplicate(true)
+	calm["delivery_full"] = false
+	if String(main._docks_plate_state(calm)["places_text"]) != "34 / 64":
+		_fail("a DOCKS plate with no full dock still warns: '%s'" % main._docks_plate_state(calm)["places_text"])
+		return false
+	var none: Dictionary = {"delivery_capacity": 0, "delivery_used": 0, "delivery_full": false, "delivery_stock": []}
+	if bool(main._docks_plate_state(none)["visible"]):
+		_fail("the DOCKS plate shows with no dock placed")
+		return false
+	var empty: Dictionary = DOCKS_ECON.duplicate(true)
+	empty["delivery_stock"] = []
+	if String(main._docks_plate_state(empty)["empty_text"]) != "nothing ready to ship":
+		_fail("an empty DOCKS plate does not say so")
+		return false
+
+	for window in [BIG, SMALL]:
+		_resize(window)
+		for econ in [DOCKS_ECON, DOCKS_MANY_ECON]:
+			main._update_docks_panel(econ)
+			if not main._docks_panel.visible:
+				_fail("the DOCKS plate is hidden at %s" % str(window))
+				return false
+			var plate: Rect2 = main._plate_rect(main._docks_panel)
+			var screen := Rect2(Vector2.ZERO, Vector2(window))
+			if not screen.encloses(plate):
+				_fail("the DOCKS plate %s leaves the %s window" % [str(plate), str(window)])
+				return false
+			for other in [
+				["the legend", main._legend_rect()],
+				["the hotbar", main._plate_rect(main._hotbar_panel)],
+				["the mode tab", main._plate_rect(main._mode_indicator)],
+			]:
+				var r: Rect2 = other[1]
+				if r.size.y > 0.0 and plate.intersects(r):
+					_fail("the DOCKS plate %s lands on %s %s at %s" % [str(plate), other[0], str(r), str(window)])
+					return false
+			var shown := 0
+			for row in main._docks_rows.get_children():
+				if row.visible:
+					shown += 1
+			var dropped: int = (econ["delivery_stock"] as Array).size() - shown
+			if dropped > 0 and (not main._docks_more_label.visible or main._docks_more_label.text != "+%d more" % dropped):
+				_fail("the DOCKS plate dropped %d rows at %s and says '%s'" % [dropped, str(window), main._docks_more_label.text])
+				return false
+			if dropped == 0 and main._docks_more_label.visible:
+				_fail("the DOCKS plate announces dropped rows with none dropped")
+				return false
+
+	# A hover parked on the corner (first person parks it there) wins it.
+	main._update_docks_panel(DOCKS_ECON)
+	var tip: Control = main._hover_tooltip
+	var tip_was := [tip.visible, tip.position, tip.size]
+	tip.visible = true
+	tip.position = main._docks_panel.position
+	tip.size = Vector2(120, 60)
+	main._update_docks_panel(DOCKS_ECON)
+	var under_hover: bool = main._docks_panel.visible
+	tip.visible = tip_was[0]
+	tip.position = tip_was[1]
+	tip.size = tip_was[2]
+	main._update_docks_panel(DOCKS_ECON)
+	if under_hover:
+		_fail("the DOCKS plate stays drawn under a hover parked on its corner")
+		return false
+	if not main._docks_panel.visible:
+		_fail("the DOCKS plate does not come back when the hover leaves its corner")
+		return false
+
+	main._set_debug_open(true)
+	var under_tool: bool = main._docks_panel.visible
+	main._set_debug_open(false)
+	if under_tool:
+		_fail("the DOCKS plate stays drawn under the F3 tool's corner")
+		return false
+	if not main._docks_panel.visible:
+		_fail("the DOCKS plate does not come back when the F3 tool closes")
+		return false
+	_resize(BIG)
+	return true
+
+
 func _ingredient_ids() -> Array:
 	var ids: Array = []
 	for entry in main._ingredients_snapshot().get("entries", []):
@@ -611,6 +743,9 @@ func _run_checks() -> void:
 		return
 	if bool(crew_rows[2]["visible"]):
 		_fail("the dead `engineering` category takes room on the CREW plate")
+		return
+
+	if not _check_docks_plate():
 		return
 	# Seconds, never ticks (UI_UX.md): 600 ticks away is not "600".
 	var payday := String(crew_state["payday_text"])

@@ -2798,7 +2798,7 @@ impl World {
                 .ecs
                 .get::<&Dock>(dock)
                 .expect("a dock placement carries a Dock");
-            stock.count_places(body.places(), body.at_capacity());
+            stock.count_places(body.places(), body.used(), body.at_capacity());
             if !body.mothballed() && !body.understaffed() {
                 let mut held = Inventory::new(body.places());
                 for (item, qty) in body.contents() {

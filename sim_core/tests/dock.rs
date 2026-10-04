@@ -457,6 +457,15 @@ fn a_mothballed_dock_holds_its_stock_back_from_every_contract() {
         world.economy_snapshot().delivery_stock.is_empty(),
         "the clipboard reads what can be drawn on, and a mothballed dock offers nothing"
     );
+    // But its cases still stand on its places: the DOCKS plate's bar counts
+    // every taken place, lent or not, against every place.
+    let economy = world.economy_snapshot();
+    assert_eq!(
+        economy.delivery_used, dock.used,
+        "a held dock's cases still fill places"
+    );
+    assert!(economy.delivery_used >= 2);
+    assert_eq!(economy.delivery_capacity, dock.places);
 }
 
 // ---------------------------------------------------------------------

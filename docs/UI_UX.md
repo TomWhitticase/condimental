@@ -1081,8 +1081,9 @@ is short and its rows are tall, so it has nothing to spend the height on.
 a blue-edged plate, never the hazard yellow every in-game plate is bordered
 with. It is **not a modal** — ESC leaves it alone, it closes nothing, and the
 factory keeps running behind it, which is the entire point of watching a
-cheat land. It sits bottom-left, under the legend and above the hotbar, the
-one corner no plate owns. Money grants go over the real command wire (a cheat
+cheat land. It sits bottom-left, under the legend and above the hotbar —
+the DOCKS plate's corner since 2026-10-04, which that plate gives up while
+the tool is open. Money grants go over the real command wire (a cheat
 that Godot kept to itself would mean a balance the sim disagrees with);
 **time speed is presentation-side** and the panel says so — the clocks in the
 game still count the simulation's seconds, not the wall's.
@@ -1273,6 +1274,25 @@ that there is exactly ONE owner of the hint's visibility, so
 key sits in the heading, `C: board`, and never yields); the list's
 floor is its first WHOLE row (`_contract_list_hard`), because a row's second
 line is the order's status.
+
+**The DOCKS plate takes the bottom-left corner** (the owner's call,
+2026-10-04: "bottom left of screen, an overlay for what's on the docks").
+The right-hand column was already out of height at 1280x720, so it is not a
+fourth tenant there; bottom-left was the one corner no in-game plate held.
+It is the STOCK/CREW dark plate: `DOCKS` and the places, `34 / 64`, on one
+line; under them a LEVEL bar (§5e) of every place on every dock taken; then
+one row per product a contract can draw on, icon, display name and count.
+The bar's numerator is the wire's `delivery_used`, which counts a held dock's
+cases too, while the rows are `delivery_stock`, only what can ship — so the
+empty state says `nothing ready to ship`, not "empty". A full dock turns the
+bar red and the places read `⚠ FULL 32 / 32`, glyph and word as well as
+colour (§7). No dock placed, no plate. It hangs from the hotbar's top edge
+and the SELECT mode tab's, never above the legend's current bottom (so F1
+gives it rows back), and where it cannot seat every row it drops them from
+the bottom and says `+2 more` rather than scrolling an IGNORE plate. It
+yields the corner — hidden, not moved — to the F3 tool and to any panel about
+what the player is looking at that lands on it: the config panel, the hover
+and the placement prompt, which first person parks in this very corner.
 
 **The legend folds, and folding is not a modal.** Its plate gains a heading
 row — `CONTROLS` and a button naming its key — and folds to that stub, so
