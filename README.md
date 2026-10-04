@@ -71,8 +71,8 @@ outpace the ingredients and the wage bill.
 <td width="50%"><img src="docs/media/build-mode.png" alt="Build mode with a placement ghost"><br><sub><b>Build mode</b> — a translucent ghost, a facing, and a prompt that says <code>✔ PLACE</code> or why it will not.</sub></td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/media/build-menu.png" alt="Build menu"><br><sub><b>Build menu (E)</b> — every buildable kind, each with its price and the crew it will ask for.</sub></td>
-<td width="50%"><img src="docs/media/ingredient-market.png" alt="Ingredient market"><br><sub><b>Market (M)</b> — every raw, bought by the crate. A new game sees tomato, sugar and vinegar; each sauce's own raws arrive with its unlock. (Shot before mustard, so its two raws are not in this frame.)</sub></td>
+<td width="50%"><img src="docs/media/build-menu.png" alt="Build menu"><br><sub><b>Build menu (E)</b> — each buildable kind with its price and the crew it will ask for. (Shot before stock shelving, the search box and the category headers joined it.)</sub></td>
+<td width="50%"><img src="docs/media/ingredient-market.png" alt="Ingredient market"><br><sub><b>Market (M)</b> — raws bought by the crate. A new game sees tomato, sugar and vinegar; each sauce's own raws arrive with its unlock. (Shot before mustard, whose two raws are not in this frame.)</sub></td>
 </tr>
 <tr>
 <td width="50%"><img src="docs/media/contracts-board.png" alt="Contracts board showing mixed-sauce orders"><br><sub><b>Contracts board (C)</b> — offers from a corner shop to a barbecue festival. A mixed order names more than one sauce and pays nothing until all of them are on the dock. (Shot before mustard joined the board.)</sub></td>
