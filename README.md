@@ -42,7 +42,7 @@ outpace the ingredients and the wage bill.
 - **Contracts, not a spot market.** Standing orders for a quantity of goods on a
   recurring cadence, signed off a board for a price. Miss a window too many times in a
   row and the order is *lost* — it goes back on the board to be signed again. Orders
-  that demand a **mix** of both sauces are on the board now, and a mix is
+  that demand a **mix** of sauces are on the board now, and a mix is
   all-or-nothing: the reason to diversify is in front of the player rather than in a
   design doc.
 - **Progression is a gate on the content, not a tech tree.** Mustard's ingredients and
@@ -197,7 +197,8 @@ game prints the resolved path once at startup. The save schema is at version 8. 
 **refuses an older save by number rather than migrating it**; each bump ships a one-off
 `scripts/migrate-save-vN-to-vM.py` that converts a save outside the game (dry run by
 default, `--apply` keeps the original as a `.bak`), and the refusal names the script.
-The demo saves can simply be re-written with that script.
+The demo saves need no conversion: re-run `scripts/make-demo-saves.sh` to write them
+fresh.
 
 ### 4. Check it works (optional)
 
@@ -205,7 +206,7 @@ The demo saves can simply be re-written with that script.
 scripts/verify-core-loop.sh
 ```
 
-36 Rust test suites and 53 headless Godot proofs, including the real `gdext` JSON
+36 Rust test suites and 50 headless Godot proofs, including the real `gdext` JSON
 boundary, save/load round trips, BBQ running as a branch off the ketchup line,
 and the interactive scene's input path. For a picture instead of a pass/fail:
 
@@ -285,7 +286,7 @@ whether that name was read off the pipe run or stated by you), both get **FILL**
    is destructive — it empties the hopper, and a tank also purges every pipe run it
    feeds — so the picker names the total it is about to destroy before it does it.
 5. **Sign orders.** Press `C`. A new game starts with no order signed: the board
-   on the right lists every offer (later tiers unlock as you deliver), each with a
+   on the right lists every offer (later tiers unlock as you sell boxes), each with a
    price to sign, a quantity, a cadence and a number of strikes, and the column on
    the left holds the orders you are running. The CONTRACTS plate in the top-right
    corner tracks every signed order, soonest due first: the time left, a countdown
@@ -414,8 +415,8 @@ The current open backlog is [GitHub issues](https://github.com/TomWhitticase/con
 
 None yet. CONDIMENTAL is heading for an **alpha** release — the core loop closes and
 it is genuinely playable, but there is no packaged build yet, no balance pass on any of
-the placeholder numbers, and save files are rejected rather than migrated when the
-schema moves. Build from source as above.
+the placeholder numbers, and the game refuses a save from an older schema; converting
+one is a script run outside the game (see "Play" above). Build from source as above.
 
 The plan is two ways to play the same game: **free**, by building it from this
 repository (always), and a small price on **Steam** for anyone who would rather have a

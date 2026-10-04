@@ -438,7 +438,8 @@ ledger the sauce gates count; version 6 (2026-09-28, #207) is a warehouse
 rack's reservation, `SavedRack::filter`; version 7 (2026-09-29) is a
 splitter's mode, `SavedSplitter::mode`; version 8 (2026-10-03, #237) is the
 player's recipe choice and mustard ground and mixed rather than cooked —
-`save.rs`'s module doc records why each could not be a default. **The loader still never migrates.** Since
+`save.rs`'s module doc records why each could not be a default. **The loader
+still never migrates.** Since
 version 5 a bump ships a one-off script that runs outside the game,
 `scripts/migrate-save-vN-to-vM.py`, and the refusal names it; the game only
 ever reads the version it writes.
