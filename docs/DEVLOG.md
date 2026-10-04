@@ -266,6 +266,14 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-04 — a DOCKS plate in the bottom-left corner
+What stands on the docks is a permanent readout now, not only a dock's hover:
+a bottom-left plate with every place taken against every place as a bar, red
+with `⚠ FULL` when a dock is full, and one row per product ready to ship. The
+sim gained `delivery_used` on the economy snapshot so the bar counts a held
+dock's cases without Godot summing anything. The plate gives the corner up to
+the F3 tool and to a hover, prompt or config panel that lands on it.
+
 ### 2026-10-03 — Machines run the recipe you choose, and mustard comes second
 
 The owner asked for three things in one conversation: swap the order so

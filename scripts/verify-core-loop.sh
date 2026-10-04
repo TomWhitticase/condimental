@@ -206,7 +206,7 @@ run_godot_script test_shop_menu.gd SHOP_MENU_OK "build menu grid + purchases, UI
 run_godot_script test_shop_search.gd SHOP_SEARCH_OK "build menu category sections + search box"
 run_godot_script test_hotbar.gd HOTBAR_OK "always-visible hotbar, number-key selection, UI_UX.md §5"
 run_godot_script test_ui_scale.gd UI_SCALE_OK "one UI_SCALE knob, no pre-scale label, everything fits the window"
-run_godot_script test_hud_plates.gd HUD_PLATES_OK "the right-hand STOCK plate and the collapsible CONTROLS legend — one row per raw ingredient clear of the clipboard and hotbar, the legend folded by its button and by F1, and every cursor panel reading the plates' current rects — plus first person parking a world panel in the corner instead of on the crosshair"
+run_godot_script test_hud_plates.gd HUD_PLATES_OK "the right-hand STOCK plate, the bottom-left DOCKS plate (wire figures, clear of legend, hotbar and mode tab, dropped rows announced, yielding to F3 and a parked hover) and the collapsible CONTROLS legend — one row per raw ingredient clear of the clipboard and hotbar, the legend folded by its button and by F1, and every cursor panel reading the plates' current rects — plus first person parking a world panel in the corner instead of on the crosshair"
 run_godot_script test_chain_rework.gd CHAIN_REWORK_OK "1x2 mixer, piped middle, hopper contents, ingredient market"
 run_godot_script test_config_panel.gd CONFIG_PANEL_OK "click a hopper or tank to configure it, UI_UX.md §5"
 run_godot_script test_placement.gd PLACEMENT_OK "empty world, ghost, rotation, place/remove — Real Placement ticket 2"

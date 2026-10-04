@@ -2307,6 +2307,21 @@ var _stock_scroll: ScrollContainer
 var _stock_rows_gutter: MarginContainer
 var _stock_rows: VBoxContainer
 var _stock_hint: Label
+## The DOCKS plate, bottom-left (UI_UX.md §5f): what stands ready to ship,
+## one row per product, under a bar of every dock place taken. Rows are keyed
+## on the wire's item id and rebuilt when the set of products changes, so a
+## new sauce needs no change here.
+var _docks_panel: PanelContainer
+var _docks_places_label: Label
+var _docks_meter: Panel
+var _docks_rows: VBoxContainer
+var _docks_row_nodes: Dictionary = {}
+var _docks_row_ids: Array = []
+var _docks_empty_label: Label
+var _docks_more_label: Label
+var _docks_base_settings: LabelSettings
+var _docks_calm_settings: LabelSettings
+var _docks_warn_settings: LabelSettings
 ## The CREW plate and its per-category rows, keyed on the wire's category id
 ## so a category added to `data/staff.ron` needs no change here.
 var _crew_panel: PanelContainer
@@ -4476,6 +4491,7 @@ func _refresh_buffers(econ: Dictionary = {}) -> void:
 	_delivery_capacity = int(econ.get("delivery_capacity", 0))
 	_delivery_full = bool(econ.get("delivery_full", false))
 	_update_dock_stock(_dock_states, sim.current_tick())
+	_update_docks_panel(econ)
 
 
 ## Re-reads every dock's polled snapshot into `_dock_states`, keyed by tile.
@@ -6079,6 +6095,7 @@ func _build_ui() -> void:
 	# rather than the strip of chips it replaces.
 	_build_stock_panel(hud, settings)
 	_build_crew_panel(hud, settings)
+	_build_docks_panel(hud, settings)
 
 	# UI_UX.md §5's other named widget: "build/recipe menus as grids of
 	# voxel-rendered icon slots." Hidden until E is pressed.
@@ -12404,6 +12421,287 @@ func _build_stock_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	_position_stock_panel()
 
 
+## The pure half of the DOCKS plate — every string and figure it shows, from
+## the economy snapshot alone, so a test can drive it with a dictionary and no
+## scene (the split `_crew_plate_state` makes).
+##
+## Rows are `delivery_stock`: what a contract can draw on right now, in the
+## sim's order. The bar is `delivery_used` against `delivery_capacity`, every
+## place on every dock, so a held dock (mothballed, or short of logistics
+## staff) still fills the bar while its cases are not offered as rows — the
+## plate says "ready to ship" for exactly that reason. No dock placed means no
+## plate: a new game's empty floor has nothing to report.
+##
+## Returns `{"visible", "places_text", "fraction", "full", "rows", "empty_text"}`;
+## each row is `{"id", "name", "count_text"}`.
+func _docks_plate_state(econ: Dictionary) -> Dictionary:
+	var capacity := int(econ.get("delivery_capacity", 0))
+	var used := int(econ.get("delivery_used", 0))
+	var full := bool(econ.get("delivery_full", false))
+	var rows: Array = []
+	for pair in econ.get("delivery_stock", []):
+		if not (pair is Array) or pair.size() < 2 or int(pair[1]) <= 0:
+			continue
+		var id := String(pair[0])
+		rows.append({"id": id, "name": _item_display_name(id), "count_text": str(int(pair[1]))})
+	return {
+		"visible": capacity > 0,
+		# Glyph and word as well as the red (UI_UX.md §7): the colour is the
+		# second reading, never the only one.
+		"places_text": ("⚠ FULL  %d / %d" if full else "%d / %d") % [used, capacity],
+		"fraction": 0.0 if capacity <= 0 else clampf(float(used) / float(capacity), 0.0, 1.0),
+		"full": full,
+		"rows": rows,
+		"empty_text": "nothing ready to ship" if rows.is_empty() else "",
+	}
+
+
+## The DOCKS plate: what is standing on the docks, bottom-left, without
+## hovering a dock or opening a panel. The right-hand column already holds
+## three plates and is out of height at 1280x720 (§5f), and the bottom-left
+## is the one corner no in-game plate owns — the F3 tool borrows it, and this
+## plate steps aside while it does (`_set_debug_open`).
+##
+## A dark plate in the STOCK/CREW skin with a hazard rule: heading and places
+## on one line, the places bar under it, then one row per product — icon,
+## display name, count right-aligned so the counts form a column. Mouse filter
+## IGNORE throughout, like every readout plate: a plate that swallowed clicks
+## would make the tiles behind it unbuildable.
+func _build_docks_panel(hud: CanvasLayer, base_settings: LabelSettings) -> void:
+	var plate := StyleBoxFlat.new()
+	plate.bg_color = Color(0.06, 0.06, 0.07, 0.93)
+	plate.border_color = Color(0.85, 0.63, 0.11, 0.95)
+	plate.border_width_top = _ui_i(3)
+	plate.set_content_margin_all(_ui_px(10.0))
+
+	# Cleared, never appended to: `_ready()` runs twice under the headless
+	# `--script` harness (the same guard the STOCK and CREW plates carry).
+	_docks_row_nodes.clear()
+	_docks_row_ids.clear()
+	_docks_base_settings = base_settings
+
+	_docks_panel = PanelContainer.new()
+	_docks_panel.name = "DocksPanel"
+	_docks_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_docks_panel.add_theme_stylebox_override("panel", plate)
+	_docks_panel.custom_minimum_size.x = STOCK_PANEL_MIN_WIDTH
+	_docks_panel.visible = false
+	hud.add_child(_docks_panel)
+
+	var body := VBoxContainer.new()
+	body.name = "DocksBody"
+	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	body.add_theme_constant_override("separation", _ui_i(6))
+	_docks_panel.add_child(body)
+
+	var heading_settings := LabelSettings.new()
+	heading_settings.font_size = _ui_font(-1)
+	heading_settings.font_color = Color(0.98, 0.85, 0.42) # the plate's hazard accent
+	heading_settings.outline_size = base_settings.outline_size
+	heading_settings.outline_color = base_settings.outline_color
+
+	var head_row := HBoxContainer.new()
+	head_row.name = "DocksHeadRow"
+	head_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	head_row.add_theme_constant_override("separation", _ui_i(12))
+	body.add_child(head_row)
+
+	var heading := Label.new()
+	heading.name = "DocksHeading"
+	heading.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	heading.label_settings = heading_settings
+	heading.text = "DOCKS"
+	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	heading.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	head_row.add_child(heading)
+
+	_docks_calm_settings = LabelSettings.new()
+	_docks_calm_settings.font_size = _ui_font(-2)
+	_docks_calm_settings.font_color = Color(0.66, 0.68, 0.72)
+	_docks_calm_settings.outline_size = base_settings.outline_size
+	_docks_calm_settings.outline_color = base_settings.outline_color
+	# Two settings objects swapped between, never one recoloured in place —
+	# the CREW hint's rule, for the same reason.
+	_docks_warn_settings = _staff_warn_settings()
+
+	_docks_places_label = Label.new()
+	_docks_places_label.name = "DocksPlaces"
+	_docks_places_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_docks_places_label.label_settings = _docks_calm_settings
+	_docks_places_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	head_row.add_child(_docks_places_label)
+
+	# A LEVEL against a real ceiling (§5e): every place on every dock.
+	_docks_meter = _build_meter(body, 0.0, METER_FILL_LEVEL)
+
+	_docks_rows = VBoxContainer.new()
+	_docks_rows.name = "DocksRows"
+	_docks_rows.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_docks_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_docks_rows.add_theme_constant_override("separation", _ui_i(5))
+	body.add_child(_docks_rows)
+
+	_docks_empty_label = Label.new()
+	_docks_empty_label.name = "DocksEmpty"
+	_docks_empty_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_docks_empty_label.label_settings = _docks_calm_settings
+	body.add_child(_docks_empty_label)
+
+	# Said when the band above the hotbar cannot seat every row: a plate that
+	# silently showed two of four products would read as a factory making two.
+	_docks_more_label = Label.new()
+	_docks_more_label.name = "DocksMore"
+	_docks_more_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_docks_more_label.label_settings = _docks_calm_settings
+	_docks_more_label.visible = false
+	body.add_child(_docks_more_label)
+
+
+## One product's row: icon, display name, count.
+func _build_docks_row(id: String) -> void:
+	var row := HBoxContainer.new()
+	row.name = "DocksRow_%s" % id
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", _ui_i(9))
+	_docks_rows.add_child(row)
+
+	var icon := TextureRect.new()
+	icon.name = "DocksIcon_%s" % id
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon.custom_minimum_size = STOCK_ICON_SIZE
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.texture = _icon_for(id)
+	row.add_child(icon)
+
+	var name_settings := LabelSettings.new()
+	name_settings.font_size = _ui_font(-1)
+	name_settings.font_color = Color(0.92, 0.93, 0.94)
+	name_settings.outline_size = _docks_base_settings.outline_size
+	name_settings.outline_color = _docks_base_settings.outline_color
+
+	var name_label := Label.new()
+	name_label.name = "DocksName_%s" % id
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	name_label.label_settings = name_settings
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(name_label)
+
+	var count_settings := LabelSettings.new()
+	count_settings.font_size = _ui_font(-1)
+	count_settings.font_color = STOCK_COUNT_COLOR
+	count_settings.outline_size = _docks_base_settings.outline_size
+	count_settings.outline_color = _docks_base_settings.outline_color
+
+	var count := Label.new()
+	count.name = "DocksCount_%s" % id
+	count.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	count.label_settings = count_settings
+	count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	count.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(count)
+
+	_docks_row_nodes[id] = {"row": row, "name": name_label, "count": count}
+
+
+## Draws `_docks_plate_state` onto the plate, then hangs it in its corner.
+## Called from `_refresh_buffers`, the poll that already reads the docks.
+func _update_docks_panel(econ: Dictionary) -> void:
+	if _docks_panel == null:
+		return
+	var state := _docks_plate_state(econ)
+	_docks_panel.set_meta("wanted", state["visible"])
+	_docks_panel.visible = state["visible"] and not _debug_open
+	if not state["visible"]:
+		return
+
+	var ids: Array = []
+	for row_state in state["rows"]:
+		ids.append(row_state["id"])
+	# Rebuilt only when the SET of products changes, not every poll — a count
+	# moving is a label's text, a new sauce arriving is a new row.
+	if ids != _docks_row_ids:
+		for child in _docks_rows.get_children():
+			_docks_rows.remove_child(child)
+			child.queue_free()
+		_docks_row_nodes.clear()
+		for id in ids:
+			_build_docks_row(String(id))
+		_docks_row_ids = ids.duplicate()
+	for row_state in state["rows"]:
+		var nodes: Dictionary = _docks_row_nodes[row_state["id"]]
+		nodes["name"].text = row_state["name"]
+		nodes["count"].text = row_state["count_text"]
+
+	_docks_places_label.text = state["places_text"]
+	_docks_places_label.label_settings = _docks_warn_settings if state["full"] else _docks_calm_settings
+	_set_meter(_docks_meter, state["fraction"], METER_FILL_WARN if state["full"] else METER_FILL_LEVEL)
+	_docks_empty_label.text = state["empty_text"]
+	_docks_empty_label.visible = state["empty_text"] != ""
+	_position_docks_panel()
+	# A panel about the thing the player is looking at wins this corner: the
+	# configuration panel they just clicked open, and the hover and placement
+	# prompt — which in first person are PARKED here (`_first_person_panel_position`).
+	# Where one lands on the plate, the readout steps aside for as long as it
+	# does — the ranking the legend already yields by (`_set_legend_yielded`).
+	if _docks_panel.visible:
+		var plate := _plate_rect(_docks_panel)
+		for panel in [_config_panel if _config_open else null, _hover_tooltip, _placement_prompt]:
+			if panel != null and _plate_rect(panel).intersects(plate):
+				_docks_panel.visible = false
+				break
+
+
+## Bottom-left, a margin clear of the window's left edge and of the hotbar
+## PLATE's top — the flyout strip `_hotbar_reserved_height` also reserves is
+## centred over the hotbar and cannot reach this corner, the distinction the
+## STOCK plate and the F3 tool both draw. Its ceiling is the legend's CURRENT
+## bottom edge, so folding the legend (F1) gives the plate its rows back.
+##
+## It fits by DROPPING ROWS from the bottom, not by scrolling: the plate is
+## IGNORE from the panel down, so a scrollbar would be a mark the player could
+## not use. The dropped rows are counted in words on `_docks_more_label`.
+func _position_docks_panel() -> void:
+	var vp := get_viewport() if is_inside_tree() else null
+	if vp == null:
+		return
+	var bounds := vp.get_visible_rect().size
+	if bounds.x <= 0.0 or bounds.y <= 0.0:
+		return
+	var margin := STOCK_PANEL_MARGIN
+	var floor_y: float = bounds.y - _hotbar_reserved_height() - margin
+	if _hotbar_panel != null and _hotbar_panel.size.y > 0.0:
+		floor_y = _hotbar_panel.get_global_rect().position.y - margin
+	# The mode tab stands on the hotbar's top edge at its LEFT end — the one
+	# part of the hotbar that reaches up into this corner. Clear it too.
+	if _mode_indicator != null and _mode_indicator.visible and _mode_indicator.size.y > 0.0:
+		floor_y = minf(floor_y, _mode_indicator.get_global_rect().position.y - margin)
+	var ceiling: float = margin
+	var legend := _legend_rect()
+	if legend.size.y > 0.0:
+		ceiling = legend.end.y + margin
+
+	# Every row first, then drop from the bottom until the plate fits. The
+	# answer depends on the window alone, never on what the last poll hid.
+	var rows := _docks_rows.get_children()
+	for row in rows:
+		row.visible = true
+	_docks_more_label.visible = false
+	var hidden := 0
+	while _docks_panel.get_combined_minimum_size().y > floor_y - ceiling and hidden < rows.size() - 1:
+		hidden += 1
+		rows[rows.size() - hidden].visible = false
+		_docks_more_label.text = "+%d more" % hidden
+		_docks_more_label.visible = true
+
+	var size := _docks_panel.get_combined_minimum_size()
+	_docks_panel.size = size
+	# Hung from its floor, never above the ceiling; overflowing DOWN toward
+	# the hotbar is the lesser fault, as it is for STOCK.
+	_docks_panel.position = Vector2(margin, maxf(ceiling, floor_y - size.y))
+
+
 ## The pure half of the CREW plate — every string it shows, from the wire's
 ## own figures and nothing else, so a test can drive it with a snapshot and
 ## no scene. Mirrors `_staff_row_state`'s split for the H panel.
@@ -17472,7 +17770,8 @@ func _debug_button(node_name: String, text: String) -> Button:
 	return button
 
 
-## Bottom-left, where nothing else lives: the legend is top-left, the
+## Bottom-left, over the DOCKS plate (which steps aside while this is open,
+## `_set_debug_open`): the legend is top-left, the
 ## clipboard top-right and the hotbar bottom-centre — and ABOVE the hotbar
 ## strip, which reaches across the bottom of the screen even where its slots
 ## do not (`_hotbar_reserved_height`, the number every other panel down there
@@ -17530,6 +17829,10 @@ func _set_debug_open(open: bool) -> void:
 		return
 	_debug_open = open
 	_debug_menu.visible = open
+	# The tool takes the bottom-left corner the DOCKS plate lives in, and a
+	# development panel drawn over a readout is the wrong way round.
+	if _docks_panel != null:
+		_docks_panel.visible = not open and bool(_docks_panel.get_meta("wanted", false))
 	if open:
 		# Filled in first, then placed: the readout is what makes this panel
 		# its full height, and placing it around an empty one put the last

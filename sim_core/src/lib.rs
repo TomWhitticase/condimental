@@ -602,6 +602,7 @@ impl SimBridge {
     /// {
     ///   "money": 0.0,
     ///   "delivery_stock": [["boxed_ketchup", 3]],
+    ///   "delivery_capacity": 32, "delivery_used": 3, "delivery_full": false,
     ///   "contracts": [
     ///     {
     ///       "id": "corner_shop",

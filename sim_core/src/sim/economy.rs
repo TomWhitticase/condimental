@@ -242,6 +242,9 @@ pub struct DeliveryStock {
     /// Every place across the docks, lent or not — `EconomySnapshot`'s
     /// `delivery_capacity`.
     places: u32,
+    /// Every place holding a case, across the docks, lent or not —
+    /// `EconomySnapshot`'s `delivery_used`.
+    used: u32,
     /// Whether some dock has every place taken — `EconomySnapshot`'s
     /// `delivery_full`.
     any_at_capacity: bool,
@@ -253,11 +256,12 @@ impl DeliveryStock {
         self.docks.push(stock);
     }
 
-    /// Counts a dock's places and fullness toward the snapshot's totals,
-    /// whether or not its stock is lent — a mothballed dock is still a place
-    /// boxes stand.
-    pub fn count_places(&mut self, places: u32, at_capacity: bool) {
+    /// Counts a dock's places, the ones taken, and its fullness toward the
+    /// snapshot's totals, whether or not its stock is lent — a mothballed
+    /// dock is still a place boxes stand.
+    pub fn count_places(&mut self, places: u32, used: u32, at_capacity: bool) {
         self.places = self.places.saturating_add(places);
+        self.used = self.used.saturating_add(used);
         self.any_at_capacity |= at_capacity;
     }
 
@@ -287,6 +291,10 @@ impl DeliveryStock {
 
     pub fn places(&self) -> u32 {
         self.places
+    }
+
+    pub fn used(&self) -> u32 {
+        self.used
     }
 
     pub fn any_at_capacity(&self) -> bool {
@@ -419,6 +427,11 @@ pub struct EconomySnapshot {
     /// on the wire so presentation can draw the level as a bar without
     /// knowing the constant.
     pub delivery_capacity: u32,
+    /// How many of those places hold a case — every dock, lent or not, so
+    /// it is the bar's numerator against `delivery_capacity`. A held dock's
+    /// cases count here and not in `delivery_stock`, which is only what a
+    /// contract can draw on.
+    pub delivery_used: u32,
     /// Whether some dock has every place taken — a summary, read beside the
     /// per-dock `DockSnapshot::at_capacity` that says which.
     ///
@@ -858,6 +871,7 @@ impl Economy {
             money: self.money.to_num::<f64>(),
             delivery_stock: stock.totals(),
             delivery_capacity: stock.places(),
+            delivery_used: stock.used(),
             delivery_full: stock.any_at_capacity(),
             contracts: self
                 .contracts

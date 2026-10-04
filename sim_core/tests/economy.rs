@@ -449,6 +449,7 @@ fn the_economy_snapshot_reports_one_entry_per_shipped_contract() {
         json.contains(&format!("\"delivery_capacity\":{DOCK_CAPACITY}")),
         "{json}"
     );
+    assert!(json.contains("\"delivery_used\":0"), "{json}");
     assert!(json.contains("\"delivery_full\":false"), "{json}");
     assert!(
         !json.contains("contract_mix"),
