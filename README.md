@@ -42,12 +42,13 @@ outpace the ingredients and the wage bill.
 - **Contracts, not a spot market.** Standing orders for a quantity of goods on a
   recurring cadence, signed off a board for a price. Miss a window too many times in a
   row and the order is *lost* — it goes back on the board to be signed again. Orders
-  that demand a **mix** of both sauces are on the board now, and a mix is
+  that demand a **mix** of sauces are on the board now, and a mix is
   all-or-nothing: the reason to diversify is in front of the player rather than in a
   design doc.
-- **Progression is a gate on the content, not a tech tree.** BBQ's three ingredients
-  and its four contracts are held back until your tenth lifetime delivery, so a new
-  game's market and board show only what a one-sauce factory can use.
+- **Progression is a gate on the content, not a tech tree.** Mustard's ingredients and
+  orders are held back until you have sold 100 boxes of ketchup, and BBQ's until 100
+  boxes of mustard, so a new game's market and board show only what a one-sauce
+  factory can use.
 - **Staff as a capacity constraint.** Four categories (manufacturing, engineering,
   packaging, logistics). Machines need a crew to run at all, wages come out of the
   same money counter every payday, and an unpaid head idles before it walks. Anything
@@ -104,18 +105,29 @@ Every model below is a real in-game asset, rendered straight out of the voxel pi
 
 | <img src="assets/voxels/icons/item_tomato.png" width="44"> <img src="assets/voxels/icons/item_sugar.png" width="44"> <img src="assets/voxels/icons/item_vinegar.png" width="44"> | <img src="assets/voxels/icons/machine_crusher.png" width="44"> | <img src="assets/voxels/icons/machine_mixer.png" width="44"> | <img src="assets/voxels/icons/machine_cooking_vat.png" width="44"> | <img src="assets/voxels/icons/machine_bottler.png" width="44"> | <img src="assets/voxels/icons/machine_packer.png" width="44"> | <img src="assets/voxels/icons/machine_dock.png" width="44"> |
 |:--:|:--:|:--:|:--:|:--:|:--:|:--:|
-| tomato · sugar · vinegar | **crusher**<br>4 tomato → paste<br>*80t* | **mixer**<br>paste + sugar + 2 vinegar → mix<br>*90t* | **cooking vat**<br>mix → ketchup<br>*240t* | **bottler**<br>ketchup → bottle<br>*60t* | **packer**<br>bottle → box<br>*40t* | **dock**<br>ships every tick |
+| tomato · sugar · vinegar | **crusher**<br>4 tomato → paste<br>*80t* | **mixer**<br>paste + sugar + 2 vinegar → mix<br>*90t* | **cooking vat**<br>mix → ketchup<br>*240t* | **bottler**<br>ketchup → 8 bottles<br>*200t* | **packer**<br>8 bottles → case<br>*40t* | **dock**<br>ships every tick |
 
 </div>
 
-**The BBQ branch** — unlocked on your tenth delivery, tapped off the pipe leaving the
-ketchup vat, and running on a second mixer, vat, bottler and packer:
+**The mustard line** — unlocked by selling 100 boxes of ketchup. A whole second line
+from raw, and no vat: mustard is ground and mixed, not cooked:
+
+<div align="center">
+
+| <img src="assets/voxels/icons/item_mustard_seed.png" width="44"> <img src="assets/voxels/icons/item_turmeric.png" width="44"> <img src="assets/voxels/icons/item_vinegar.png" width="44"> | <img src="assets/voxels/icons/machine_crusher.png" width="44"> | <img src="assets/voxels/icons/machine_mixer.png" width="44"> | <img src="assets/voxels/icons/machine_bottler.png" width="44"> | <img src="assets/voxels/icons/machine_packer.png" width="44"> |
+|:--:|:--:|:--:|:--:|:--:|
+| mustard seed · turmeric · vinegar | **crusher**<br>4 seed → ground mustard<br>*80t* | **mixer**<br>ground mustard + turmeric + 2 vinegar → mustard<br>*90t* | **bottler**<br>mustard → 8 bottles<br>*200t* | **packer**<br>8 bottles → case<br>*40t* |
+
+</div>
+
+**The BBQ branch** — unlocked by selling 100 boxes of mustard, tapped off the pipe
+leaving the ketchup vat, and running on a second mixer, vat, bottler and packer:
 
 <div align="center">
 
 | <img src="assets/voxels/icons/item_spice_mix.png" width="44"> <img src="assets/voxels/icons/item_molasses.png" width="44"> <img src="assets/voxels/icons/item_liquid_smoke.png" width="44"> | <img src="assets/voxels/icons/machine_mixer.png" width="44"> | <img src="assets/voxels/icons/machine_cooking_vat.png" width="44"> | <img src="assets/voxels/icons/machine_bottler.png" width="44"> | <img src="assets/voxels/icons/machine_packer.png" width="44"> |
 |:--:|:--:|:--:|:--:|:--:|
-| spice mix · molasses · liquid smoke | **mixer**<br>ketchup + spice mix + molasses → BBQ mix<br>*90t* | **cooking vat**<br>BBQ mix + liquid smoke → BBQ<br>*600t* | **bottler**<br>BBQ → bottle<br>*60t* | **packer**<br>bottle → box<br>*40t* |
+| spice mix · molasses · liquid smoke | **mixer**<br>ketchup + spice mix + molasses → BBQ mix<br>*90t* | **cooking vat**<br>BBQ mix + liquid smoke → BBQ<br>*600t* | **bottler**<br>BBQ → 8 bottles<br>*200t* | **packer**<br>8 bottles → case<br>*40t* |
 
 </div>
 
@@ -181,9 +193,12 @@ scripts/make-demo-saves.sh
 
 Saves live in Godot's per-user data directory, not in the repo (on macOS:
 `~/Library/Application Support/Godot/app_userdata/CONDIMENTAL/saves`). The running
-game prints the resolved path once at startup. The save schema is at version 4 and an
-older save is **refused by number rather than migrated**, so re-run that script after
-pulling a schema bump.
+game prints the resolved path once at startup. The save schema is at version 8. The game
+**refuses an older save by number rather than migrating it**; each bump ships a one-off
+`scripts/migrate-save-vN-to-vM.py` that converts a save outside the game (dry run by
+default, `--apply` keeps the original as a `.bak`), and the refusal names the script.
+The demo saves need no conversion: re-run `scripts/make-demo-saves.sh` to write them
+fresh.
 
 ### 4. Check it works (optional)
 
@@ -191,8 +206,8 @@ pulling a schema bump.
 scripts/verify-core-loop.sh
 ```
 
-26 Rust test suites and 37 headless Godot proofs, including the real `gdext` JSON
-boundary, save/load round trips, the second sauce running as a branch off the first,
+36 Rust test suites and 50 headless Godot proofs, including the real `gdext` JSON
+boundary, save/load round trips, BBQ running as a branch off the ketchup line,
 and the interactive scene's input path. For a picture instead of a pass/fail:
 
 ```bash
@@ -271,10 +286,11 @@ whether that name was read off the pipe run or stated by you), both get **FILL**
    is destructive — it empties the hopper, and a tank also purges every pipe run it
    feeds — so the picker names the total it is about to destroy before it does it.
 5. **Sign orders.** Press `C`. A new game starts with no order signed: the board
-   on the right lists every offer (later tiers unlock as you deliver), each with a
+   on the right lists every offer (later tiers unlock as you sell boxes), each with a
    price to sign, a quantity, a cadence and a number of strikes, and the column on
-   the left holds the orders you are running. The clipboard in the corner tracks every signed order: checklist, payout,
-   countdown, and whether it is `✔ READY`, `⚠ AT RISK` or `⚠ LAST CHANCE`.
+   the left holds the orders you are running. The CONTRACTS plate in the top-right
+   corner tracks every signed order, soonest due first: the time left, a countdown
+   bar, and whether it is `✔ READY`, `⚠` at risk or `⚠ LAST CHANCE`.
 6. **Watch the money.** Finished boxes wait on the dock they arrive at until a
    contract collects them — one box pays one contract, never two. A dock has 32
    places; once they are all taken it refuses deliveries and the belt backs up.
@@ -291,11 +307,14 @@ whether that name was read off the pipe run or stated by you), both get **FILL**
    quantity and its *border* is the state, so an uncrewed machine still reads as one.
    Press `P` for the whole factory's throughput. The cooking vat's 240-tick cycle is
    the longest stage on the ketchup line, so that is where it backs up first.
-9. **Open the second sauce.** Your tenth delivery unlocks BBQ: three new raws in the
-   market, four new orders on the board, two of which want both sauces at once. Tap a
-   pipe off the run leaving the ketchup vat and feed a second mixer — BBQ eats finished
-   *ketchup*, so the branch is a decision about how to split one vat's output, not a
-   second factory bolted on beside the first.
+9. **Open the second sauce.** Selling 100 boxes of ketchup unlocks mustard: mustard
+   seed and turmeric in the market and a new tier of orders on the board. It is a
+   second line from raw — crusher, mixer (choose its recipe by clicking it), bottler,
+   packer — with no vat at all.
+10. **Open the third.** Selling 100 boxes of mustard unlocks BBQ: three new raws and
+   its own orders, some of which want more than one sauce at once. Tap a pipe off the
+   run leaving the ketchup vat and feed another mixer — BBQ eats finished *ketchup*, so
+   the branch is a decision about how to split one vat's output.
 
 ## Under the hood
 
@@ -376,7 +395,8 @@ it a game rather than a demo (shop and inventory, real placement, splitters, the
 chain rework, the delivery dock, contracts as data, the staff pool, production
 statistics, save/load, and a music and sound pass). **BBQ shipped as the second sauce**,
 which proved the thing it was built to prove: a sauce is content, and a branching chain,
-a gated unlock and a mixed order all work without new Rust.
+a gated unlock and a mixed order all work without new Rust. Mustard followed and, since
+2026-10-03, is the second sauce, with BBQ third.
 
 **Next, roughly in order:**
 
@@ -395,8 +415,8 @@ The current open backlog is [GitHub issues](https://github.com/TomWhitticase/con
 
 None yet. CONDIMENTAL is heading for an **alpha** release — the core loop closes and
 it is genuinely playable, but there is no packaged build yet, no balance pass on any of
-the placeholder numbers, and save files are rejected rather than migrated when the
-schema moves. Build from source as above.
+the placeholder numbers, and the game refuses a save from an older schema; converting
+one is a script run outside the game (see "Play" above). Build from source as above.
 
 The plan is two ways to play the same game: **free**, by building it from this
 repository (always), and a small price on **Steam** for anyone who would rather have a
