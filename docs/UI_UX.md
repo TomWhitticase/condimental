@@ -1246,6 +1246,9 @@ reached at all. The column pays the plate first now —
 and the clipboard is capped at the line where the whole list fits
 (`_stock_list_ceiling_y`) but never below its own one-line floor. The shipped
 1600x900 window shows whole dockets and the whole plate again.
+**Measured 2026-10-05** (issue #95, against the compact rows): 1600x900
+seats two whole contract rows beside the whole STOCK list and CREW; a third
+is 35px short and scrolls. `test_hud_plates.gd` pins the two.
 
 **At 1280x720 the column still cannot seat all three whole, so the cut is
 announced.** A plate silently showing one of three ingredients reads as a

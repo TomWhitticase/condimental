@@ -1126,6 +1126,17 @@ func _check_docket_case(strip: bool, window: Vector2i) -> bool:
 			where, bought, owed, first_row, first_line
 		])
 		return false
+	# The shipped review window shows more than one order (issue #95: three
+	# signed, and the clipboard stood one docket over a scrollbar). Two whole
+	# rows is what 1600x900 seats beside the whole STOCK list and CREW; the
+	# third is 35px short and scrolls, which is the column's ranked trade
+	# (UI_UX.md §5, "three tenants in one column").
+	var boundaries: Array = _docket_boundaries()
+	if window == BIG and boundaries.size() >= 3 and bought < float(boundaries[1]) - 0.5:
+		_fail("at %s with %d orders signed the contracts list seats %.0fpx, short of two whole rows (%.0f)" % [
+			where, boundaries.size(), bought, float(boundaries[1])
+		])
+		return false
 
 	# Neither plate is drawn ON the other. This is the fault that outranks
 	# every cut below: the earlier section checks it too, but only with the
@@ -1419,7 +1430,7 @@ func _check_config_case(window: Vector2i, tile: Vector2i, what: String, across: 
 func _finish_sweep() -> void:
 	main._staff_snapshot = {}
 	_resize(BIG)
-	_summary += "; the contracts list is cut between rows and always shows its first whole row where the column has room, and neither plate lands on the other, at both sizes with the strip up and down"
+	_summary += "; the contracts list is cut between rows and always shows its first whole row where the column has room — two whole rows at 1600x900 (issue #95) — and neither plate lands on the other, at both sizes with the strip up and down"
 	_frame = 0
 
 
