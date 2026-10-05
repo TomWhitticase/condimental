@@ -1129,8 +1129,8 @@ func _check_docket_case(strip: bool, window: Vector2i) -> bool:
 	# The shipped review window shows more than one order (issue #95: three
 	# signed, and the clipboard stood one docket over a scrollbar). Two whole
 	# rows is what 1600x900 seats beside the whole STOCK list and CREW; the
-	# third is 35px short and scrolls, which is the column's ranked trade
-	# (UI_UX.md §5, "three tenants in one column").
+	# third is 35px short (57px with the alarm up) and scrolls, which is the
+	# column's ranked trade (UI_UX.md §5, "three tenants in one column").
 	var boundaries: Array = _docket_boundaries()
 	if window == BIG and boundaries.size() >= 3 and bought < float(boundaries[1]) - 0.5:
 		_fail("at %s with %d orders signed the contracts list seats %.0fpx, short of two whole rows (%.0f)" % [
