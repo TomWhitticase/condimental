@@ -32,17 +32,18 @@ matches what code comments and data files cite.
   Chakra Petch SemiBold at 16px, and in the engine's default Open Sans,
   measures to the same pixel headless and in a 2x-scale macOS window, both
   before and after the Label is drawn. Nor does the `test_hud_plates.gd`
-  modal sweep show a stable gap. Printed per case, headless always gives
-  the same widths. Windowed runs mostly agree with it, but the contracts
-  board came back 1480 or 1482px at 1600x900 and 1264 or 1261px at 1280x720
-  from one windowed run to the next, while headless never varied. The
-  second review of this change traced it: one card's countdown reads
-  "2m 47s to go" (108px) headless and "2m 46s to go" (110px) windowed,
-  because the windowed run's game clock gets one second further. That is
-  live game text, not drawing. So the 2026-09-20 gap does not reproduce
-  today, and its real cause was never established. The likeliest suspect is that the render it was seen
-  in ran a ticked fixture whose figures were wider than the headless
-  test's, but that is not proved.
+  modal sweep show a mode-dependent gap. Every modal but the contracts board
+  measured the same in every run of either mode. The board came back 1480
+  or 1482px at 1600x900, and 1264 or 1261px at 1280x720, in BOTH modes, run
+  to run. The reviews of this change traced it to a contract countdown
+  ("2m 46s to go" is 2px wider than "2m 47s to go"). That text depends on
+  how much wall-clock time the run took to reach the case, because
+  `main.gd` advances the simulation on the real frame delta and this test
+  pins no `--fixed-fps`. So never pin a board width read off any run of it.
+  The 2026-09-20 gap does not reproduce today, and its real cause was never
+  established. The likeliest suspect is that the render it was seen in ran
+  a ticked fixture whose figures were wider than the headless test's, but
+  that is not proved.
 
   The sweep is run in a real window as well anyway, as a guard rather than
   a fix for a known gap.

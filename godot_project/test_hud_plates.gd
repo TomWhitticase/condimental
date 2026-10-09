@@ -14,9 +14,9 @@
 # and, without `--headless`, through scripts/check-fits-window.sh (issue
 # #101): the same sweep in a real off-screen window that is actually drawn,
 # the conditions the render has. The success line says which it was,
-# `[headless]` or `[windowed]`. Its game clock gets a little further than a
-# headless run's, so live text (a contract countdown) can differ by a digit:
-# never pin a width read off a windowed run.
+# `[headless]` or `[windowed]`. Either way the simulation runs on the real
+# frame delta (no `--fixed-fps`), so live text such as a contract countdown
+# differs by a digit run to run: never pin a board width read off this test.
 #
 # What it asserts:
 #
