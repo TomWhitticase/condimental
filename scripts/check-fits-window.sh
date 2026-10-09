@@ -8,9 +8,12 @@
 # passed the headless sweep at 1280x720 and the rendered frame still clipped
 # it on both edges (docs/UI_UX.md §5c). Why was never pinned down. It is not
 # the font, which measures a string to the pixel the same headless and
-# windowed, and on Godot 4.6.3 no modal measures stably differently today. So this
-# is a guard, not a fix for a known gap: it runs the same assertions with a
-# real display server, a real window and real draws, the render's conditions.
+# windowed. On Godot 4.6.3 the two differ today only where live text does: a
+# contract countdown is one second further along windowed. So this is a
+# guard, not a fix for a known gap: it runs the same assertions with a real
+# display server, a real window and real draws, the render's conditions.
+# Its game clock runs a little further than the headless one's, so never pin
+# a width read off a windowed run.
 #
 # The window is off-screen and focus is handed back, as for
 # scripts/screenshot-scene.sh. Needs a display, so CI (headless Linux) does

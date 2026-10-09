@@ -35,11 +35,12 @@ matches what code comments and data files cite.
   modal sweep show a stable gap. Printed per case, headless always gives
   the same widths. Windowed runs mostly agree with it, but the contracts
   board came back 1480 or 1482px at 1600x900 and 1264 or 1261px at 1280x720
-  from one windowed run to the next, while headless never varied. That
-  looks like live board text moving with frame timing, not drawing; a
-  review of this change saw no difference at all across two windowed runs.
-  So the 2026-09-20 gap does not reproduce today, and its real cause was
-  never established. The likeliest suspect is that the render it was seen
+  from one windowed run to the next, while headless never varied. The
+  second review of this change traced it: one card's countdown reads
+  "2m 47s to go" (108px) headless and "2m 46s to go" (110px) windowed,
+  because the windowed run's game clock gets one second further. That is
+  live game text, not drawing. So the 2026-09-20 gap does not reproduce
+  today, and its real cause was never established. The likeliest suspect is that the render it was seen
   in ran a ticked fixture whose figures were wider than the headless
   test's, but that is not proved.
 

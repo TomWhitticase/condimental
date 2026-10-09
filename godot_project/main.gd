@@ -17247,8 +17247,9 @@ func _set_payday_confirm_open(open: bool) -> void:
 ## Centred in the whole viewport, like the pause menu and for its reason: the
 ## player has been interrupted and there is nothing underneath worth keeping
 ## clear. Clamped on screen so no button lands where it cannot be clicked
-## (UI_UX.md §5c), and measured with `maxf(minimum, size)` because a headless
-## run reports a narrower minimum than a real window draws.
+## (UI_UX.md §5c), and measured with `maxf(minimum, size)` because
+## `get_combined_minimum_size()` can under-report a panel whose text was set
+## this frame (see `_panel_position_near`'s note on the machine hover).
 func _position_payday_confirm() -> void:
 	if _payday_confirm_panel == null:
 		return
