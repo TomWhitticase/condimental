@@ -144,8 +144,8 @@ func build(
 
 	# Measured AFTER the rows exist, and only the height: every control on a
 	# row is pinned, so this is a sum of numbers this file chose rather than a
-	# question about font metrics — which is the part a headless run cannot
-	# answer (godot_project/CLAUDE.md).
+	# measured text width — which is the part a headless run cannot be trusted
+	# with on its own (godot_project/CLAUDE.md).
 	scroll.custom_minimum_size.x = _px(ROW_WIDTH)
 	fit(rows_height_budget)
 

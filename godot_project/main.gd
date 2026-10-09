@@ -14226,10 +14226,10 @@ func _config_picker_name(choice: String) -> String:
 ## [`CONFIG_PICKER_NAME_MIN_FONT_DELTA`] allows.
 ##
 ## The measurement happens HERE, at build time in the real window, rather
-## than being pinned to a constant a test could assert: headless font metrics
-## are narrower than a live window's (`godot_project/CLAUDE.md`), so a number
-## measured headless is wrong on screen and a number measured on screen is
-## wrong headless. A fit that re-measures is right in both.
+## than being pinned to a constant a test could assert: a width measured
+## headless has disagreed with the drawn one before (`godot_project/CLAUDE.md`),
+## so a number pinned from either run may be wrong in the other. A fit that
+## re-measures is right in both.
 func _fit_config_picker_name(label: Label, settings: LabelSettings) -> void:
 	# The widest single word is the only thing that can fail: anything with a
 	# space in it has somewhere legal to break.
@@ -17247,8 +17247,9 @@ func _set_payday_confirm_open(open: bool) -> void:
 ## Centred in the whole viewport, like the pause menu and for its reason: the
 ## player has been interrupted and there is nothing underneath worth keeping
 ## clear. Clamped on screen so no button lands where it cannot be clicked
-## (UI_UX.md §5c), and measured with `maxf(minimum, size)` because a headless
-## run reports a narrower minimum than a real window draws.
+## (UI_UX.md §5c), and measured with `maxf(minimum, size)` because
+## `get_combined_minimum_size()` can under-report a panel whose text was set
+## this frame (see `_panel_position_near`'s note on the machine hover).
 func _position_payday_confirm() -> void:
 	if _payday_confirm_panel == null:
 		return
@@ -19981,7 +19982,7 @@ func _world_position_for_size(size: Vector2, anchor: Vector2) -> Vector2:
 ## column at every resolution.
 ##
 ## Given the panel's drawn size, so a test can drive the rule with sizes of
-## its own rather than trusting a headless font metric.
+## its own rather than trusting a headless width measurement.
 func _first_person_panel_position(size: Vector2) -> Vector2:
 	var vp := get_viewport()
 	var bounds := vp.get_visible_rect().size if vp != null else Vector2(1600, 900)

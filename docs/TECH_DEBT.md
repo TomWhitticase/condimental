@@ -1,6 +1,6 @@
 # CONDIMENTAL — Tech debt
 
-**Changes since last overview audit: 3** · **Debt total: 0 points**
+**Changes since last overview audit: 4** · **Debt total: 0 points**
 
 Feature freeze: **off** — set by `scripts/tech-debt-status.sh --write`.
 Last audit: 2026-10-04 — docs against code and content (README's sauce order, chain and

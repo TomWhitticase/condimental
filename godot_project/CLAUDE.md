@@ -128,9 +128,13 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
   neither a pin nor a wrap, and at 489px it made the whole panel 99px wider
   than `CONFIG_PANEL_WIDTH` says it is — which is what put it on the legend
   it could not then get off (issue #107). Pin the width or do not wrap.
-- **A headless test cannot prove a width.** Headless font metrics are
-  narrower than a real window's, and `get_combined_minimum_size()` can
-  underreport what is on screen — take `maxf(minimum, size)` when
+- **A headless test cannot prove a width on its own.** On 2026-09-20 a
+  headless sweep passed at the size the render clipped. The cause was never
+  pinned down, and it is not the font, which measures the same headless and
+  windowed (issue #101). `scripts/check-fits-window.sh` reruns
+  `test_hud_plates.gd`'s modal sweep in a real, drawn window, and
+  `verify-core-loop.sh` runs it on macOS. `get_combined_minimum_size()` can
+  also underreport what is on screen — take `maxf(minimum, size)` when
   positioning. Nor can you get a width out of a wrapping Label by turning
   wrapping off to measure it: the cached minimum is only re-shaped when the
   TEXT changes, so a single-word label answers "1px, it fits" to every

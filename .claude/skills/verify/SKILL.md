@@ -17,6 +17,7 @@ full one before handing work back.
 | Anything in `godot_project/`, the wire, or data files | `scripts/verify-core-loop.sh` |
 | Anything visual / a content-id lookup | `scripts/screenshot-scene.sh` — see the `screenshot-review` skill |
 | The `gdext` scaffold, a `gdext`/Godot version bump | `scripts/verify-scaffold.sh` |
+| A panel's layout or width | `scripts/check-fits-window.sh` (the modal width sweep in a real window; `verify-core-loop.sh` runs it on macOS) |
 
 **`scripts/verify-core-loop.sh` is the full gate.** In order it runs
 `cargo test -p sim_core`, `cargo test -p voxgen`, `cargo xtask`, two

@@ -266,6 +266,14 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-09 — the modal width sweep runs in a real window too
+
+Issue #101. `scripts/check-fits-window.sh` reruns `test_hud_plates.gd` in an
+off-screen window that is really drawn, and `verify-core-loop.sh` runs it on
+macOS. "Headless font metrics are narrower" turned out to be wrong: the font
+measures the same either way. The 2026-09-20 gap no longer reproduces and its
+cause was never found, so the windowed sweep is a guard.
+
 ### 2026-10-04 — a DOCKS plate in the bottom-left corner
 What stands on the docks is a permanent readout now, not only a dock's hover:
 a bottom-left plate with every place taken against every place as a bar, red

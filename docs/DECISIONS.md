@@ -25,6 +25,39 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-09: **The modal width sweep also runs in a real window (issue
+  #101).**
+  The 2026-09-20 record below says headless font metrics are narrower than a
+  real window's. Measured on Godot 4.6.3, that is not so. One string set in
+  Chakra Petch SemiBold at 16px, and in the engine's default Open Sans,
+  measures to the same pixel headless and in a 2x-scale macOS window, both
+  before and after the Label is drawn. Nor does the `test_hud_plates.gd`
+  modal sweep show a mode-dependent gap. Every modal but the contracts board
+  measured the same in every run of either mode. The board came back 1480
+  or 1482px at 1600x900, and 1264 or 1261px at 1280x720, in BOTH modes, run
+  to run. The reviews of this change traced it to a contract countdown
+  ("2m 46s to go" is 2px wider than "2m 47s to go"). That text depends on
+  how much wall-clock time the run took to reach the case, because
+  `main.gd` advances the simulation on the real frame delta and this test
+  pins no `--fixed-fps`. So never pin a board width read off any run of it.
+  The 2026-09-20 gap does not reproduce today, and its real cause was never
+  established. The likeliest suspect is that the render it was seen in ran
+  a ticked fixture whose figures were wider than the headless test's, but
+  that is not proved.
+
+  The sweep is run in a real window as well anyway, as a guard rather than
+  a fix for a known gap.
+  `test_hud_plates.gd` notices it is not headless, moves its window
+  off-screen, and forces a draw whenever macOS skips one, both as
+  `test_screenshot.gd` does. `scripts/check-fits-window.sh` runs it, hands
+  focus back (the shared `scripts/lib/hand-focus-back.sh`), and passes only
+  on `HUD_PLATES_OK: [windowed]`, so a run that silently fell back to
+  headless is refused. `verify-core-loop.sh` runs it when not on CI and on
+  macOS. CI's Linux runner has no display and prints a SKIP line instead.
+  Chosen over the issue's option 1, a measured-gap margin: a margin would
+  have to be re-measured each time a panel changes, while the windowed run
+  measures the real thing every time and costs about three seconds.
+
 - 2026-10-03: **The player chooses each machine's recipe; mustard is ground
   and mixed, and comes second.**
   (Owner, in three steps on 2026-10-02/03: "i feel like its probably better
@@ -3415,7 +3448,9 @@ matches what code comments and data files cite.
 
   **The measurement trap, twice.** The same "shaping happens on draw" rule bit
   in two more places, and both are worth knowing before trusting a number.
-  First: **headless font metrics are narrower than a real window's.** The
+  First: **headless font metrics are narrower than a real window's.**
+  (Corrected 2026-10-09, issue #101: the font measures the same either way,
+  and this gap's cause was never found; see the 2026-10-09 record.) The
   staff panel measured 1339px against 1264px available headless, passed the
   test, and was still clipped in the render at exactly that size; the fix
   (dropping the 262px per-tick figure as well) was found by instrumenting

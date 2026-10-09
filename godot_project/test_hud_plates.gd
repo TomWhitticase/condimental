@@ -11,6 +11,13 @@
 # Run with:
 #   godot --headless --path godot_project --script test_hud_plates.gd
 #
+# and, without `--headless`, through scripts/check-fits-window.sh (issue
+# #101): the same sweep in a real off-screen window that is actually drawn,
+# the conditions the render has. The success line says which it was,
+# `[headless]` or `[windowed]`. Either way the simulation runs on the real
+# frame delta (no `--fixed-fps`), so live text such as a contract countdown
+# differs by a digit run to run: never pin a board width read off this test.
+#
 # What it asserts:
 #
 #   * the stock plate is a HUD plate of its own, a sibling of the clipboard
@@ -161,6 +168,10 @@ var _modal := 0
 var _swept := false
 ## The configuration sweep's cursor, an index into `CONFIG_CASES`.
 var _cfg := 0
+## Whether this run has a real window (`scripts/check-fits-window.sh`, issue
+## #101) rather than `--headless`, and the draw count `_keep_drawing` last saw.
+var _windowed := false
+var _frames_drawn_seen := -1
 
 
 func _fail(msg: String) -> void:
@@ -169,12 +180,16 @@ func _fail(msg: String) -> void:
 
 
 func _initialize() -> void:
+	_windowed = DisplayServer.get_name() != "headless"
+	if _windowed:
+		_hide_window()
 	main = load("res://main.tscn").instantiate()
 	root.add_child(main)
 	main._ready()
 
 
-func _process(_delta: float) -> bool:
+func _process(delta: float) -> bool:
+	_keep_drawing(delta)
 	if not _ran:
 		_ran = true
 		_run_checks()
@@ -199,6 +214,29 @@ func _resize(to: Vector2i) -> void:
 	main._position_crew_panel()
 	main._update_contract_panel()
 	main._position_stock_panel()
+
+
+## Takes a real window off the desktop before anything is drawn in it, the way
+## `test_screenshot.gd`'s `_hide_window` does and for the same reason: this
+## runs on a laptop someone is using. Borderless first, because macOS clamps
+## a titled window back onto a screen.
+func _hide_window() -> void:
+	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_NO_FOCUS, true)
+	DisplayServer.window_set_flag(DisplayServer.WINDOW_FLAG_BORDERLESS, true)
+	DisplayServer.window_set_position(Vector2i(-20000, 0))
+
+
+## Draws this frame by hand if the engine skipped it. The windowed run exists
+## to measure under the render's conditions (issue #101), and Godot skips
+## drawing a window macOS reports as occluded, which an off-screen one is —
+## without this the windowed run would not be drawn any more than a headless one.
+func _keep_drawing(delta: float) -> void:
+	if not _windowed:
+		return
+	var drawn := Engine.get_frames_drawn()
+	if drawn == _frames_drawn_seen:
+		RenderingServer.force_draw(true, delta)
+	_frames_drawn_seen = drawn
 
 
 func _press_key(keycode: Key) -> void:
@@ -922,7 +960,7 @@ func _run_checks() -> void:
 	# over to look at entirely behind it.
 	#
 	# The sizes are the test's own, not a headless measurement: a headless
-	# font metric cannot prove a width (godot_project/CLAUDE.md), so what is
+	# width cannot prove a drawn one (godot_project/CLAUDE.md), so what is
 	# pinned here is the RULE, given a size, and the render is the acceptance.
 	# 550x283 is the machine hover as it was drawn at 1280x720 when the bug
 	# was found (it is 456x283 now, issue #99); the larger size is kept as
@@ -1323,8 +1361,8 @@ func _config_step() -> bool:
 	if _cfg >= CONFIG_CASES.size():
 		_open_only("")
 		_resize(BIG)
-		print("HUD_PLATES_OK: %s; every modal (%s) fits inside the window with every button reachable, at 1600x900 and at 1280x720; and a hopper's and a FLUID TANK's configuration panel keeps clear of all three right-hand plates at both sizes — and never drawn on top of the CONTROLS legend, which steps aside at a size where nothing can clear both (issue #107) — with the building centred and standing low in the frame where issue #88 photographed it" % [
-			_summary, ", ".join(_modal_keys())
+		print("HUD_PLATES_OK: [%s] %s; every modal (%s) fits inside the window with every button reachable, at 1600x900 and at 1280x720; and a hopper's and a FLUID TANK's configuration panel keeps clear of all three right-hand plates at both sizes — and never drawn on top of the CONTROLS legend, which steps aside at a size where nothing can clear both (issue #107) — with the building centred and standing low in the frame where issue #88 photographed it" % [
+			"windowed" if _windowed else "headless", _summary, ", ".join(_modal_keys())
 		])
 		quit(0)
 		return true
