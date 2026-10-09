@@ -25,6 +25,31 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-09: **The modal width sweep also runs in a real window (issue
+  #101).**
+  The 2026-09-20 record below says headless font metrics are narrower than a
+  real window's. Measured on Godot 4.6.3, that is not so. One string set in
+  Chakra Petch SemiBold at 16px, and in the engine's default Open Sans,
+  measures to the same pixel headless and in a 2x-scale macOS window, both
+  before and after the Label is drawn. What a headless run lacks is the
+  draw. The same `test_hud_plates.gd` modal sweep, printed per case, agrees
+  on every modal but the contracts board, which asks for 1482px drawn
+  against 1480px headless at 1600x900 and 1261px against 1264px at 1280x720.
+  That is small today, but it is a real disagreement, and it is the kind
+  that clipped the staff panel.
+
+  So the sweep is now run in a real window as well.
+  `test_hud_plates.gd` notices it is not headless, moves its window
+  off-screen, and forces a draw whenever macOS skips one, both as
+  `test_screenshot.gd` does. `scripts/check-fits-window.sh` runs it, hands
+  focus back (the shared `scripts/lib/hand-focus-back.sh`), and passes only
+  on `HUD_PLATES_OK: [windowed]`, so a run that silently fell back to
+  headless is refused. `verify-core-loop.sh` runs it when not on CI and on
+  macOS. CI's Linux runner has no display and prints a SKIP line instead.
+  Chosen over the issue's option 1, a measured-gap margin: a margin would
+  have to be re-measured each time a panel changes, while the windowed run
+  measures the real thing every time and costs about three seconds.
+
 - 2026-10-03: **The player chooses each machine's recipe; mustard is ground
   and mixed, and comes second.**
   (Owner, in three steps on 2026-10-02/03: "i feel like its probably better

@@ -241,6 +241,21 @@ run_godot_script test_camera_seal.gd CAMERA_SEAL_OK "a review render's camera ca
 run_godot_script test_payday_warning.gd PAYDAY_WARNING_OK "the payday warning: the simulation answers whether a spend would leave the next payday unpayable and Godot only renders that answer, a spend that crosses the line and one made while already short each raising the confirmation with its own heading, CANCEL leaving money/stock/world untouched and SPEND ANYWAY issuing the command, ESC cancelling without reaching the panel behind it, all four spends plus SHIFT's replacement purchase gated, and a hire the payday cannot cover warning beside a live button — the payday warning, 2026-09-26"
 run_godot_script test_cookbook.gd COOKBOOK_OK "THE COOKBOOK (B): the sauce tree drawn from cookbook_json into the canvas meta a headless run can read, a locked family as a silhouette with its gate and nothing else, pages that are their wire entry in seconds, the pages linked, no id or name in the whole book written anywhere in cookbook_panel.gd, one modal at a time, and the same panel hosted by the pause menu — THE COOKBOOK"
 
+# The one check here that is NOT headless (issue #101): test_hud_plates.gd's
+# modal width sweep again in a real, off-screen window, because a headless run
+# never draws and so measures panels whose Labels were never shaped as drawn.
+# It needs a display, so a CI runner (headless Linux) skips it and says so.
+echo
+if [ -z "${CI:-}" ] && [ "$(uname)" = "Darwin" ]; then
+  echo "==> scripts/check-fits-window.sh (the modal width sweep in a real window)"
+  if ! "$repo_root/scripts/check-fits-window.sh"; then
+    echo "FAIL: a modal does not fit a real window — scripts/check-fits-window.sh" >&2
+    exit 1
+  fi
+else
+  echo "SKIP: scripts/check-fits-window.sh needs a macOS display (CI is headless)"
+fi
+
 echo
 echo "$godot_scripts_run headless Godot scripts run."
 echo "PASS: real placement + milestone 3/4 core loop + full chain + visual pass + camera nav + contract clipboard"

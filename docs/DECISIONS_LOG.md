@@ -18,6 +18,12 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-09 **The modal width sweep also runs in a real window.**
+  `scripts/check-fits-window.sh` runs `test_hud_plates.gd` off-screen with a
+  forced draw each frame, and `verify-core-loop.sh` runs it on macOS (CI is
+  headless and skips it, saying so). The 2026-09-20 entry's "headless font
+  metrics are narrower" was wrong. The bundled font measures a string the
+  same either way; the gap is that a headless run never draws. (Issue #101.)
 - 2026-10-03 **Money is shown in pounds, with `£`.** Every money figure a
   player reads — balance, prices, wages, payouts, the Cookbook, the BASICS
   prose — goes through `godot_project/money_text.gd` (`Money.amount` for
@@ -976,8 +982,8 @@ See [WORKFLOW.md](WORKFLOW.md).
   clamped everywhere a modal is positioned, and the market is pushed clear of
   the clipboard, STOCK and CREW plates (`_plate_rect`, `_pushed_clear_of`).
 - 2026-09-20 **A headless layout test cannot prove a real width; only
-  `scripts/screenshot-scene.sh` can.** Godot's headless font metrics are
-  NARROWER than a real window's: the staff panel measured 1264px available
+  `scripts/screenshot-scene.sh` can.** A headless run measures panels it
+  never drew (first blamed on font metrics; corrected 2026-10-09): the staff panel measured 1264px available
   against a 1339px minimum headless, passed `test_hud_plates.gd`, and was
   still clipped in the rendered frame at the same size. Headless assertions
   are the regression net; the render is the acceptance. For the same reason a
