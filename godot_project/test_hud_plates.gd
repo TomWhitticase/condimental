@@ -13,8 +13,8 @@
 #
 # and, without `--headless`, through scripts/check-fits-window.sh (issue
 # #101): the same sweep in a real off-screen window that is actually drawn,
-# since a headless run measures Labels it never drew. The success line says
-# which it was, `[headless]` or `[windowed]`.
+# the conditions the render has. The success line says which it was,
+# `[headless]` or `[windowed]`.
 #
 # What it asserts:
 #
@@ -224,10 +224,10 @@ func _hide_window() -> void:
 	DisplayServer.window_set_position(Vector2i(-20000, 0))
 
 
-## Draws this frame by hand if the engine skipped it. A windowed run exists
-## because a Label is only shaped when it is DRAWN (issue #101), and Godot
-## skips drawing a window macOS reports as occluded, which an off-screen one
-## is — without this the windowed run would measure what the headless one does.
+## Draws this frame by hand if the engine skipped it. The windowed run exists
+## to measure under the render's conditions (issue #101), and Godot skips
+## drawing a window macOS reports as occluded, which an off-screen one is —
+## without this the windowed run would not be drawn any more than a headless one.
 func _keep_drawing(delta: float) -> void:
 	if not _windowed:
 		return
@@ -958,7 +958,7 @@ func _run_checks() -> void:
 	# over to look at entirely behind it.
 	#
 	# The sizes are the test's own, not a headless measurement: a headless
-	# font metric cannot prove a width (godot_project/CLAUDE.md), so what is
+	# width cannot prove a drawn one (godot_project/CLAUDE.md), so what is
 	# pinned here is the RULE, given a size, and the render is the acceptance.
 	# 550x283 is the machine hover as it was drawn at 1280x720 when the bug
 	# was found (it is 456x283 now, issue #99); the larger size is kept as

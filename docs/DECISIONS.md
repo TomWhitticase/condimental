@@ -31,14 +31,20 @@ matches what code comments and data files cite.
   real window's. Measured on Godot 4.6.3, that is not so. One string set in
   Chakra Petch SemiBold at 16px, and in the engine's default Open Sans,
   measures to the same pixel headless and in a 2x-scale macOS window, both
-  before and after the Label is drawn. What a headless run lacks is the
-  draw. The same `test_hud_plates.gd` modal sweep, printed per case, agrees
-  on every modal but the contracts board, which asks for 1482px drawn
-  against 1480px headless at 1600x900 and 1261px against 1264px at 1280x720.
-  That is small today, but it is a real disagreement, and it is the kind
-  that clipped the staff panel.
+  before and after the Label is drawn. Nor does the `test_hud_plates.gd`
+  modal sweep show a stable gap. Printed per case, headless always gives
+  the same widths. Windowed runs mostly agree with it, but the contracts
+  board came back 1480 or 1482px at 1600x900 and 1264 or 1261px at 1280x720
+  from one windowed run to the next, while headless never varied. That
+  looks like live board text moving with frame timing, not drawing; a
+  review of this change saw no difference at all across two windowed runs.
+  So the 2026-09-20 gap does not reproduce today, and its real cause was
+  never established. The likeliest suspect is that the render it was seen
+  in ran a ticked fixture whose figures were wider than the headless
+  test's, but that is not proved.
 
-  So the sweep is now run in a real window as well.
+  The sweep is run in a real window as well anyway, as a guard rather than
+  a fix for a known gap.
   `test_hud_plates.gd` notices it is not headless, moves its window
   off-screen, and forces a draw whenever macOS skips one, both as
   `test_screenshot.gd` does. `scripts/check-fits-window.sh` runs it, hands
@@ -3440,7 +3446,9 @@ matches what code comments and data files cite.
 
   **The measurement trap, twice.** The same "shaping happens on draw" rule bit
   in two more places, and both are worth knowing before trusting a number.
-  First: **headless font metrics are narrower than a real window's.** The
+  First: **headless font metrics are narrower than a real window's.**
+  (Corrected 2026-10-09, issue #101: the font measures the same either way,
+  and this gap's cause was never found; see the 2026-10-09 record.) The
   staff panel measured 1339px against 1264px available headless, passed the
   test, and was still clipped in the render at exactly that size; the fix
   (dropping the 262px per-tick figure as well) was found by instrumenting

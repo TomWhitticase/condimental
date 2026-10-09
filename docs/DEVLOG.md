@@ -271,8 +271,8 @@ below is history and should only ever be appended to.)*
 Issue #101. `scripts/check-fits-window.sh` reruns `test_hud_plates.gd` in an
 off-screen window that is really drawn, and `verify-core-loop.sh` runs it on
 macOS. "Headless font metrics are narrower" turned out to be wrong: the font
-measures the same either way, and what a headless run lacks is the draw. The
-contracts board asks for 2-3px more or less when drawn than headless.
+measures the same either way. The 2026-09-20 gap no longer reproduces and its
+cause was never found, so the windowed sweep is a guard.
 
 ### 2026-10-04 — a DOCKS plate in the bottom-left corner
 What stands on the docks is a permanent readout now, not only a dock's hover:

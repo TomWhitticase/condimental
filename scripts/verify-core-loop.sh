@@ -242,18 +242,19 @@ run_godot_script test_payday_warning.gd PAYDAY_WARNING_OK "the payday warning: t
 run_godot_script test_cookbook.gd COOKBOOK_OK "THE COOKBOOK (B): the sauce tree drawn from cookbook_json into the canvas meta a headless run can read, a locked family as a silhouette with its gate and nothing else, pages that are their wire entry in seconds, the pages linked, no id or name in the whole book written anywhere in cookbook_panel.gd, one modal at a time, and the same panel hosted by the pause menu — THE COOKBOOK"
 
 # The one check here that is NOT headless (issue #101): test_hud_plates.gd's
-# modal width sweep again in a real, off-screen window, because a headless run
-# never draws and so measures panels whose Labels were never shaped as drawn.
-# It needs a display, so a CI runner (headless Linux) skips it and says so.
+# modal width sweep again in a real, off-screen window, under the render's
+# conditions, because a headless sweep once passed at a size the render
+# clipped. It needs a display, so a CI runner (headless Linux) skips it and
+# says so; SKIP_WINDOWED=1 skips it too, for a session with no GUI login.
 echo
-if [ -z "${CI:-}" ] && [ "$(uname)" = "Darwin" ]; then
+if [ -z "${CI:-}" ] && [ -z "${SKIP_WINDOWED:-}" ] && [ "$(uname)" = "Darwin" ]; then
   echo "==> scripts/check-fits-window.sh (the modal width sweep in a real window)"
   if ! "$repo_root/scripts/check-fits-window.sh"; then
     echo "FAIL: a modal does not fit a real window — scripts/check-fits-window.sh" >&2
     exit 1
   fi
 else
-  echo "SKIP: scripts/check-fits-window.sh needs a macOS display (CI is headless)"
+  echo "SKIP: scripts/check-fits-window.sh (needs a macOS display; CI and SKIP_WINDOWED=1 skip it)"
 fi
 
 echo

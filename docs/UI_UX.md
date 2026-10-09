@@ -956,16 +956,16 @@ entirely behind its own tooltip. The corner is chosen over "below the
 crosshair" because there is not room below it: at 1280x720 the strip between
 the crosshair and the hotbar is about 230px and a machine hover is 283 tall.
 
-**A headless test cannot prove a width; a drawn window can.** The staff
-panel passed the headless assertion at the very size the rendered frame
-clipped. That was first put down to headless font metrics, but the bundled
-font measures a string identically headless and windowed (2026-10-09, issue
-#101). What differs is that a headless run never *draws*. So the modal width
-sweep runs twice: headless in `test_hud_plates.gd`, and in a real off-screen
-window in `scripts/check-fits-window.sh`, which `verify-core-loop.sh` runs on
-macOS. The two do disagree: the contracts board asks for 1482px drawn
-against 1480px headless at 1600x900. Headless assertions are the regression
-net; the windowed sweep and `scripts/screenshot-scene.sh` are the acceptance. Relatedly, `get_combined_minimum_size()` can *under*report
+**A headless test cannot prove a width on its own.** The staff panel passed
+the headless assertion at the very size the rendered frame clipped. That was
+put down to headless font metrics, but the font measures a string identically
+headless and windowed (2026-10-09, issue #101). The real cause was never
+pinned down, and on Godot 4.6.3 no modal measures stably differently in
+the two today. So the modal width sweep runs twice: headless in `test_hud_plates.gd`,
+and in a real, drawn, off-screen window in `scripts/check-fits-window.sh`,
+which `verify-core-loop.sh` runs on macOS. Headless assertions are the
+regression net; the windowed sweep and `scripts/screenshot-scene.sh` are the
+acceptance. Relatedly, `get_combined_minimum_size()` can *under*report
 what is on screen (the machine hover: 299px reported, 545px drawn), so
 anything positioning a panel takes `maxf(minimum, size)` on both axes.
 
