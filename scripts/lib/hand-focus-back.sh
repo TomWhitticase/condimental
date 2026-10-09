@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Sourced, not run: by scripts/screenshot-scene.sh and
 # scripts/check-fits-window.sh, the two scripts that open a real Godot window.
 #
