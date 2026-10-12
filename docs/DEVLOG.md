@@ -266,6 +266,17 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-12 — a dock's hover keeps its crew line at 1280x720
+
+Issue #173's other half. With the legend open at 1280x720, the band under it
+is shorter than the dock's places grid alone, so the yield ladder dropped
+the crew line and still found nowhere clear. The crew went for nothing,
+even on a fresh hover. A dock's places grid is now the ladder's first rung.
+Its two facts are the `places` and `waiting:` lines above it, the same way
+the load bar's `% busy` stays in the text when the bar goes. At 1600x900
+nothing yields. `test_hover.gd` pins the 720p case and fails without the
+change.
+
 ### 2026-10-09 — the modal width sweep runs in a real window too
 
 Issue #101. `scripts/check-fits-window.sh` reruns `test_hud_plates.gd` in an

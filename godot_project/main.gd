@@ -19743,18 +19743,20 @@ func _update_hover_tooltip() -> void:
 	# (issue #99). Measured every frame from the full panel, so a folded
 	# legend or a bigger window gives the lines straight back.
 	var full := _panel_draw_size(_hover_tooltip)
-	# Every rung past the first drops the same text line, so one crewless
-	# build serves them all.
+	# Only the crew rung drops a text line, so one crewless build serves it
+	# and every rung past it.
 	var crewless := _hover_text_at_tile(tile, HOVER_YIELD_CREW)
 	var sheds := _hover_yield_sheds(text != crewless, state)
 	var yielded := _hover_yield_rungs(full, query_pos, sheds)
 	if yielded > 0:
-		_hover_label.text = crewless
+		if yielded >= HOVER_YIELD_CREW:
+			_hover_label.text = crewless
 		_apply_hover_panel_state(state, yielded)
 		# A free-standing Control only ever grows to its minimum, never
 		# shrinks back to it, so the shorter size is set outright. Width is
-		# kept: the lines shed are never the widest, and the full width is
-		# the one `_panel_draw_size` already trusts.
+		# kept: the full width is the one `_panel_draw_size` already trusts,
+		# and the one every rung was judged at. A dock's grid can be its
+		# widest row, so a yielded dock may stand a little wider than its text.
 		var shed_height := 0.0
 		for i in range(yielded):
 			shed_height += sheds[i]
@@ -19764,20 +19766,33 @@ func _update_hover_tooltip() -> void:
 
 
 ## The hover's yield ladder (issue #99), in the order its rungs are shed:
-## first the `crew:` line — the CREW plate on screen already names every
+## first a dock's places grid, whose two facts — how many places are taken,
+## and by what — are the `places` and `waiting:` lines above it (issue #173:
+## at 1280x720 the grid is taller than the band under the legend leaves, so
+## shedding the crew line first never cleared and the crew went for nothing);
+## then the `crew:` line — the CREW plate on screen already names every
 ## category — then the load bar, whose `% busy` figure is still printed in
-## the text two lines above it. Neither loses a fact the player cannot see
-## elsewhere on the same frame, which is why these two go and nothing else.
-const HOVER_YIELD_CREW := 1
-const HOVER_YIELD_LOAD := 2
+## the text two lines above it. None loses a fact the player cannot see
+## elsewhere on the same frame, which is why these three go and nothing else.
+const HOVER_YIELD_PLACES := 1
+const HOVER_YIELD_CREW := 2
+const HOVER_YIELD_LOAD := 3
 
 
 ## How many pixels each rung of the ladder gives back for the tile being
-## hovered, rung 1 first. A rung this tile does not have (a belt has no crew
-## line, a dock no load bar) gives back nothing, and costs nothing to climb.
+## hovered, rung 1 first. A rung this tile does not have (only a dock has a
+## places grid, a belt has no crew line, a dock no load bar) gives back
+## nothing, and costs nothing to climb.
 ## Measured off the live nodes rather than typed, so a UI scale change moves
 ## them with it.
 func _hover_yield_sheds(has_crew_line: bool, state: Dictionary) -> Array[float]:
+	var places_row := 0.0
+	var places: Dictionary = state.get("places", {})
+	if not places.is_empty() and _hover_places_grid != null:
+		places_row = _places_grid_size(int(places.get("places", 0))).y
+		var grid_column := _hover_places_grid.get_parent() as Container
+		if grid_column != null:
+			places_row += grid_column.get_theme_constant("separation")
 	var crew_line := 0.0
 	if has_crew_line and _hover_label != null:
 		crew_line = float(_hover_label.get_line_height())
@@ -19790,7 +19805,7 @@ func _hover_yield_sheds(has_crew_line: bool, state: Dictionary) -> Array[float]:
 		var column := _hover_load_meter.get_parent() as Container
 		if column != null:
 			load_row += column.get_theme_constant("separation")
-	var sheds: Array[float] = [crew_line, load_row]
+	var sheds: Array[float] = [places_row, crew_line, load_row]
 	return sheds
 
 
@@ -19833,7 +19848,7 @@ func _hover_yield_rungs(size: Vector2, anchor: Vector2, sheds: Array[float]) -> 
 func _apply_hover_panel_state(state: Dictionary, yielded := 0) -> void:
 	var places: Dictionary = state.get("places", {})
 	if _hover_places_grid != null:
-		_hover_places_grid.visible = not places.is_empty()
+		_hover_places_grid.visible = not places.is_empty() and yielded < HOVER_YIELD_PLACES
 		if not places.is_empty():
 			var count := int(places.get("places", 0))
 			var cells: Array = places.get("cells", [])

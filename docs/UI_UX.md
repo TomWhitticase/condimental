@@ -898,9 +898,12 @@ hover (456x283) is 48px taller than the band between the legend and the
 hotbar, and no gap beside the legend is wide enough, so every position
 covered some plate. Folding the legend for the player would break §5f's "a
 fold is the player's", so the hover sheds instead, fewest rungs first
-(`_hover_yield_rungs`): **the `crew:` line**, which the CREW plate on the
-same frame already names, then **the load bar**, whose `% busy` figure stays
-in the text above it. The ladder is judged by the same placement rule that
+(`_hover_yield_rungs`): **a dock's places grid**, whose two facts are the
+`places` and `waiting:` lines above it (issue #173: at 1280x720 the grid alone
+is taller than the band under the legend, so the dock shed its crew line for
+nothing), then **the `crew:` line**, which the CREW plate on the same frame
+already names, then **the load bar**, whose `% busy` figure stays in the text
+above it. The ladder is judged by the same placement rule that
 then places the panel, from the full panel every frame. That means a bigger
 window or a folded legend brings the lines back on its own. **A line goes
 only if going helps:** when no rung clears, a rung is taken only if it

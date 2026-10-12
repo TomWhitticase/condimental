@@ -31,7 +31,10 @@
 #     hidden in ISOMETRIC),
 #   * the tooltip is its own height on the first frame after a taller one,
 #     and its own width on the second — a belt hovered straight after the
-#     crusher (issue #173).
+#     crusher (issue #173),
+#   * at 1280x720 with the legend open, a dock's hover yields its places
+#     grid rather than its crew line, and stands clear of every plate
+#     (issue #173's other half).
 #
 # `_tile_under_screen_pos` calls `Camera3D.project_ray_origin`/
 # `project_ray_normal`, which (like `unproject_position`) require the camera
@@ -327,5 +330,65 @@ func _run_checks() -> void:
 		])
 		return
 
-	print("HOVER_OK: screen-to-tile resolution finds the right machine in both view modes, every placed kind answers through one entry point and names itself the way the rest of the UI does, a machine reports buffers and a progress meter while a belt reports neither, a rotated tile reports its facing, open floor finds none, looking up in first-person finds no tile, crosshair visibility tracks view mode, a shorter hover sheds the taller one's height on its first frame and its width on the next")
+	# --- A dock's hover keeps its crew line at 1280x720 (issue #173) --------
+	# With the legend open, the band between it and the hotbar is shorter
+	# than the per-dock places grid alone, so shedding the crew line first
+	# never cleared: it went for nothing, even on a fresh hover. The grid is
+	# the dock's first rung now — its two facts are the `places` and
+	# `waiting:` lines — and what is pinned is the acceptance the issue set:
+	# the crew line stays, and the panel stands clear of every plate.
+	var dock_tile := Vector2i(1, -3)
+	Layouts.place(main.sim, "dock", dock_tile, "east")
+	main._rebuild_world()
+	main._read_dock_states()
+	root.size = Vector2i(1280, 720)
+	main._position_hotbar()
+	main._position_crew_panel()
+	main._update_contract_panel()
+	if main._legend_collapsed:
+		main._set_legend_collapsed(false)
+	var dock_pos: Vector2 = main._camera.unproject_position(
+		main._tile_origin(dock_tile.x, dock_tile.y, main.BELT_SURFACE_Y))
+	if not Rect2(Vector2.ZERO, Vector2(root.size)).has_point(dock_pos):
+		_fail("the dock at %s projects off the 1280x720 screen (%s), so its hover proves nothing" % [str(dock_tile), str(dock_pos)])
+		return
+	# Two frames, as a live hover gets: the second is the one past the
+	# Label's width lag.
+	for _frame in range(2):
+		main._pointer_override = dock_pos
+		main._update_hover_tooltip()
+		main._pointer_override = null
+	var dock_text: String = main._hover_label.text
+	if not main._hover_tooltip.visible or not dock_text.begins_with("Dock"):
+		_fail("hovering the dock at %s should show its tooltip, got: %s" % [str(dock_pos), dock_text])
+		return
+	if not dock_text.contains("crew: 1 logistics"):
+		_fail("at 1280x720 with the legend open the dock's hover shed its crew line:\n%s" % dock_text)
+		return
+	if main._hover_places_grid.visible:
+		_fail("at 1280x720 with the legend open the dock's places grid should be the line that yields")
+		return
+	if not dock_text.contains("places") or not dock_text.contains("waiting:"):
+		_fail("the dock's places grid can only go while its two lines still say what it drew:\n%s" % dock_text)
+		return
+	var dock_rect := Rect2(main._hover_tooltip.position, main._panel_draw_size(main._hover_tooltip))
+	if main._hud_overlap_area(dock_rect, main._hud_avoid_rects()) > 0.0:
+		_fail("the dock's yielded hover %s still stands on a HUD plate" % str(dock_rect))
+		return
+	# With room, nothing yields: the grid is back at 1600x900.
+	root.size = Vector2i(1600, 900)
+	main._position_hotbar()
+	main._position_crew_panel()
+	main._update_contract_panel()
+	dock_pos = main._camera.unproject_position(
+		main._tile_origin(dock_tile.x, dock_tile.y, main.BELT_SURFACE_Y))
+	for _frame in range(2):
+		main._pointer_override = dock_pos
+		main._update_hover_tooltip()
+		main._pointer_override = null
+	if not main._hover_places_grid.visible or not main._hover_label.text.contains("crew: 1 logistics"):
+		_fail("at 1600x900 the dock's hover should keep both its places grid and its crew line")
+		return
+
+	print("HOVER_OK:screen-to-tile resolution finds the right machine in both view modes, every placed kind answers through one entry point and names itself the way the rest of the UI does, a machine reports buffers and a progress meter while a belt reports neither, a rotated tile reports its facing, open floor finds none, looking up in first-person finds no tile, crosshair visibility tracks view mode, a shorter hover sheds the taller one's height on its first frame and its width on the next, a dock at 1280x720 yields its places grid and keeps its crew line")
 	quit(0)

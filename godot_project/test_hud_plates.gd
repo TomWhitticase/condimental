@@ -1023,7 +1023,8 @@ func _run_checks() -> void:
 	# At 1280x720 with the legend open, the band between the legend and the
 	# hotbar's strip is shorter than a full machine hover, and no gap beside
 	# the legend is wide enough, so every position covered some HUD. The
-	# hover now sheds its crew line, then its load bar, until one clears.
+	# hover now sheds rungs (a dock's places grid, its crew line, its load
+	# bar) until one clears.
 	# Sized off the band this run actually has rather than off the 235px a
 	# real window measured: what is pinned is the RULE — shed the fewest
 	# rungs that clear, and none at all when the legend is folded or the
