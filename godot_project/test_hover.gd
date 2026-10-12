@@ -390,5 +390,5 @@ func _run_checks() -> void:
 		_fail("at 1600x900 the dock's hover should keep both its places grid and its crew line")
 		return
 
-	print("HOVER_OK:screen-to-tile resolution finds the right machine in both view modes, every placed kind answers through one entry point and names itself the way the rest of the UI does, a machine reports buffers and a progress meter while a belt reports neither, a rotated tile reports its facing, open floor finds none, looking up in first-person finds no tile, crosshair visibility tracks view mode, a shorter hover sheds the taller one's height on its first frame and its width on the next, a dock at 1280x720 yields its places grid and keeps its crew line")
+	print("HOVER_OK: screen-to-tile resolution finds the right machine in both view modes, every placed kind answers through one entry point and names itself the way the rest of the UI does, a machine reports buffers and a progress meter while a belt reports neither, a rotated tile reports its facing, open floor finds none, looking up in first-person finds no tile, crosshair visibility tracks view mode, a shorter hover sheds the taller one's height on its first frame and its width on the next, a dock at 1280x720 yields its places grid and keeps its crew line")
 	quit(0)
