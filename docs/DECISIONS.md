@@ -3479,7 +3479,9 @@ matches what code comments and data files cite.
   at that one window size is filed rather than fudged: the real answer is a
   legend that folds itself or a shorter tooltip, which is a content decision.
   (Taken 2026-09-25, issue #99: the tooltip sheds its `crew:` line and then
-  its load bar — see UI_UX.md §5c.)
+  its load bar — see UI_UX.md §5c. Amended 2026-10-12, issue #173: a dock's
+  places grid now goes first, since at 1280x720 it alone is taller than the
+  band under the legend and the crew line went for nothing.)
 
   **The same lesson, a third time: the configuration panel** (issue #88, folded
   in because it turned out to be this fix and not a separate one). The panel a
