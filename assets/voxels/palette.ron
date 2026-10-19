@@ -459,8 +459,8 @@
         // -> bright sauce from end to end, with nothing between them in
         // this palette because the crusher mills the seed wet and the
         // middle of the chain is a tinted fluid in a pipe — the way
-        // `liquid_paste`/`liquid_mix`/`liquid_ketchup` read darkening the
-        // other. The number was set against the STEEL it sits in (31.0
+        // `liquid_paste`/`liquid_mix`/`liquid_ketchup` step by value
+        // along the other. The number was set against the STEEL it sits in (31.0
         // under `steel`, 72.2 under the `steel_light` rim), not against the
         // market row: a heap inside a bright tote is the adjacency that can
         // swallow it.

@@ -310,8 +310,6 @@ const FLUID_TINTS := {
 	# luma 0.578, 31.4/255 over `vinegar` and 74/255 under `mustard`. It
 	# reads as the story it tells — tomato cut with vinegar and sugar is
 	# paler than the ketchup the vat cooks it down to, 86/255 darker.
-	# Rendered (`--fluid-gallery` at 1600x900, mean luma of each run's sight
-	# windows): 109.2 against `bbq_mix`'s 110.7 before, 155.7 against it now.
 	"ketchup_mix": Color(0.957, 0.486, 0.369),
 	"ketchup": Color(0.77, 0.10, 0.05),
 	# The BBQ branch's three fluids (issue #68). They have no `liquid_*`

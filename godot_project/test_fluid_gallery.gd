@@ -350,7 +350,7 @@ func _run_checks() -> void:
 					"'%s' and '%s' are tinted the same liquid (distance %.3f, of which "
 					% [fluid, other_id, distance]
 					+ "%.3f is summed |dRGB| and %.3f is |dLuma| x %s) — the gallery stands "
-					% [chroma, value, FLUID_TINT_LUMA_WEIGHT * value, FLUID_TINT_LUMA_WEIGHT]
+					% [chroma, FLUID_TINT_LUMA_WEIGHT * value, FLUID_TINT_LUMA_WEIGHT]
 					+ "them in one frame, so two of its runs would be one liquid. Move them "
 					+ "apart in BRIGHTNESS by preference: this camera reads by value, and a "
 					+ "pair separated by hue alone clears the floor while still reading as "
