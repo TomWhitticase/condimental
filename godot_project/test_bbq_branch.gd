@@ -247,8 +247,8 @@ fallback, which reads as water rather than as sauce"
 	# Two fluids a few tiles apart that a player cannot tell apart are the
 	# same bug one step later, so the six colours are also checked for being
 	# six. The threshold is deliberately loose — it refuses a copied-and-
-	# forgotten duplicate, not a deliberate shade pair like ketchup_mix and
-	# ketchup, which sit 0.31 apart.
+	# forgotten duplicate, not a deliberate shade pair like bbq_mix and bbq,
+	# which sit 0.27 apart.
 	var seen: Dictionary = {}
 	for network in networks:
 		var fluid_id := String(network.get("fluid", ""))

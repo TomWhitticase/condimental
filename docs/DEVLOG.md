@@ -266,6 +266,18 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-19 — ketchup mix is a pale coral, apart from BBQ mix by value
+
+Issue #131. The two mixers' outputs, `ketchup_mix` and `bbq_mix`, were 7.7/255
+of tint luma apart and told apart by hue alone, which is #113's defect one
+neighbour over. The value axis below `vinegar` was full, but mustard losing its
+two intermediate fluids on 2026-10-03 had emptied the band above it, so
+`liquid_mix` (and the `ketchup_mix` tint that mirrors it) went from #AF3B27 to
+#F47C5E: 31.4/255 over `vinegar`, and the uncooked mix now reads paler than the
+ketchup it is cooked into. `test_fluid_gallery.gd`'s distance floor followed
+the art up from 0.26 to 0.37, 10% under the new worst pair (`bbq_mix` <->
+`liquid_smoke`, 0.412).
+
 ### 2026-10-12 — a dock's hover keeps its crew line at 1280x720
 
 Issue #173's other half. With the legend open at 1280x720, the band under it
