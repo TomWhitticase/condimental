@@ -187,12 +187,17 @@
         // to own colour. Class `liquid`, not `matte`, because the project
         // owner's review of the rendered scene said these three read as
         // solid painted blocks: the pails' contents ARE a wet surface, and
-        // the gloss is what says so (UI_UX.md §4). They darken and redden
-        // along the chain — thick paste, then paste cut with vinegar, then
-        // the cooked-down classic ketchup red — so the three stages stay
-        // tellable apart on the belt.
+        // the gloss is what says so (UI_UX.md §4). They move along the
+        // chain by VALUE — thick dark paste, then paste cut with vinegar and
+        // sugar into a pale coral, then the cooked-down classic ketchup red —
+        // so the three stages stay tellable apart on the belt and in a pipe.
+        // `liquid_mix` is the pale one, and was lifted from #AF3B27 for
+        // issue #131: as `FLUID_TINTS["ketchup_mix"]` it sat 7.7/255 of luma
+        // from `bbq_mix`, two mid-chain liquids told apart by hue alone. It
+        // now stands in the empty band between `vinegar_amber` and
+        // `mustard_gold`'s tint, 31.4 over the first — see `main.gd`.
         (name: "liquid_paste",   rgb: "#8E2418", class: "liquid"),
-        (name: "liquid_mix",     rgb: "#AF3B27", class: "liquid"),
+        (name: "liquid_mix",     rgb: "#F47C5E", class: "liquid"),
         (name: "liquid_ketchup", rgb: "#C4190E", class: "liquid"),
 
         // --- sugar, the chain's second raw ingredient (the chain-rework
@@ -454,8 +459,8 @@
         // -> bright sauce from end to end, with nothing between them in
         // this palette because the crusher mills the seed wet and the
         // middle of the chain is a tinted fluid in a pipe — the way
-        // `liquid_paste`/`liquid_mix`/`liquid_ketchup` read darkening the
-        // other. The number was set against the STEEL it sits in (31.0
+        // `liquid_paste`/`liquid_mix`/`liquid_ketchup` step by value
+        // along the other. The number was set against the STEEL it sits in (31.0
         // under `steel`, 72.2 under the `steel_light` rim), not against the
         // market row: a heap inside a bright tote is the adjacency that can
         // swallow it.

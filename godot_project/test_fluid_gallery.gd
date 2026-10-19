@@ -91,41 +91,37 @@ const FLUID_TINT_LUMA_WEIGHT := 2.0
 ## reads by, so the metric was blind on the axis that matters and raising it
 ## would only have moved where it was blind.
 ##
-## Measured on the shipped six with the luma term in: the worst pair is now
-## `ketchup_mix` <-> `bbq_mix` at **0.291**, then `bbq_mix` <-> `liquid_smoke`
-## at 0.412 and `vinegar` <-> `liquid_smoke` at 0.452; everything else is
-## 0.45 and up. **0.26 is a 10% margin below the worst pair** — deliberately
-## tight, where the old 0.08's was 46%, because a seventh fluid landing
-## between 0.26 and 0.29 is one a human should look at rather than one a
-## constant should wave through.
-##
-## It was 0.24 below a worst pair of 0.269, which was `bbq_mix` <->
-## `liquid_smoke` — the value collision issue #113 reported. That is fixed
-## rather than tolerated now: `smoke_slate` was lifted from #4D4521 to
-## #706430 in `palette.ron`, taking the pair from 6.2/255 of tint luma to
-## 24.4/255, so the floor could follow the art up. See `main.gd`'s
-## `FLUID_TINTS["liquid_smoke"]` for why the move is a lift and not a
-## darkening.
+## Measured on the shipped seven with the luma term in: the worst pair is
+## `bbq_mix` <-> `liquid_smoke` at **0.412** (24.4/255 of luma), then
+## `vinegar` <-> `liquid_smoke` at 0.452 and `bbq_mix` <-> `bbq` at 0.454;
+## everything else is 0.48 and up. **0.37 is a 10% margin below the worst
+## pair** — deliberately tight, where the old 0.08's was 46%, because a new
+## fluid landing between 0.37 and 0.41 is one a human should look at rather
+## than one a constant should wave through.
 ##
 ## **The floor sitting below a pair a ticket reports as too close is a
-## record that somebody should look, not an endorsement of it.** The pair
-## that inherits that role is `ketchup_mix` <-> `bbq_mix`: 0.291 overall but
-## only 7.7/255 of luma between them, so they are told apart by hue much as
-## the old pair was. Red against brown is a wider hue gap than terracotta
-## against olive and both are mid-chain fluids that never share a frame in
-## the shipped fixtures, which is why this is filed rather than fixed here.
+## record that somebody should look, not an endorsement of it.** It has
+## followed the art up twice, each time because the pair under it was fixed
+## rather than tolerated:
 ##
-## **Re-measured over nine when mustard landed (three stages of it, then),
-## and the floor did not move**: the worst pair stayed `ketchup_mix` <->
-## `bbq_mix` at 0.291. Mustard lost its cook and its two intermediate fluids
-## on 2026-10-03, leaving seven; removing tints cannot shrink the worst gap,
-## so the floor still sits the same margin below the same pair.
+##   * 0.24 below a worst pair of 0.269, `bbq_mix` <-> `liquid_smoke` — the
+##     value collision issue #113 reported. `smoke_slate` was lifted from
+##     #4D4521 to #706430 in `palette.ron`, taking the pair from 6.2/255 of
+##     tint luma to 24.4/255 (see `main.gd`'s `FLUID_TINTS["liquid_smoke"]`
+##     for why that move is a lift and not a darkening).
+##   * 0.26 below a worst pair of 0.291, `ketchup_mix` <-> `bbq_mix` — only
+##     7.7/255 of luma apart, so told apart by hue alone (issue #131). The
+##     value axis below `vinegar` had no room left for a 26/255 gap, but
+##     mustard's lost intermediates (2026-10-03) had emptied the band above
+##     it, so `liquid_mix` went from #AF3B27 to a pale #F47C5E there: that
+##     pair is now 1.504 apart with 72.9/255 of luma, and the floor followed
+##     to the next pair in line.
 ##
 ## `test_bbq_branch.gd` keeps its own, looser 0.08 on plain summed |dRGB|,
 ## and the two are deliberately NOT the same number any more: that one is
 ## documented as a copied-entry catcher over the four runs its fixture
 ## names, this one is a calibrated judgement over every tint the game has.
-const FLUID_TINT_MIN_DISTANCE := 0.26
+const FLUID_TINT_MIN_DISTANCE := 0.37
 
 ## The material class a generator emits for a machine's product mesh
 ## (`machine_product` in `assets/voxels/generators/assets.rs`). Its presence
@@ -354,7 +350,7 @@ func _run_checks() -> void:
 					"'%s' and '%s' are tinted the same liquid (distance %.3f, of which "
 					% [fluid, other_id, distance]
 					+ "%.3f is summed |dRGB| and %.3f is |dLuma| x %s) — the gallery stands "
-					% [chroma, value, FLUID_TINT_LUMA_WEIGHT * value, FLUID_TINT_LUMA_WEIGHT]
+					% [chroma, FLUID_TINT_LUMA_WEIGHT * value, FLUID_TINT_LUMA_WEIGHT]
 					+ "them in one frame, so two of its runs would be one liquid. Move them "
 					+ "apart in BRIGHTNESS by preference: this camera reads by value, and a "
 					+ "pair separated by hue alone clears the floor while still reading as "

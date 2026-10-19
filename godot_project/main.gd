@@ -299,7 +299,18 @@ const FLUID_TINTS := {
 	# chain is that the player can see the product change as it goes down the
 	# line. These match `palette.ron`'s own `liquid_mix` and `liquid_ketchup`
 	# (the pails' colours) so a fluid keeps its identity wherever it appears.
-	"ketchup_mix": Color(0.69, 0.23, 0.15),
+	#
+	# `ketchup_mix` is #F47C5E, a pale coral, LIFTED from #AF3B27 for issue
+	# #131. The old red sat at tint luma 0.304, 7.7/255 from `bbq_mix` at
+	# 0.292: the two mixers' outputs were told apart by hue alone, which is
+	# the axis a lit-and-shadowed bore is least reliable on (#113's defect one
+	# neighbour over). Every slot below `vinegar` was taken, but mustard
+	# losing its two intermediate fluids (2026-10-03) left the band from
+	# `vinegar` (0.454) up to `mustard` (0.868) empty, so the mix moves there:
+	# luma 0.578, 31.4/255 over `vinegar` and 74/255 under `mustard`. It
+	# reads as the story it tells — tomato cut with vinegar and sugar is
+	# paler than the ketchup the vat cooks it down to, 86/255 darker.
+	"ketchup_mix": Color(0.957, 0.486, 0.369),
 	"ketchup": Color(0.77, 0.10, 0.05),
 	# The BBQ branch's three fluids (issue #68). They have no `liquid_*`
 	# entry in `palette.ron` to mirror, and deliberately so — that file
@@ -358,7 +369,8 @@ const FLUID_TINTS := {
 	# needs luma ~0.419 (#796C33), which lands 9.1/255 from `vinegar` — the
 	# same defect against a different neighbour. 0.387 is near the midpoint,
 	# and the pair is no longer a value collision by the measure that
-	# defined one (issue #131 carries the crowding).
+	# defined one. (Issue #131 was the crowding; it was relieved by moving
+	# `ketchup_mix` out of this band above, not by moving this.)
 	"liquid_smoke": Color(0.439, 0.392, 0.188),
 	# --- Mustard's three, and the first branch that BRIGHTENS -------------
 	#
@@ -374,6 +386,8 @@ const FLUID_TINTS := {
 	# band because the fluid gallery measured the other six at `bbq` 97.6 up
 	# to `vinegar` 178.2 out of 255, leaving 178 to the ~237 ceiling of this
 	# hue free; this lands at 235.9 on the frame, 57.7 clear of `vinegar`.
+	# Its nearest neighbour below is `ketchup_mix` since issue #131 moved
+	# that into this band, still 74/255 under it in tint luma.
 	"mustard": Color(0.992, 0.892, 0.270),
 }
 const FLUID_TINT_FALLBACK := Color(0.60, 0.79, 0.86)
