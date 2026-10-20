@@ -25,6 +25,55 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-20: **A pipe run several machines wait on serves them together
+  (issue #93).**
+  Building the BBQ branch onto a running ketchup line cut the ketchup bottler
+  off completely: with the branch placed at tick 10 000 of a running line, it
+  bottled nothing for ~8 000 ticks while the BBQ mixer took every unit the vat
+  made. The issue guessed this was the new pipework priming, and suggested a
+  fill-rate cap on newly placed, empty tiles. Measuring it showed something
+  else. The branch's tap is one pipe. The ketchup run's volume stayed at about
+  2 units throughout. What primes is the BBQ mixer's *outlet* run (20 units of
+  `bbq_mix`), and the mixer drinks at one per 90 ticks against a vat that makes
+  one per 240. The starvation was a race. Equalization pulls every tile of the
+  shared run toward the same pressure, so all of them cross one unit at nearly
+  the same moment. The pass walks `links` in a fixed order, so the same tile
+  crossed first every time, and its machine won every unit. A fill-rate cap on
+  new pipe would not have touched this.
+
+  Options weighed:
+  - Simultaneous (Jacobi) equalization: it would tie symmetric tiles, but
+    machine tick order would then break every tie the same way. It would also
+    need a smaller flow rate to stay conservative at junctions, which moves
+    every pinned fluid timing.
+  - Alternating the pass direction by tick parity: a vat whose period has a
+    fixed parity defeats it, so it is fair only by luck of the content.
+  - Remembering who drew last and alternating: fair, but it is state. Saved, it
+    is a format bump (v9) and a migration of the owner's saves. Unsaved, it
+    breaks `a_saved_factory_comes_back_running_state_identical`'s lockstep.
+  - Chosen: hold the run while any consumer is waiting on it. It is derived
+    from state that is already saved, so it needs no save field and is exactly
+    as deterministic as the tick.
+
+  Measured on the probe above (bottles / 8 per 1000 ticks): ketchup went from
+  0 to 2 while the branch primes, with BBQ also at 2. That is an equal share of
+  the vat's 4.2. Priming costs the same ketchup in total, because the outlet
+  run's 20 units come out of the vat either way. It is now spread over ~30 000
+  ticks at a 17% shortfall instead of 8 000 at 100%, so three missed windows
+  (#55) become a thin margin. Steady state is unchanged: once the BBQ mixer
+  backs up behind its 600-tick vat it is never waiting, and the 3:2 split
+  `the_two_sauces_split_one_vat_three_to_two` pins still holds. That test now
+  primes with the ketchup bottler mothballed and signs the ketchup board, because a
+  shared priming runs past the point where the Corner Shop alone lets the
+  ketchup dock back the line up. It also tops its tanks up with auto-fill:
+  a manual fill every tick bills a part unit as a whole one, which used to run
+  the fixture's vinegar out by ~20 000 ticks.
+
+  Cost accepted: a shared run that is running dry can strand a few units, up
+  to about one per waiting tile, until the next fill or deposit reaches it.
+  A crew refusal is no deadlock. A refused machine's tile still fills, so it
+  stops holding the run, and the others draw past it.
+
 - 2026-10-09: **The modal width sweep also runs in a real window (issue
   #101).**
   The 2026-09-20 record below says headless font metrics are narrower than a
