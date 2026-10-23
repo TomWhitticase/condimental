@@ -162,15 +162,24 @@ func _run_checks() -> void:
 	var rebuild_msec := _msec(warm_start)
 
 	# `_read_world_layout` ON ITS OWN, the first thing a rebuild does and the
-	# subject of issue #3: it re-parses the WHOLE `world_layout_json` (some
-	# 336 KB at this scale) on every place, remove and rotate. Reported as a
-	# share of the rebuild above, because that share is the number the issue
-	# is really about — and because the 40-80 ms it was first quoted at came
-	# off a DEBUG `sim_core`, where the wire is written by an unoptimised
-	# build. Not asserted: it is a fraction of an already-asserted total.
+	# subject of issue #3. It used to re-parse the WHOLE `world_layout_json`
+	# (some 350 KB at this scale) on every place, remove and rotate; it now
+	# parses only the entries whose text changed. So it is timed the way play
+	# pays for it — straight after a rotate, one belt and its neighbours'
+	# links changed — not as a re-read of an unchanged world, which would
+	# time nothing but cache hits. Reported as a share of the rebuild above,
+	# because that share is the number the issue is really about. Not
+	# asserted: it is a fraction of an already-asserted total.
+	var turned: Array = main._placements[floori(main._placements.size() / 2.0)]["tile"]
+	var rotate := JSON.stringify({"type": "rotate", "tile": turned})
+	main.sim.issue_command_json(rotate)
 	var layout_start := Time.get_ticks_usec()
 	main._read_world_layout()
 	var layout_msec := _msec(layout_start)
+	# Three more quarter turns put the belt back as the line needs it.
+	for _turn in range(3):
+		main.sim.issue_command_json(rotate)
+	main._read_world_layout()
 
 	# Run the line so there is product to draw, then measure frames.
 	main.sim.issue_command_json(JSON.stringify({"type": "fill_hopper"}))

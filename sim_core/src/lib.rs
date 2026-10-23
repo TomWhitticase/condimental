@@ -349,6 +349,32 @@ impl SimBridge {
         GString::from(json.as_str())
     }
 
+    /// [`Self::world_layout_json`] with each placement serialized on its
+    /// own: entry `i` is exactly the JSON object `world_layout_json`'s array
+    /// holds at `i`, in the same order.
+    ///
+    /// It exists for the scene's rebuild (issue #3). Parsing the whole
+    /// array is most of what a re-read costs at scale — ~12 ms of
+    /// `JSON.parse_string` for a 1500-tile line, against ~1 ms to write it —
+    /// and a place, remove or rotate leaves nearly every entry
+    /// byte-identical. One string per entry lets `main.gd` keep what it
+    /// parsed last time keyed by that string, and parse only the entries
+    /// that changed. The key is the entry's whole text, so a change the
+    /// cache did not anticipate (a neighbour's links, `crewed` flipping
+    /// factory-wide) is a new key and is parsed — nothing has to say what
+    /// changed.
+    #[func]
+    fn world_layout_entries(&self) -> PackedStringArray {
+        self.world
+            .world_layout()
+            .iter()
+            .map(|placement| {
+                let json = serde_json::to_string(placement).expect("world layout must serialize");
+                GString::from(json.as_str())
+            })
+            .collect()
+    }
+
     /// Every fluid network in the world, JSON-serialized as an **array** of
     /// `sim::FluidSnapshot` — each one's fluid, per-segment volume/pressure,
     /// which machines tap it and which tanks feed it (ARCHITECTURE.md §9
