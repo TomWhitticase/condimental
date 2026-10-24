@@ -281,6 +281,18 @@ everywhere is just new text. A cold read (load, new game) is ~5 ms slower,
 paid once. The read is still whole-world; the remaining ~75% of a warm
 rebuild is node construction, which stays milestone 8's.
 
+### 2026-10-20 — a shared pipe run serves its consumers together
+
+Issue #93, the simulation half of #55. A BBQ branch built onto a running
+ketchup line used to take every unit of ketchup the vat made for ~8 000 ticks,
+and the ketchup bottler made nothing. The cause was not new pipework priming.
+It was a race on the shared run that one tile won every time, decided by link
+order. Now a run is held while any machine on it is waiting for it alone, so
+its consumers start together and the old line keeps half the vat while the
+branch primes (`World::held_networks`). The rule is derived, never saved, so
+there is no save-format change. Steady state and the 3:2 split are unchanged.
+Full record: DECISIONS.md, 2026-10-20.
+
 ### 2026-10-19 — ketchup mix is a pale coral, apart from BBQ mix by value
 
 Issue #131. The two mixers' outputs, `ketchup_mix` and `bbq_mix`, were 7.7/255

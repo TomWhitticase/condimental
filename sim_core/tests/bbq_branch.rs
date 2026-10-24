@@ -197,16 +197,70 @@ fn the_two_sauces_split_one_vat_three_to_two() {
         });
     }
 
-    // Measure a *rate*, over a window that starts well after the branch has
-    // primed its pipes. The first few thousand ticks are spent filling two
-    // new pipe runs, and that priming is ketchup the branch drinks and never
-    // gives back — a cumulative count taken from tick zero reads the
-    // transient, not the ratio.
-    let mut start = BTreeMap::new();
-    for tick in 0..36_000u64 {
-        supply(&mut world);
+    // The tanks top themselves up in whole units. `supply`'s manual fill bills
+    // a part unit as a whole one every tick, which runs the vinegar out long
+    // before a run this long ends.
+    for tank in world.fluid_tank_snapshots() {
+        world.issue_command(PlayerCommand::SetTankAutoFill {
+            tile: tank.tile,
+            enabled: true,
+        });
+    }
+    let fill_hoppers = |world: &mut World| {
+        world.issue_command(PlayerCommand::FillHopper {
+            amount: HOPPER_CAPACITY,
+            tile: None,
+        });
+    };
+
+    // Measure a *rate*, over a window that starts after the branch has primed
+    // its pipes. Priming is ketchup the branch drinks and never gives back,
+    // and since issue #93 the ketchup bottler keeps an equal share while it
+    // happens, so it stretches to some 30 000 ticks — past where the ketchup
+    // dock, shipping to the Corner Shop alone, backs the line up. So the
+    // ketchup bottler is switched off until the BBQ mixer's run is full,
+    // which is the old full-rate priming done on purpose, and the ketchup
+    // board is signed when it comes back on so its dock keeps draining.
+    world.issue_command(PlayerCommand::SetMothballed {
+        tile: KETCHUP_BOTTLER,
+        enabled: true,
+    });
+    let mixed = |world: &World| -> f64 {
+        world
+            .fluid_snapshots()
+            .iter()
+            .filter(|run| run.fluid.as_deref() == Some("bbq_mix"))
+            .map(|run| run.total_volume)
+            .sum()
+    };
+    let mut primed = false;
+    for _ in 0..20_000u64 {
+        fill_hoppers(&mut world);
         world.tick();
-        if tick == 12_000 {
+        if mixed(&world) >= 18.0 {
+            primed = true;
+            break;
+        }
+    }
+    assert!(
+        primed,
+        "the BBQ mixer's run must fill while it has the vat to itself"
+    );
+    world.issue_command(PlayerCommand::SetMothballed {
+        tile: KETCHUP_BOTTLER,
+        enabled: false,
+    });
+    for contract in ["corner_shop", "market_stall"] {
+        world.issue_command(PlayerCommand::SignContract {
+            id: contract.to_string(),
+        });
+    }
+
+    let mut start = BTreeMap::new();
+    for tick in 0..26_000u64 {
+        fill_hoppers(&mut world);
+        world.tick();
+        if tick == 2_000 {
             start.insert("bottled_ketchup", made(&world, "bottled_ketchup"));
             start.insert("bbq_mix", made(&world, "bbq_mix"));
         }
@@ -351,6 +405,7 @@ fn a_bbq_machine_that_runs_dry_keeps_its_own_recipe() {
 }
 
 const KETCHUP_DOCK: (i32, i32) = (26, 0);
+const KETCHUP_BOTTLER: (i32, i32) = (16, 0);
 const BBQ_DOCK: (i32, i32) = (31, -3);
 
 /// The branch run until its ketchup dock holds a few boxes, then with the
@@ -636,5 +691,148 @@ fn two_docks_both_holding_ordered_stock_need_two_heads() {
     assert!(
         !dock_at(&world, KETCHUP_DOCK).understaffed && !dock_at(&world, BBQ_DOCK).understaffed,
         "a second head crews both docks"
+    );
+}
+
+/// **A branch built onto a running line leaves that line a share** (issue
+/// #93).
+///
+/// The BBQ mixer drinks from the run the ketchup bottler already lives on,
+/// and it is the faster of the two, so while the branch fills its own pipes
+/// it wants every unit the vat makes. Both draw from one run whose tiles
+/// cross a whole unit at nearly the same moment, and before #93 the same
+/// tile crossed first every time: the bottler made nothing for the ~8 000
+/// ticks the branch took to prime, which is three missed delivery windows
+/// and a lost contract (#55). Now a run another machine is waiting on serves
+/// nobody until that machine's tile has filled too
+/// (`World::held_networks`), so the two take turns.
+///
+/// Built the way a player builds it — the shipped line first, running, and
+/// then the branch's pieces bought and placed on top. The pieces are
+/// `bbq_branch` less `reference_chain`, so the layout is pinned in one place.
+#[test]
+fn a_branch_built_on_a_running_line_leaves_it_a_share_of_the_vat() {
+    let branch_pieces: Vec<_> = {
+        let full = bbq_branch(recipes(), BUDGET);
+        let shipped: Vec<(i32, i32)> = reference_chain(recipes())
+            .world_layout()
+            .into_iter()
+            .map(|placement| placement.tile)
+            .collect();
+        let hoppers = full.hopper_snapshots();
+        full.world_layout()
+            .into_iter()
+            .filter(|placement| !shipped.contains(&placement.tile))
+            .map(|placement| {
+                let item = hoppers
+                    .iter()
+                    .find(|hopper| hopper.tile == placement.tile)
+                    .map(|hopper| hopper.item.clone());
+                (placement.kind, placement.tile, item, placement.recipe)
+            })
+            .collect()
+    };
+
+    let mut world = sim_core::sim::reference_chain_with_budget(recipes(), BUDGET);
+    sim_core::sim::reference::open_every_gate(&mut world);
+    stock_up(&mut world);
+    staff_up(&mut world);
+    // Whole-unit top-ups, for the reason the 3:2 test gives.
+    let auto_fill_tanks = |world: &mut World| {
+        for tank in world.fluid_tank_snapshots() {
+            world.issue_command(PlayerCommand::SetTankAutoFill {
+                tile: tank.tile,
+                enabled: true,
+            });
+        }
+    };
+    auto_fill_tanks(&mut world);
+    let fills = |world: &World| made(world, "bottled_ketchup");
+    let run = |world: &mut World, ticks: u64| {
+        for _ in 0..ticks {
+            world.issue_command(PlayerCommand::FillHopper {
+                amount: HOPPER_CAPACITY,
+                tile: None,
+            });
+            world.tick();
+        }
+    };
+
+    // The shipped line, primed and running on its own.
+    run(&mut world, 6_000);
+    let before = fills(&world);
+    run(&mut world, 4_000);
+    let alone = fills(&world) - before;
+    assert!(
+        alone > 0,
+        "the shipped line must be bottling before the branch arrives"
+    );
+
+    for (kind, tile, item, recipe) in &branch_pieces {
+        world.issue_command(PlayerCommand::Purchase {
+            kind: kind.clone(),
+            quantity: 1,
+        });
+        world.issue_command(PlayerCommand::Place {
+            kind: kind.clone(),
+            tile: *tile,
+            direction: sim_core::sim::Direction::East,
+            item: item.clone(),
+            recipe: recipe.clone(),
+        });
+        assert!(
+            world.query_tile(*tile).is_some(),
+            "the branch's {kind} must go down at {tile:?}"
+        );
+    }
+    staff_up(&mut world);
+    auto_fill_tanks(&mut world);
+
+    // Twice the window the line was measured over alone, all of it inside
+    // the branch's priming: its mixer's run is still filling at the end.
+    let (ketchup_from, bbq_from) = (fills(&world), made(&world, "bbq_mix"));
+    run(&mut world, 8_000);
+    let shared = fills(&world) - ketchup_from;
+    let bbq = made(&world, "bbq_mix") - bbq_from;
+    assert!(bbq > 0, "the branch must be drawing ketchup");
+    assert!(
+        shared * 2 >= alone,
+        "the ketchup bottler must keep a share of the vat while the branch primes: it bottled \
+         {alone} in 4 000 ticks alone and only {shared} in the 8 000 after the branch went \
+         down, while the branch's mixer drew {bbq} units"
+    );
+}
+
+/// Which runs are held is worked out from the tick's state and never stored
+/// (`World::held_networks`), so a factory saved while its two consumers are
+/// taking turns comes back taking the same turns. Saved mid-priming, when the
+/// shared run is held on most ticks, and run in lockstep with the original.
+#[test]
+fn a_shared_run_saved_mid_turn_comes_back_in_lockstep() {
+    let mut original = branch();
+    for _ in 0..3_000u64 {
+        supply(&mut original);
+        original.tick();
+    }
+    let mut loaded = World::from_save_ron(&original.to_save_ron(), recipes())
+        .expect("the branch's save must load");
+    for step in 0..4_000u64 {
+        supply(&mut original);
+        supply(&mut loaded);
+        original.tick();
+        loaded.tick();
+        if step % 250 == 0 {
+            assert_eq!(
+                loaded.to_save_ron(),
+                original.to_save_ron(),
+                "the loaded branch diverged {} tick(s) after the load",
+                step + 1
+            );
+        }
+    }
+    assert_eq!(loaded.to_save_ron(), original.to_save_ron());
+    assert!(
+        made(&original, "bbq_mix") > 0 && made(&original, "bottled_ketchup") > 0,
+        "both consumers must have drawn from the shared run over the stretch compared"
     );
 }
