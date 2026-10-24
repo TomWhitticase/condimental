@@ -343,7 +343,7 @@ const FIXTURE_NAMES: PackedStringArray = [
 	"pipes", "gallery", "items", "fluid_gallery", "bottleneck", "bbq",
 	"stalled_run", "understaffed", "shortfall", "payday_warning", "full_dock",
 	"unclerked_dock", "warehouse", "split_docks", "mustard", "splitter_modes",
-	"crossing", "splitter_turns",
+	"crossing", "splitter_turns", "bbq_tap",
 ]
 
 ## The fixtures whose whole claim is a factory that is WORKING, and which are
@@ -1210,6 +1210,8 @@ func _build_fixture() -> void:
 				printerr("SCREENSHOT_FAIL: --fixture crossing built no crossing — %s" % crossing_failure)
 				_refuse()
 				return
+		"bbq_tap":
+			Layouts.build_bbq_tap_line(_main.sim)
 		"demo":
 			Layouts.build_demo_line(_main.sim)
 		_:

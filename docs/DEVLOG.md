@@ -266,6 +266,22 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-24 — the build ghost warns before a machine shares a running pipe run
+
+Issue #92. Building the BBQ branch onto a running ketchup line gave no warning
+at any point: the ghost went green, and the first sign was a CONTRACT LOST
+banner thousands of ticks later. Since #93 the two machines on the run take
+turns instead of one starving, but a turn is still a share. On main, with the
+three starter orders signed, the branch halves what the ketchup line bottles
+and two of the three orders are lost within 40 000 ticks. Now the ghost of a
+machine that would draw from a run a placed machine already draws from says
+"▲ shares the Ketchup run with Bottler". The sim decides it
+(`World::placement_fluid_preview`, asked through `placement_fluid_preview_json`
+with the same command the ghost already previews), and its taps come from
+`machine_taps`, the one rule `recompute_topology` now plumbs placed machines
+by, so the warning and the plumbing the click gets cannot disagree.
+`screenshot-scene.sh --fixture bbq_tap --ghost mixer --ghost-at 14,-3` shows it.
+
 ### 2026-10-23 — a rebuild re-parses only the placements that changed
 
 Issue #3. Every place, remove and rotate re-read the world layout by

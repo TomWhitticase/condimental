@@ -1,0 +1,146 @@
+//! `World::placement_fluid_preview` — the build ghost's sharing warning
+//! (issue #92): before a machine is placed, which pipe runs would it draw
+//! from that a placed machine already draws from?
+//!
+//! Since issue #93 two machines on one run take turns rather than one
+//! starving, but turns are still a share. Building the BBQ branch onto a
+//! ketchup line that serves the three starter orders halves what that line
+//! bottles and loses two of the three contracts within 40 000 ticks (measured
+//! on 2026-10-24, the issue's own scenario, on main with #93 in). The player
+//! is told before the click, not by a lost contract thousands of ticks on.
+
+use sim_core::sim::{
+    Direction, PlayerCommand, RecipeRegistry, World, reference_chain, reference_chain_with_budget,
+};
+
+fn recipes() -> RecipeRegistry {
+    RecipeRegistry::from_ron_str(include_str!("../../data/recipes.ron"))
+        .expect("data/recipes.ron must parse")
+}
+
+/// The tile the BBQ branch taps the ketchup run from, and the mixer that
+/// stands on it — `sim::bbq_branch`'s joint 1.
+const BBQ_TAP: (i32, i32) = (14, -1);
+const BBQ_MIXER: (i32, i32) = (14, -3);
+
+fn build(world: &mut World, kind: &str, tile: (i32, i32), recipe: Option<&str>) {
+    world.issue_command(PlayerCommand::Purchase {
+        kind: kind.to_string(),
+        quantity: 1,
+    });
+    world.issue_command(PlayerCommand::Place {
+        kind: kind.to_string(),
+        tile,
+        direction: Direction::East,
+        item: None,
+        recipe: recipe.map(str::to_string),
+    });
+    assert!(
+        world.query_tile(tile).is_some(),
+        "the fixture's {kind} must go down at {tile:?}"
+    );
+}
+
+/// Enough to buy the branch's pieces on top of the shipped line, which
+/// `reference_chain` alone is funded for exactly.
+const BUDGET: u32 = 5_000;
+
+/// The shipped line with the branch's one joint pipe laid, so the next thing
+/// a player places is the mixer that would drink from it.
+fn line_with_the_tap_laid() -> World {
+    let mut world = reference_chain_with_budget(recipes(), BUDGET);
+    build(&mut world, "pipe", BBQ_TAP, None);
+    world
+}
+
+fn tile_of(world: &World, kind: &str) -> (i32, i32) {
+    world
+        .world_layout()
+        .into_iter()
+        .find(|placement| placement.kind == kind)
+        .unwrap_or_else(|| panic!("the reference chain places a {kind}"))
+        .tile
+}
+
+#[test]
+fn a_mixer_placed_on_the_ketchup_run_is_told_it_shares_it_with_the_bottler() {
+    let world = line_with_the_tap_laid();
+    let shared = world.placement_fluid_preview("mixer", BBQ_MIXER, Direction::East);
+    assert_eq!(shared.len(), 1, "one run, the ketchup one: {shared:?}");
+    assert_eq!(shared[0].pipe, BBQ_TAP, "drawn through the joint pipe");
+    assert_eq!(shared[0].fluid.as_deref(), Some("ketchup"));
+    assert_eq!(
+        shared[0].drawn_by,
+        vec!["bottler".to_string()],
+        "the shipped bottler is the machine already living on that run"
+    );
+
+    // And the click gets exactly the plumbing the warning described: the
+    // placed mixer drinks from the run the joint pipe is on.
+    let mut world = world;
+    build(&mut world, "mixer", BBQ_MIXER, Some("bbq_mix"));
+    let run = world
+        .fluid_snapshots()
+        .into_iter()
+        .find(|run| run.segments.iter().any(|s| s.tile == BBQ_TAP))
+        .expect("the joint pipe is on a run");
+    assert_eq!(run.fluid.as_deref(), Some("ketchup"));
+    assert!(
+        world.placement_fluid_preview("mixer", BBQ_MIXER, Direction::East)[0]
+            .drawn_by
+            .contains(&"mixer".to_string()),
+        "once placed, the mixer is itself one of the machines on that run"
+    );
+}
+
+#[test]
+fn a_run_nobody_draws_from_yet_warns_nothing() {
+    // The vat's outlet run before its bottler is placed: the bottler is the
+    // run's first consumer, which is the ordinary way a line is built.
+    let mut world = reference_chain(recipes());
+    let bottler = tile_of(&world, "bottler");
+    world.issue_command(PlayerCommand::Remove { tile: bottler });
+    assert!(world.query_tile(bottler).is_none(), "the bottler is lifted");
+    assert_eq!(
+        world.placement_fluid_preview("bottler", bottler, Direction::East),
+        vec![],
+        "a first consumer shares with nobody"
+    );
+}
+
+#[test]
+fn a_kind_that_draws_no_fluid_or_touches_no_pipe_warns_nothing() {
+    let world = line_with_the_tap_laid();
+    // The packer is a solid-only kind, beside the same joint pipe.
+    assert_eq!(
+        world.placement_fluid_preview("packer", BBQ_MIXER, Direction::East),
+        vec![]
+    );
+    // A mixer well away from any pipe.
+    assert_eq!(
+        world.placement_fluid_preview("mixer", (40, 40), Direction::East),
+        vec![]
+    );
+    // Not a machine at all.
+    assert_eq!(
+        world.placement_fluid_preview("pipe", BBQ_MIXER, Direction::East),
+        vec![]
+    );
+}
+
+#[test]
+fn a_preview_mutates_nothing() {
+    let world = line_with_the_tap_laid();
+    let (revision, save) = (world.revision(), world.to_save_ron());
+    let _ = world.placement_fluid_preview("mixer", BBQ_MIXER, Direction::East);
+    assert_eq!(
+        world.revision(),
+        revision,
+        "a question does not move revision()"
+    );
+    assert_eq!(
+        world.to_save_ron(),
+        save,
+        "and changes nothing a save would see"
+    );
+}

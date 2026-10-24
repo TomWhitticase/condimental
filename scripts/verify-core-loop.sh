@@ -200,6 +200,7 @@ run_godot_script test_contract_board.gd CONTRACT_BOARD_OK "contracts board (C), 
 run_godot_script test_icons.gd ICONS_OK "_icon_for, UI_UX.md §5"
 run_godot_script test_hover.gd HOVER_OK "machine hover tooltips, UI_UX.md §5"
 run_godot_script test_fluids.gd FLUIDS_OK "pipe rendering + fluid hover, milestone 6"
+run_godot_script test_shared_run_warning.gd SHARED_RUN_WARNING_OK "the build ghost warns before a machine shares a running pipe run, issue #92"
 run_godot_script test_machines.gd MACHINES_OK "per-kind machine models, multi-tile footprints, hopper fill"
 run_godot_script test_connections.gd CONNECTIONS_OK "belt-to-building junctions at every facing, retired belt variants gone"
 run_godot_script test_shop_menu.gd SHOP_MENU_OK "build menu grid + purchases, UI_UX.md §5"

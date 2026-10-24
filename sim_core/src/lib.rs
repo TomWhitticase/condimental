@@ -280,6 +280,32 @@ impl SimBridge {
         GString::from(json.as_str())
     }
 
+    /// Which pipe runs a `place` command would draw from that a placed
+    /// machine already draws from — the build ghost's sharing warning (issue
+    /// #92). Takes exactly what `preview_command_json` takes, so the ghost
+    /// asks both questions of one dictionary; changes nothing. JSON array of
+    /// `sim::SharedRunPreview`:
+    ///
+    /// ```json
+    /// [{"pipe": [13, 1], "fluid": "ketchup", "drawn_by": ["bottler"]}]
+    /// ```
+    ///
+    /// `[]` for anything but a `place`, and for malformed JSON: no warning.
+    #[func]
+    fn placement_fluid_preview_json(&self, command_json: GString) -> GString {
+        let shared = match sim::command_from_json(&command_json.to_string()) {
+            Some(sim::PlayerCommand::Place {
+                kind,
+                tile,
+                direction,
+                ..
+            }) => self.world.placement_fluid_preview(&kind, tile, direction),
+            _ => Vec::new(),
+        };
+        let json = serde_json::to_string(&shared).expect("SharedRunPreview must serialize");
+        GString::from(json.as_str())
+    }
+
     /// Would `command_json` succeed if issued now, and what would its tile
     /// become? Takes exactly what `issue_command_json` takes and changes
     /// nothing — `sim::World::preview_command`, which asks the same rule

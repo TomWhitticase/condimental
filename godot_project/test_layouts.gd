@@ -1523,6 +1523,19 @@ static func unclerked_dock_is_silent(sim) -> bool:
 ## unpaid) are the ticket's own example wording, so this fixture is what
 ## makes that sentence literally true rather than merely plausible. Placed,
 ## not empty, so the panel's WHY line has something to say too.
+## THE BBQ BRANCH'S FIRST STEP (issue #92) — the fixture
+## `screenshot-scene.sh --fixture bbq_tap --ghost mixer --ghost-at 14,-3`
+## photographs: the shipped line with the branch's joint pipe laid at
+## (14, -1) on top of the ketchup run, and one mixer bought and not placed.
+## The mixer ghost held where `build_bbq_branch` puts it reads the sharing
+## warning, because the bottler already draws from that run.
+static func build_bbq_tap_line(sim) -> void:
+	build_reference_line(sim)
+	fund(sim, 5000)
+	place(sim, "pipe", Vector2i(14, -1), "east")
+	sim.issue_command_json(JSON.stringify({"type": "purchase", "kind": "mixer"}))
+
+
 static func build_underfunded_line(sim) -> void:
 	build_reference_line(sim)
 	fund(sim, 8)

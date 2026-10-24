@@ -77,5 +77,6 @@ pub use world::{
     DockSnapshot, FluidSnapshot, FluidTankSnapshot, FluidTapSnapshot, HopperSnapshot, LinkInput,
     LinkKind, LinkOutput, Links, MachineLoadEntry, MachineLoadSnapshot, MachineSnapshot, PIPE_KIND,
     PipeConnection, PipeLinks, PipeSnapshot, PlacementSnapshot, PlayerCommand, PreviewResult,
-    SpendPreview, SplitterSnapshot, Stall, StallKind, TileSnapshot, World, command_from_json,
+    SharedRunPreview, SpendPreview, SplitterSnapshot, Stall, StallKind, TileSnapshot, World,
+    command_from_json,
 };

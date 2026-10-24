@@ -2327,6 +2327,26 @@ pub struct PlacementSnapshot {
 /// the panel has to *say why* — "this £420 leaves you £1 180 against a
 /// £1 600 payday" — and a panel that had only `warn` would have to
 /// re-derive the rest, which is the one thing GDScript may not do.
+/// One run a machine not yet placed would draw from that a placed machine
+/// already draws from — [`World::placement_fluid_preview`]'s answer, and
+/// the ghost's warning (issue #92).
+///
+/// Since issue #93 such machines take turns on the run rather than one of
+/// them starving, but that is still a SHARE: whatever the run carries is
+/// now split between more mouths, and a line that was selling all of it
+/// sells less. That is what the player is told before the click, rather
+/// than learning it from a lost contract thousands of ticks later.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SharedRunPreview {
+    /// The pipe tile the new machine would draw from.
+    pub pipe: TileCoord,
+    /// What the run carries now — `None` while nothing has named it.
+    pub fluid: Option<FluidId>,
+    /// The kind of every placed machine already drawing from it, in tile
+    /// order, one entry per machine.
+    pub drawn_by: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct SpendPreview {
     /// Whether this command moves money at all, now or at the next payday.
@@ -2475,6 +2495,10 @@ struct Topology {
     /// Which network and which segment each pipe tile is, so a tile query
     /// doesn't have to search every network.
     pipe_index: BTreeMap<TileCoord, (usize, usize)>,
+    /// Every pipe tile's run direction and body — what the open-sides mask
+    /// ([`pipe_open_toward`]) is read off, kept so a question asked between
+    /// rebuilds ([`World::placement_fluid_preview`]) applies the same mask.
+    pipe_sides: BTreeMap<TileCoord, (Direction, BodyKind)>,
     /// `(machine, network index, segment index)` for every fluid-consuming
     /// machine that touches a pipe — the network it **draws** from.
     machine_taps: Vec<(Entity, usize, usize)>,
@@ -3288,6 +3312,20 @@ impl World {
     /// are infrastructure rather than machines (see [`BELT_KIND`]) — and
     /// `None` for a kind that is neither, which is what makes an unknown
     /// kind an unplaceable one.
+    /// Whether `kind` draws a fluid and whether it deposits one, under ANY of
+    /// its recipes: `(draws, deposits)`. A property of the *kind*, not of
+    /// whichever recipe a machine is running, so a machine gets its taps
+    /// whatever it was told to make — switching recipe never changes which
+    /// runs it touches, only what [`resolve_network_fluids`] names them.
+    fn kind_plumbs(&self, kind: &str) -> (bool, bool) {
+        let (mut draws, mut deposits) = (false, false);
+        for recipe in self.recipes.for_machine(kind) {
+            draws |= !recipe.fluid_inputs.is_empty();
+            deposits |= !recipe.fluid_outputs.is_empty();
+        }
+        (draws, deposits)
+    }
+
     fn footprint_for(&self, kind: &str) -> Option<Footprint> {
         if kind == BELT_KIND || kind == PIPE_KIND || kind == CROSSING_KIND {
             return Some(Footprint::ONE_BY_ONE);
@@ -4342,6 +4380,10 @@ impl World {
                 )
             })
             .collect();
+        topology.pipe_sides = pipe_tiles
+            .iter()
+            .map(|(&tile, &(_, _, direction, body))| (tile, (direction, body)))
+            .collect();
         // Whether the pipe on `tile` is open on `side`; `false` for a tile
         // with no pipe on it at all.
         let opens = |tile: TileCoord, side: Direction| {
@@ -5301,6 +5343,61 @@ impl World {
     /// does not warn: the economy would refuse it, so there is no consequence
     /// to confirm (see [`SpendPreview::affordable`]). It still reports the
     /// shortfall it finds, because that is true — it simply is not its cause.
+    /// **Issue #92's question, asked before the click:** would a `kind`
+    /// placed at `tile` facing `direction` draw from a pipe run some placed
+    /// machine already draws from? One entry per such run, in the order the
+    /// placement's taps would be found; empty for a kind that draws no fluid,
+    /// a footprint touching no pipe, or a run nobody draws from yet (a vat's
+    /// outlet before its bottler is placed is the commonest).
+    ///
+    /// The taps are [`machine_taps`]'s, the one rule `recompute_topology`
+    /// plumbs placed machines by, so the warning and the plumbing the click
+    /// then gets cannot disagree. Like [`Self::spend_preview`] it is a
+    /// question: it mutates nothing and does not move [`Self::revision`].
+    /// It does not judge whether the placement is legal — the ghost already
+    /// asks [`Self::preview_command`] that.
+    pub fn placement_fluid_preview(
+        &self,
+        kind: &str,
+        tile: TileCoord,
+        direction: Direction,
+    ) -> Vec<SharedRunPreview> {
+        let Some(footprint) = self.machines.footprint_of(kind) else {
+            return Vec::new();
+        };
+        let sides = &self.topology.pipe_sides;
+        let opens = |tile: TileCoord, side: Direction| {
+            sides
+                .get(&tile)
+                .is_some_and(|&(direction, body)| pipe_open_toward(body, direction, side))
+        };
+        let taps = machine_taps(
+            &footprint,
+            tile,
+            direction,
+            self.kind_plumbs(kind),
+            &opens,
+            &self.topology.pipe_index,
+        );
+        taps.inputs
+            .into_iter()
+            .filter_map(|(_, pipe, (network, _))| {
+                let drawn_by: Vec<String> = self
+                    .topology
+                    .machine_taps
+                    .iter()
+                    .filter(|&&(_, drawn, _)| drawn == network)
+                    .map(|&(machine, _, _)| self.placement_of(machine).kind)
+                    .collect();
+                (!drawn_by.is_empty()).then(|| SharedRunPreview {
+                    pipe,
+                    fluid: self.topology.networks[network].fluid.clone(),
+                    drawn_by,
+                })
+            })
+            .collect()
+    }
+
     pub fn spend_preview(&self, cmd: Option<&PlayerCommand>) -> SpendPreview {
         let money = self.economy.money;
         let next_bill = self.staff.next_bill();
@@ -8050,6 +8147,78 @@ fn is_belt_like(body: BodyKind) -> bool {
 /// turns the pipe axis with it.
 pub(super) fn crossing_pipe_direction(belt: Direction) -> Direction {
     belt.rotate_cw()
+}
+
+/// Where a machine standing on a footprint is plumbed: the one run it could
+/// deposit into and every run it could draw from. `pipe_index` entries, so a
+/// network and the segment the machine touches.
+struct MachineTaps {
+    /// The pipe tile off the outlet face, and its index.
+    output: Option<(TileCoord, (usize, usize))>,
+    /// One entry per *network*, in the footprint's deterministic tile order:
+    /// the side stepped from the footprint, the pipe tile, and its index.
+    inputs: Vec<(Direction, TileCoord, (usize, usize))>,
+}
+
+/// **The tap rule**, written once: [`World::recompute_topology`] plumbs every
+/// placed machine through it, and [`World::placement_fluid_preview`] asks it
+/// about a machine that is not placed yet, so the warning a ghost shows and
+/// the taps the placement then gets cannot disagree (issue #92).
+///
+/// `plumbs` is `(draws, deposits)` — [`World::kind_plumbs`], a property of
+/// the KIND. `opens` is the open-sides mask over the placed pipe.
+///
+/// The outlet pipe stands off the outlet face, so from the pipe the machine
+/// is back the way the machine points — the side the pipe has to be open on.
+/// The inputs are every network touching the footprint, not just the first:
+/// a recipe may draw several fluids, and which tap supplies which is matched
+/// by fluid id in `Machine::tick`. One entry per *network*, so the taps a
+/// machine is handed are pairwise distinct and can be borrowed mutably all at
+/// once. A crossing's pipe is closed across the belt, so a machine beside it
+/// on that side is not plumbed into it; and a machine never draws from the
+/// run it fills — that is not plumbing, it is a machine feeding itself, and
+/// it is why a loop of pipe wrapped around one machine reads as its outlet.
+fn machine_taps(
+    footprint: &Footprint,
+    origin: TileCoord,
+    direction: Direction,
+    (draws, deposits): (bool, bool),
+    opens: &impl Fn(TileCoord, Direction) -> bool,
+    pipe_index: &BTreeMap<TileCoord, (usize, usize)>,
+) -> MachineTaps {
+    let output = if deposits {
+        footprint
+            .outlet_neighbours(origin, direction)
+            .into_iter()
+            .filter(|&tile| opens(tile, direction.opposite()))
+            .find_map(|tile| pipe_index.get(&tile).map(|&index| (tile, index)))
+    } else {
+        None
+    };
+    let output_network = output.map(|(_, (network, _))| network);
+    let mut inputs: Vec<(Direction, TileCoord, (usize, usize))> = Vec::new();
+    if draws {
+        let touching = footprint
+            .tiles_facing(origin, direction)
+            .into_iter()
+            .flat_map(|tile| Direction::ALL.map(|dir| (dir, dir.step(tile))))
+            .filter(|&(dir, neighbour)| opens(neighbour, dir.opposite()))
+            .filter_map(|(dir, neighbour)| {
+                pipe_index
+                    .get(&neighbour)
+                    .map(|&index| (dir, neighbour, index))
+            })
+            .filter(|&(_, _, (network, _))| Some(network) != output_network);
+        for tap in touching {
+            if !inputs
+                .iter()
+                .any(|&(_, _, (network, _))| network == tap.2.0)
+            {
+                inputs.push(tap);
+            }
+        }
+    }
+    MachineTaps { output, inputs }
 }
 
 /// **The open-sides mask** (`docs/BELT_PIPE_CROSSING_PLAN.md`): whether a
