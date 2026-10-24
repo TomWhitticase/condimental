@@ -275,7 +275,9 @@ turns instead of one starving, but a turn is still a share. On main, with the
 three starter orders signed, the branch halves what the ketchup line bottles
 and two of the three orders are lost within 40 000 ticks. Now the ghost of a
 machine that would draw from a run a placed machine already draws from says
-"▲ shares the Ketchup run with Bottler". The sim decides it
+"▲ shares the Ketchup run with Bottler", and a pipe that would join placed
+machines on one run (the branch's joint, laid after its mixer) says
+"▲ joins Bottler, Mixer on the Ketchup run". The sim decides it
 (`World::placement_fluid_preview`, asked through `placement_fluid_preview_json`
 with the same command the ghost already previews), and its taps come from
 `machine_taps`, the one rule `recompute_topology` now plumbs placed machines

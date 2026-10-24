@@ -16805,7 +16805,8 @@ func _placement_prompt_text() -> String:
 			kind_name, "over" if _build_kind == PIPE_KIND else "under", _kind_display_name(other)
 		]
 	return "✔ PLACE  %s  ·  facing %s\nclick to build    %d left to place\n%s%s\nR: rotate    ESC: cancel%s" % [
-		kind_name, _build_direction, owned, _shared_runs_text(_ghost_shared_runs), _auto_buy_hint_text(),
+		kind_name, _build_direction, owned, _shared_runs_text(_ghost_shared_runs, _build_kind == PIPE_KIND),
+		_auto_buy_hint_text(),
 		contents_hint
 	]
 
@@ -16817,18 +16818,21 @@ func _placement_prompt_text() -> String:
 ## the machines on such a run take turns rather than one starving, so the
 ## sentence is about a SHARE — the line already living on the run will get
 ## less of it — which is what a lost contract later would otherwise teach.
-func _shared_runs_text(shared_runs: Array) -> String:
+func _shared_runs_text(shared_runs: Array, joining := false) -> String:
 	var lines := ""
 	for run in shared_runs:
-		lines += "%s\n" % _shared_run_text(run)
+		lines += "%s\n" % _shared_run_text(run, joining)
 	return lines
 
 
-## One shared run, worded: "▲ shares the Ketchup run with Bottler". Several
-## machines of one kind read as a count ("2 × Bottler"), distinct kinds in
-## the order the wire lists them; a run nothing has named yet is "an unnamed
-## run" rather than a guessed fluid.
-func _shared_run_text(run: Dictionary) -> String:
+## One shared run, worded: "▲ shares the Ketchup run with Bottler" for a
+## machine ghost, which is the new mouth; "▲ joins Bottler, Mixer on the
+## Ketchup run" for a pipe ghost (`joining`), which adds no machine but puts
+## placed ones on one run — the BBQ branch's joint, laid after its mixer.
+## Several machines of one kind read as a count ("2 × Bottler"), distinct
+## kinds in the order the wire lists them; a run nothing has named yet is
+## "an unnamed run" rather than a guessed fluid.
+func _shared_run_text(run: Dictionary, joining := false) -> String:
 	var counts := {}
 	var order: Array[String] = []
 	for kind in run.get("drawn_by", []):
@@ -16846,6 +16850,8 @@ func _shared_run_text(run: Dictionary) -> String:
 		"the %s run" % _item_display_name(String(fluid)) if fluid != null and String(fluid) != ""
 		else "an unnamed run"
 	)
+	if joining:
+		return "▲ joins %s on %s" % [", ".join(names), subject]
 	return "▲ shares %s with %s" % [subject, ", ".join(names)]
 
 

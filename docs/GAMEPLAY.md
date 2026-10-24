@@ -204,7 +204,10 @@ built now: a shared run serves its consumers in turns (issue #93,
 placed machine already draws from says so before the click — "▲ shares the
 Ketchup run with Bottler" (issue #92, 2026-10-24, `World::placement_fluid_preview`).
 Turns are still a share: the branch on a line serving all three starter
-orders halves what that line bottles. The measured table and the protocol behind
+orders halves what that line bottles (measured 2026-10-24: orders signed at
+tick 6 000 of a running line, the branch built 10 000 ticks later, then
+40 000 ticks run — 1320 bottles and three orders kept without it, 656 and
+one with it). The measured table and the protocol behind
 it are in `data/unlocks.ron`'s comment and the full record is in
 `docs/DECISIONS.md`.
 

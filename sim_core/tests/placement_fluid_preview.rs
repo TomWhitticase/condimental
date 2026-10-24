@@ -144,3 +144,59 @@ fn a_preview_mutates_nothing() {
         "and changes nothing a save would see"
     );
 }
+
+/// **The issue's own build order** (`sim::bbq_branch`'s plan): the mixer
+/// goes down first, touching no pipe, and then the joint pipe joins it to the
+/// run the bottler drinks from. Neither machine is placed by the second click,
+/// so it is the PIPE's ghost that has to say what the click does.
+#[test]
+fn the_pipe_that_joins_a_placed_mixer_to_the_bottler_s_run_is_warned() {
+    let mut world = reference_chain_with_budget(recipes(), BUDGET);
+    assert_eq!(
+        world.placement_fluid_preview("mixer", BBQ_MIXER, Direction::East),
+        vec![],
+        "the mixer, placed first, touches no pipe yet"
+    );
+    build(&mut world, "mixer", BBQ_MIXER, Some("bbq_mix"));
+
+    let shared = world.placement_fluid_preview("pipe", BBQ_TAP, Direction::East);
+    assert_eq!(
+        shared.len(),
+        1,
+        "the joint makes one shared run: {shared:?}"
+    );
+    assert_eq!(shared[0].pipe, BBQ_TAP);
+    assert_eq!(shared[0].fluid.as_deref(), Some("ketchup"));
+    let mut drawn_by = shared[0].drawn_by.clone();
+    drawn_by.sort();
+    assert_eq!(
+        drawn_by,
+        vec!["bottler".to_string(), "mixer".to_string()],
+        "both machines the joined run would serve"
+    );
+
+    // And the click does exactly that: both now draw from one run.
+    build(&mut world, "pipe", BBQ_TAP, None);
+    assert_eq!(
+        world.placement_fluid_preview("pipe", BBQ_TAP, Direction::East),
+        vec![],
+        "a tile that is already laid is refused as occupied, and warns nothing"
+    );
+    let shared_now = world.placement_fluid_preview("mixer", (14, -6), Direction::East);
+    assert!(
+        shared_now.is_empty(),
+        "nothing is near (14, -6): {shared_now:?}"
+    );
+}
+
+#[test]
+fn a_pipe_that_extends_a_run_without_adding_a_consumer_warns_nothing() {
+    let world = line_with_the_tap_laid();
+    // One tile further west of the joint, along the empty ground above the
+    // ketchup run: it lengthens the run and touches no machine.
+    assert_eq!(
+        world.placement_fluid_preview("pipe", (13, -1), Direction::East),
+        vec![],
+        "the bottler alone still drinks from it"
+    );
+}

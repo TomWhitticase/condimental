@@ -821,6 +821,14 @@ one-line larder strip that used to sit above the sockets.
    font's ○ ■ ✕ came out at three different sizes, and a drawn shape fills
    the word's cap height in every mode. The tab stands flush on the plate's
    top rule; it shares the name flyout's row, so the column is no taller.
+5. **The PLACE prompt says when a click shares a pipe run** (issue #92,
+   2026-10-24): a machine ghost that would draw from a run a placed machine
+   already draws from reads "▲ shares the Ketchup run with Bottler", and a
+   pipe ghost that would put placed machines on one run reads "▲ joins
+   Bottler, Mixer on the Ketchup run". The line stands between the click line
+   and the SHIFT line, a glyph and words rather than colour. The SIM decides
+   it (`placement_fluid_preview_json`, asked of the command the ghost
+   already previews); the prompt only words the answer.
 
 Borrowed patterns: a selector bigger than its slot and a fading name flyout
 (Minecraft); a framed hover spec sheet with kind, count, price and both verbs

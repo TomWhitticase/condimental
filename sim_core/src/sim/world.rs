@@ -2314,19 +2314,6 @@ pub struct PlacementSnapshot {
     pub links: Option<Links>,
 }
 
-/// What a spend would do to the next payday — the answer
-/// [`World::spend_preview`] gives, and the whole of what the confirmation
-/// panel draws (`docs/UI_UX.md` §2b point 40).
-///
-/// Every money field is `f64` because this struct only ever crosses the
-/// wire; the arithmetic behind it is [`Money`] throughout (ARCHITECTURE.md
-/// §3.9 — floats at the presentation boundary, one-way). The bills and
-/// shortfalls stay `u32`, the units [`StaffPools`] already speaks.
-///
-/// It carries both sides of the comparison, not just the verdict, because
-/// the panel has to *say why* — "this £420 leaves you £1 180 against a
-/// £1 600 payday" — and a panel that had only `warn` would have to
-/// re-derive the rest, which is the one thing GDScript may not do.
 /// One run a machine not yet placed would draw from that a placed machine
 /// already draws from — [`World::placement_fluid_preview`]'s answer, and
 /// the ghost's warning (issue #92).
@@ -2342,11 +2329,27 @@ pub struct SharedRunPreview {
     pub pipe: TileCoord,
     /// What the run carries now — `None` while nothing has named it.
     pub fluid: Option<FluidId>,
-    /// The kind of every placed machine already drawing from it, in tile
-    /// order, one entry per machine.
+    /// The kind of every placed machine that would be drawing from it beside
+    /// another, in tile order, one entry per machine. For a machine ghost
+    /// that is the machines already on the run (the ghost is the other); for
+    /// a pipe ghost, which joins machines that are each placed already, it
+    /// is every machine the joined run would serve.
     pub drawn_by: Vec<String>,
 }
 
+/// What a spend would do to the next payday — the answer
+/// [`World::spend_preview`] gives, and the whole of what the confirmation
+/// panel draws (`docs/UI_UX.md` §2b point 40).
+///
+/// Every money field is `f64` because this struct only ever crosses the
+/// wire; the arithmetic behind it is [`Money`] throughout (ARCHITECTURE.md
+/// §3.9 — floats at the presentation boundary, one-way). The bills and
+/// shortfalls stay `u32`, the units [`StaffPools`] already speaks.
+///
+/// It carries both sides of the comparison, not just the verdict, because
+/// the panel has to *say why* — "this £420 leaves you £1 180 against a
+/// £1 600 payday" — and a panel that had only `warn` would have to
+/// re-derive the rest, which is the one thing GDScript may not do.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct SpendPreview {
     /// Whether this command moves money at all, now or at the next payday.
@@ -3307,11 +3310,6 @@ impl World {
     // Placement
     // -----------------------------------------------------------------
 
-    /// The footprint a kind is placed with: `data/machines.ron`'s for
-    /// anything that file defines, one tile for the belt and the pipe, which
-    /// are infrastructure rather than machines (see [`BELT_KIND`]) — and
-    /// `None` for a kind that is neither, which is what makes an unknown
-    /// kind an unplaceable one.
     /// Whether `kind` draws a fluid and whether it deposits one, under ANY of
     /// its recipes: `(draws, deposits)`. A property of the *kind*, not of
     /// whichever recipe a machine is running, so a machine gets its taps
@@ -3326,6 +3324,11 @@ impl World {
         (draws, deposits)
     }
 
+    /// The footprint a kind is placed with: `data/machines.ron`'s for
+    /// anything that file defines, one tile for the belt and the pipe, which
+    /// are infrastructure rather than machines (see [`BELT_KIND`]) — and
+    /// `None` for a kind that is neither, which is what makes an unknown
+    /// kind an unplaceable one.
     fn footprint_for(&self, kind: &str) -> Option<Footprint> {
         if kind == BELT_KIND || kind == PIPE_KIND || kind == CROSSING_KIND {
             return Some(Footprint::ONE_BY_ONE);
@@ -3501,6 +3504,27 @@ impl World {
         item: Option<&str>,
         recipe: Option<&str>,
     ) -> Result<PlacePlan, PlaceRefusal> {
+        let plan = self.plan_place_on_ground(kind, tile, direction, item, recipe)?;
+        if self.shop.owned.count(kind) == 0 {
+            return Err(PlaceRefusal::NoneOwned);
+        }
+        Ok(plan)
+    }
+
+    /// Every rule of [`Self::plan_place`] except ownership: what a `Place`
+    /// would build on this ground, whether or not one is in hand. The
+    /// ownership check is last there and depends on nothing this decides, so
+    /// this is the same plan, not a second copy of it —
+    /// [`Self::pipe_join_preview`] asks it so a ghost can say what laying a
+    /// pipe would join before the player has bought the pipe.
+    fn plan_place_on_ground(
+        &self,
+        kind: &str,
+        tile: TileCoord,
+        direction: Direction,
+        item: Option<&str>,
+        recipe: Option<&str>,
+    ) -> Result<PlacePlan, PlaceRefusal> {
         if !self.can_construct(kind) {
             return Err(PlaceRefusal::NotBuildable);
         }
@@ -3547,9 +3571,6 @@ impl World {
                 machine_recipe,
             },
         };
-        if self.shop.owned.count(kind) == 0 {
-            return Err(PlaceRefusal::NoneOwned);
-        }
         Ok(plan)
     }
 
@@ -5311,43 +5332,17 @@ impl World {
         body.try_absorb(&mut segment)
     }
 
-    /// What a command would do to the **next payday**, before it is issued
-    /// (`docs/GAMEPLAY.md` §7). A read-only pass over `&self`: it never
-    /// mutates, never bumps [`Self::revision`], and is not a
-    /// mutate-then-rollback.
-    ///
-    /// This exists because every spend in the game is *valid* right up to
-    /// the moment it starves the wage bill, and the consequence arrives a
-    /// thousand ticks later at the payday, by which time the belt is laid.
-    /// Presentation asks this first and puts the answer in front of the
-    /// player; the rule lives here, so GDScript decides nothing — it reads
-    /// [`SpendPreview::warn`] (`godot_project/CLAUDE.md`'s one rule).
-    ///
-    /// **It prices by calling the very functions the command arms call** —
-    /// [`super::shop::Shop::cost_of`],
-    /// [`Self::stock_room_for`] then
-    /// [`super::ingredients::Ingredients::cost_of`], the board offer's own
-    /// `price`, and [`StaffPools::next_bill`] against the category's wage.
-    /// A second copy of a price rule here would drift from the arm that
-    /// takes the money, and the drift would be invisible: both numbers
-    /// would look plausible.
-    ///
-    /// A command that costs nothing answers `spends: false` and zeroes
-    /// rather than erroring, so a caller may preview anything. `None` — the
-    /// wire handed a string that did not parse — takes the same arm, because
-    /// "no command" and "a free command" have the same answer and a second
-    /// path for the first would be a second place to keep it correct.
-    ///
-    /// A command the balance **cannot cover** answers `affordable: false` and
-    /// does not warn: the economy would refuse it, so there is no consequence
-    /// to confirm (see [`SpendPreview::affordable`]). It still reports the
-    /// shortfall it finds, because that is true — it simply is not its cause.
     /// **Issue #92's question, asked before the click:** would a `kind`
     /// placed at `tile` facing `direction` draw from a pipe run some placed
     /// machine already draws from? One entry per such run, in the order the
     /// placement's taps would be found; empty for a kind that draws no fluid,
     /// a footprint touching no pipe, or a run nobody draws from yet (a vat's
     /// outlet before its bottler is placed is the commonest).
+    ///
+    /// **A pipe is asked too**, because the order a player builds in is
+    /// theirs: the BBQ branch is drawn mixer first and joint pipe second
+    /// (`sim::bbq_branch`), and then it is the PIPE whose click puts two
+    /// machines on one run. See [`Self::pipe_join_preview`].
     ///
     /// The taps are [`machine_taps`]'s, the one rule `recompute_topology`
     /// plumbs placed machines by, so the warning and the plumbing the click
@@ -5361,6 +5356,9 @@ impl World {
         tile: TileCoord,
         direction: Direction,
     ) -> Vec<SharedRunPreview> {
+        if kind == PIPE_KIND {
+            return self.pipe_join_preview(tile, direction);
+        }
         let Some(footprint) = self.machines.footprint_of(kind) else {
             return Vec::new();
         };
@@ -5397,6 +5395,142 @@ impl World {
             .collect()
     }
 
+    /// [`Self::placement_fluid_preview`] for a PIPE at `tile`: would laying
+    /// it put two or more placed machines on one run that were not on one
+    /// run before? At most one entry, for the run the new tile would make.
+    ///
+    /// Answered by the tap rule itself rather than a second copy of it: the
+    /// new tile and every run it would join are taken as one merged run, and
+    /// [`machine_taps`] is asked, for each machine that drew from one of
+    /// those runs or stands beside the new tile, whether it would draw from
+    /// the merged one. That keeps every exception the rule has — a machine
+    /// never draws from the run it fills, a crossing is closed across its
+    /// belt — without restating any of them here. Whether the tile becomes a
+    /// plain pipe or a crossing is [`Self::plan_place_on_ground`]'s answer,
+    /// the plan the click acts on; ground it refuses previews nothing.
+    /// Ownership is not asked: the ghost says "none owned" on its own.
+    fn pipe_join_preview(&self, tile: TileCoord, direction: Direction) -> Vec<SharedRunPreview> {
+        let body = match self.plan_place_on_ground(PIPE_KIND, tile, direction, None, None) {
+            Ok(PlacePlan::Crossing { .. }) => BodyKind::Crossing,
+            Ok(PlacePlan::Fresh { .. }) => BodyKind::Pipe,
+            Err(_) => return Vec::new(),
+        };
+        let sides = &self.topology.pipe_sides;
+        let opens = |at: TileCoord, side: Direction| {
+            if at == tile {
+                return pipe_open_toward(body, direction, side);
+            }
+            sides
+                .get(&at)
+                .is_some_and(|&(direction, body)| pipe_open_toward(body, direction, side))
+        };
+        // The runs the new tile joins: a neighbour pipe open toward it, on a
+        // side the new tile is open on — the adjacency rule, from both ends.
+        let joined: BTreeSet<usize> = Direction::ALL
+            .into_iter()
+            .filter(|&side| opens(tile, side) && opens(side.step(tile), side.opposite()))
+            .filter_map(|side| self.topology.pipe_index.get(&side.step(tile)))
+            .map(|&(network, _)| network)
+            .collect();
+        const MERGED: usize = usize::MAX;
+        let mut index: BTreeMap<TileCoord, (usize, usize)> = self
+            .topology
+            .pipe_index
+            .iter()
+            .map(|(&at, &(network, segment))| {
+                let network = if joined.contains(&network) {
+                    MERGED
+                } else {
+                    network
+                };
+                (at, (network, segment))
+            })
+            .collect();
+        index.insert(tile, (MERGED, 0));
+
+        let drew_from = |machine: Entity, network: usize| {
+            self.topology
+                .machine_taps
+                .iter()
+                .any(|&(m, n, _)| m == machine && n == network)
+        };
+        let beside: BTreeSet<Entity> = Direction::ALL
+            .into_iter()
+            .filter_map(|side| self.topology.grid.get(&side.step(tile)).copied())
+            .collect();
+        let drawers: Vec<Entity> = self
+            .topology
+            .machines
+            .iter()
+            .copied()
+            .filter(|&machine| {
+                beside.contains(&machine) || joined.iter().any(|&n| drew_from(machine, n))
+            })
+            .filter(|&machine| {
+                let placement = self.placement_of(machine);
+                machine_taps(
+                    &placement.footprint,
+                    self.position_of(machine),
+                    placement.direction,
+                    self.kind_plumbs(&placement.kind),
+                    &opens,
+                    &index,
+                )
+                .inputs
+                .iter()
+                .any(|&(_, _, (network, _))| network == MERGED)
+            })
+            .collect();
+        // Nothing new is shared if one run already served exactly these.
+        let already_shared = joined
+            .iter()
+            .any(|&n| drawers.iter().all(|&machine| drew_from(machine, n)));
+        if drawers.len() < 2 || already_shared {
+            return Vec::new();
+        }
+        vec![SharedRunPreview {
+            pipe: tile,
+            fluid: joined
+                .iter()
+                .find_map(|&n| self.topology.networks[n].fluid.clone()),
+            drawn_by: drawers
+                .into_iter()
+                .map(|machine| self.placement_of(machine).kind)
+                .collect(),
+        }]
+    }
+
+    /// What a command would do to the **next payday**, before it is issued
+    /// (`docs/GAMEPLAY.md` §7). A read-only pass over `&self`: it never
+    /// mutates, never bumps [`Self::revision`], and is not a
+    /// mutate-then-rollback.
+    ///
+    /// This exists because every spend in the game is *valid* right up to
+    /// the moment it starves the wage bill, and the consequence arrives a
+    /// thousand ticks later at the payday, by which time the belt is laid.
+    /// Presentation asks this first and puts the answer in front of the
+    /// player; the rule lives here, so GDScript decides nothing — it reads
+    /// [`SpendPreview::warn`] (`godot_project/CLAUDE.md`'s one rule).
+    ///
+    /// **It prices by calling the very functions the command arms call** —
+    /// [`super::shop::Shop::cost_of`],
+    /// [`Self::stock_room_for`] then
+    /// [`super::ingredients::Ingredients::cost_of`], the board offer's own
+    /// `price`, and [`StaffPools::next_bill`] against the category's wage.
+    /// A second copy of a price rule here would drift from the arm that
+    /// takes the money, and the drift would be invisible: both numbers
+    /// would look plausible.
+    ///
+    /// A command that costs nothing answers `spends: false` and zeroes
+    /// rather than erroring, so a caller may preview anything. `None` — the
+    /// wire handed a string that did not parse — takes the same arm, because
+    /// "no command" and "a free command" have the same answer and a second
+    /// path for the first would be a second place to keep it correct.
+    ///
+    /// A command the balance **cannot cover** answers `affordable: false` and
+    /// does not warn: the economy would refuse it, so there is no consequence
+    /// to confirm (see [`SpendPreview::affordable`]). It still reports the
+    /// shortfall it finds, because that is true — it simply is not its cause.
     pub fn spend_preview(&self, cmd: Option<&PlayerCommand>) -> SpendPreview {
         let money = self.economy.money;
         let next_bill = self.staff.next_bill();

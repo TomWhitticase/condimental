@@ -343,7 +343,7 @@ const FIXTURE_NAMES: PackedStringArray = [
 	"pipes", "gallery", "items", "fluid_gallery", "bottleneck", "bbq",
 	"stalled_run", "understaffed", "shortfall", "payday_warning", "full_dock",
 	"unclerked_dock", "warehouse", "split_docks", "mustard", "splitter_modes",
-	"crossing", "splitter_turns", "bbq_tap",
+	"crossing", "splitter_turns", "bbq_tap", "bbq_joint",
 ]
 
 ## The fixtures whose whole claim is a factory that is WORKING, and which are
@@ -1222,6 +1222,8 @@ func _build_fixture() -> void:
 				return
 		"bbq_tap":
 			Layouts.build_bbq_tap_line(_main.sim)
+		"bbq_joint":
+			Layouts.build_bbq_joint_line(_main.sim)
 		"demo":
 			Layouts.build_demo_line(_main.sim)
 		_:

@@ -37,10 +37,12 @@
 # with the list of names and a non-zero status; it used to build the demo
 # line and look plausible.
 #
-# Pass --fixture <machines|fluids|vat|splitter|splitter_modes|splitter_turns|chain|stress|pipes|gallery|bbq_tap|demo> for a different one:
+# Pass --fixture <machines|fluids|vat|splitter|splitter_modes|splitter_turns|chain|stress|pipes|gallery|bbq_tap|bbq_joint|demo> for a different one:
 # `bbq_tap` (the shipped line with the BBQ branch's joint pipe laid on the
 # ketchup run and a mixer bought — hold `--ghost mixer --ghost-at 14,-3` over
-# it for the build ghost's sharing warning, issue #92),
+# it for the build ghost's sharing warning, issue #92), `bbq_joint` (the same
+# step the other way round: the BBQ mixer placed and a pipe bought — hold
+# `--ghost pipe --ghost-at 14,-1` for the joint's "joins" warning),
 # `machines` (a hopper, a machine and a dock), `fluids` (a tank, a pipe run
 # and the machine tapping it), `vat` (the 2x2 cooking vat alone), `splitter`
 # (a line that FORKS — one splitter with both outputs built and a second with

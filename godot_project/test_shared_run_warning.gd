@@ -10,6 +10,9 @@
 #   * a mixer ghost on the branch's tap reads "▲ shares the Ketchup run with
 #     Bottler" — the fluid and the machine named from the WIRE
 #     (`placement_fluid_preview_json` and the display names), not from here,
+#   * built in the issue's own order — mixer first, joint pipe second — the
+#     PIPE's ghost reads "▲ joins Bottler, Mixer on the Ketchup run", since
+#     it is that click which puts the two on one run,
 #   * the same mixer away from any pipe, and a first consumer on a run
 #     nobody draws from yet, read no warning at all,
 #   * and the warning is the sim's answer, not GDScript's: the text is built
@@ -103,6 +106,33 @@ func _run_checks() -> void:
 		_fail("a first consumer shares with nobody, got:\n%s" % first)
 		return
 
+	# --- 2b. the issue's own order: the mixer first, then the joint pipe --
+	# A fresh scene, so the pipe laid in section 1 is not already there.
+	main.queue_free()
+	main = load("res://main.tscn").instantiate()
+	root.add_child(main)
+	main._ready()
+	Layouts.build_reference_line(main.sim)
+	Layouts.fund(main.sim, 5000)
+	Layouts.place(main.sim, "mixer", BBQ_MIXER, "east", "", "bbq_mix")
+	main.sim.issue_command_json(JSON.stringify({"type": "purchase", "kind": "pipe"}))
+	main._rebuild_world()
+	var joint: String = _prompt_for("pipe", BBQ_TAP)
+	if not joint.begins_with("✔ PLACE"):
+		_fail("the joint pipe's tile must be a valid placement, got:\n%s" % joint)
+		return
+	var joins := "▲ joins %s, %s on the %s run" % [
+		main._kind_display_name("mixer"), main._kind_display_name("bottler"),
+		main._item_display_name("ketchup"),
+	]
+	var joins_other := "▲ joins %s, %s on the %s run" % [
+		main._kind_display_name("bottler"), main._kind_display_name("mixer"),
+		main._item_display_name("ketchup"),
+	]
+	if not (joint.contains(joins) or joint.contains(joins_other)):
+		_fail("the joint pipe laid after the mixer must say it joins the two, got:\n%s" % joint)
+		return
+
 	# --- 3. the words are the wire's: a two-machine run counts them ------
 	var two: String = main._shared_run_text({"pipe": [0, 0], "fluid": "vinegar", "drawn_by": ["mixer", "mixer"]})
 	if two != "▲ shares the %s run with 2 × %s" % [main._item_display_name("vinegar"), main._kind_display_name("mixer")]:
@@ -113,7 +143,8 @@ func _run_checks() -> void:
 		return
 
 	print(
-		"SHARED_RUN_WARNING_OK: a mixer ghost on the BBQ branch's tap reads '%s' — " % expected
+		"SHARED_RUN_WARNING_OK: a mixer ghost on the BBQ branch's tap reads '%s', " % expected
+		+ "and built mixer-first the joint pipe's ghost says it joins the two — "
 		+ "the run and the machine named off placement_fluid_preview_json and the display names — "
 		+ "while a mixer touching no pipe and a first consumer on an undrawn run read no warning"
 	)
