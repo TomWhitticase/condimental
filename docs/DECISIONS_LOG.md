@@ -18,6 +18,16 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-20 **A pipe run several machines wait on serves them together.**
+  A run is *held* on any tick a machine on it is waiting for that run alone
+  (idle, switched on, recipe chosen, every solid and every other fluid in
+  hand) and the tile it draws from is short. A held run supplies nobody, so
+  its waiting consumers start on the same tick, one unit each.
+  `World::held_networks` derives it from the tick's state before step 3 and
+  `machine_supply_stall` reads it (a held machine shows `fluid_input`). It is
+  never stored: no save field, and a load is in lockstep. A run with one
+  consumer is never held against anyone. The cost is a few units standing in a
+  shared run that is running dry. Issue #93. Full record in `docs/DECISIONS.md`.
 - 2026-10-09 **The modal width sweep also runs in a real window.**
   `scripts/check-fits-window.sh` runs `test_hud_plates.gd` off-screen with a
   forced draw each frame, and `verify-core-loop.sh` runs it on macOS (CI is
