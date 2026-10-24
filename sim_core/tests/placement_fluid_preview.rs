@@ -18,8 +18,9 @@ fn recipes() -> RecipeRegistry {
         .expect("data/recipes.ron must parse")
 }
 
-/// The tile the BBQ branch taps the ketchup run from, and the mixer that
-/// stands on it — `sim::bbq_branch`'s joint 1.
+/// The tile the BBQ branch taps the ketchup run from, and the origin of the
+/// 1x2 mixer that stands beside it (covering (14, -3) and (14, -2), the
+/// latter against the tap) — `sim::bbq_branch`'s joint 1.
 const BBQ_TAP: (i32, i32) = (14, -1);
 const BBQ_MIXER: (i32, i32) = (14, -3);
 
@@ -121,18 +122,13 @@ fn a_kind_that_draws_no_fluid_or_touches_no_pipe_warns_nothing() {
         world.placement_fluid_preview("mixer", (40, 40), Direction::East),
         vec![]
     );
-    // A lone pipe on open ground, and one beside a single machine: each
-    // makes a run at most one machine draws from, which is no share at all.
-    // Only `pipe_join_preview`'s fewer-than-two check answers these.
+    // A lone pipe on open ground makes a run no machine draws from. Of
+    // `pipe_join_preview`'s guards only fewer-than-two answers it: the
+    // ground accepts it, and there is no shared run for `already_shared`.
     assert_eq!(
         world.placement_fluid_preview("pipe", (40, 40), Direction::East),
         vec![],
         "a lone pipe on open ground joins nobody"
-    );
-    assert_eq!(
-        world.placement_fluid_preview("pipe", BBQ_MIXER, Direction::East),
-        vec![],
-        "a pipe where the mixer would stand touches no machine that draws"
     );
 }
 
@@ -226,12 +222,29 @@ fn the_pipe_that_joins_a_placed_mixer_to_the_bottler_s_run_is_warned() {
 fn a_pipe_that_extends_a_run_without_adding_a_consumer_warns_nothing() {
     let world = line_with_the_tap_laid();
     // One tile further west of the joint, along the empty ground above the
-    // ketchup run: it lengthens the run and touches no machine.
+    // ketchup run: it lengthens the run. It does stand against one machine,
+    // the 2x2 cooking vat below it, but that is the machine that FILLS this
+    // run, and a machine never draws from the run it fills — so the bottler
+    // is still the only one drinking.
     assert_eq!(
         world.placement_fluid_preview("pipe", (13, -1), Direction::East),
         vec![],
         "the bottler alone still drinks from it"
     );
+    // And it really does join that run, so the case above is the
+    // lengthening it claims rather than a lone pipe.
+    let mut world = world;
+    build(&mut world, "pipe", (13, -1), None);
+    let run = world
+        .fluid_snapshots()
+        .into_iter()
+        .find(|run| run.segments.iter().any(|s| s.tile == (13, -1)))
+        .expect("the pipe is on a run");
+    assert!(
+        run.segments.iter().any(|s| s.tile == BBQ_TAP),
+        "the new pipe is on the tap's run"
+    );
+    assert_eq!(run.fluid.as_deref(), Some("ketchup"));
 }
 
 /// Once the branch exists the mixer and the bottler already share the
