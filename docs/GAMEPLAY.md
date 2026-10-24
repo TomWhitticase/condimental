@@ -402,7 +402,8 @@ implementation history (epics, tickets, balancing passes) behind each one.
   reason (understaffed is a kind of starved, no fourth state). Payday pays
   one head at a time in `staff.ron` order out of the one money counter; the
   first unpayable head, and every one after it, goes **unpaid** — still
-  hired, idle until the next payday, gone only if unpaid there too, and a
+  hired, idle until the next payday (unless its category works in arrears,
+  as the shipping clerk does — issue #85), gone only if unpaid there too, and a
   covered payday clears the arrears (the contract board's strikes, applied
   to people). A head is billed for any period it was employed in any part
   of (notice pay, so firing before payday saves nothing), so nobody works a
@@ -434,8 +435,16 @@ implementation history (epics, tickets, balancing passes) behind each one.
   are refused. It costs nothing and saves nothing directly, so there is no
   new balance number: what it changes is who is on the payroll. What it
   does **not** do is conjure income — a standing order lost to three missed
-  windows during a shutdown costs money to re-sign, which is issue #85 and
-  still open.
+  windows during a shutdown costs money to re-sign.
+- **A shipping clerk works one period unpaid** (`works_in_arrears` in
+  `data/staff.ron`, logistics only, issue #85, 2026-10-24). The payday pays
+  logistics last, so a payday a coin short leaves the clerk unpaid. If the
+  clerk then stopped work, the dock, which is the factory's only income,
+  would stop too, and the next payday could never be met. Working on, the
+  clerk ships the period's cases and that pays it. This is grace, not
+  credit: unpaid twice, the clerk still leaves. A miss deep enough to idle
+  packaging leaves nothing for the clerk to ship, so mothballing is still
+  that factory's way out.
 - **Every placement reports whether it has its crew** (`crewed`, 2026-09-20)
   — the establishment's stable answer to *if everything placed wanted to run
   at once, who goes without?*, allocated in the order the tick claims in.
@@ -486,7 +495,8 @@ implementation history (epics, tickets, balancing passes) behind each one.
   falls without firing anyone, stops its output and HOLDS its batch. Any
   kind that asks for a crew can be switched off, the dock included. What it
   does not do is replace a standing order lost while the factory was dark —
-  see the decision record, and issue #85.
+  see the decision record. A payday only a few coins short no longer
+  darkens it: the shipping clerk works that period unpaid (§7, issue #85).
 - ~~Is there a reputation/trust score gating access to higher-tier
   contracts, separate from equipment-tier gating?~~ **Half-decided 2026-09-19
   (§9's progression-gates bullet):** higher-tier contracts *are* gated

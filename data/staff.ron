@@ -36,14 +36,29 @@
 // in, and it is the PAYDAY order: on payday heads are paid one at a time
 // down this list, and the first head that cannot be paid — and every head
 // after it — goes UNPAID. Manufacturing is first because a factory that
-// must leave someone unpaid should idle its shipping clerk before its cook.
+// must leave someone unpaid should leave its shipping clerk unpaid before
+// its cook — and the clerk, unlike the cook, works on unpaid for a period
+// (`works_in_arrears`, below).
 //
 // WHAT AN UNPAID HEAD DOES (the quality pass, 2026-09-13; the rule is
 // `sim_core/src/sim/staff.rs`'s, this is the summary). It stays hired but
-// does not work the period it was not paid for, so the machines it crewed
+// does not work the period it was not paid for (unless its category works
+// in arrears — see below), so the machines it crewed
 // starve with a `staff` stall and the staff panel says how many are
 // unpaid; it leaves only if the NEXT payday cannot pay it either, and a
 // payday that covers it clears the arrears. Two strikes, like a contract.
+//
+// `works_in_arrears: true` (optional, default false) is the one exception,
+// and it is LOGISTICS' (issue #85, 2026-10-24): an unpaid head of such a
+// category still turns up for the period it was not paid for. One period's
+// grace, not credit — the two strikes are unchanged, so it still leaves if
+// the next payday misses it too. It exists because the order above leaves
+// the clerk unpaid first, and the dock is the only road from product to
+// money: a clerk who stopped work would stop every sale, so a payday a coin
+// short could never be earned back. Working, the clerk ships the period's
+// cases and the next payday is met. A deeper miss still idles packaging,
+// and no grace on the dock can ship what was never bottled — mothballing is
+// that factory's way out.
 // A head is owed for any period it was employed in any part of: a head
 // fired before payday is still billed at that payday (notice pay, paid
 // first), a head hired just before payday is billed at it, and a hire is
@@ -81,6 +96,6 @@
         StaffCategory(id: "manufacturing", name: "Manufacturing", wage: 2, starting_headcount: 4),
         StaffCategory(id: "engineering",   name: "Engineering",   wage: 2, starting_headcount: 0, renamed_from: ["maintenance"]),
         StaffCategory(id: "packaging",     name: "Packaging",     wage: 2, starting_headcount: 2),
-        StaffCategory(id: "logistics",     name: "Logistics",     wage: 2, starting_headcount: 1),
+        StaffCategory(id: "logistics",     name: "Logistics",     wage: 2, starting_headcount: 1, works_in_arrears: true),
     ],
 )

@@ -25,6 +25,60 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-24: **A shipping clerk works one period in arrears (issue #85).**
+  Three shipped rules compounded into a spiral nothing could leave. The
+  payday pays `data/staff.ron` top to bottom and logistics is last, on
+  purpose: a factory that must leave someone unpaid should leave the clerk
+  unpaid, not the cook. The first head the money misses goes unpaid, along
+  with every head after it, so a payday a coin short always lands on the
+  clerk. And an unpaid head did not work. The dock is the only road from
+  product to money, so that one coin stopped all income. The next bill
+  (notice pay included) then came round at the full figure with nothing
+  earned towards it, and the clerk walked at the second strike. Measured on
+  the shipped line, a payday a few coins short was as fatal as a payday
+  with no money at all.
+
+  The issue offered four fixes and this takes the third, a grace period on
+  the dock, generalised as content: `StaffCategory::works_in_arrears`, set on
+  logistics only. An unpaid head of such a category still turns up for the
+  period it was not paid for. `staff::at_work` is the one reading of "who is
+  at their post" (`headcount - unpaid`, or `headcount` for such a category),
+  and both `StaffPools::reset` and `World::uncrewed_placements` take it, so
+  the crew a machine is offered and the crew the HUD says it has cannot
+  disagree. The other three were rejected:
+  - **Reordering the payday** reverses a deliberate, commented decision, and
+    a shortfall would then idle a cook instead, which is its own spiral.
+  - **A partial-pay reserve** changes what the balance means.
+  - **A sell-back above `Remove`'s refund** is a cash escape, and a much
+    larger economy change than the defect needs.
+
+  **It is grace, not credit.** The two-strike rule is unchanged: the clerk
+  still leaves if the next payday misses them too. The grace buys exactly
+  one period of shipping, and it works because that period's cases are what
+  pays the next payday. Measured (`sim_core/tests/mothball.rs`):
+  - **10 to 13 against a bill of 14:** the factory recovers. At 12 and 13
+    only the clerk goes unpaid; at 10 and 11 one packer does as well. In
+    every case the next payday is met, nobody leaves, and the standing order
+    survives, for three paydays running.
+  - **9 or less:** both packers go unpaid, nothing is bottled, and the clerk
+    has nothing to ship. The spiral is unchanged, and mothballing
+    (2026-09-20) is still the way out. The mothball acceptance tests moved
+    their fixture to that deeper miss, since a coin short is no longer
+    broke.
+
+  The grace cannot be farmed. A head in arrears is still billed, so working
+  unpaid saves nothing, and a second miss still costs the head.
+
+  The HUD reads the field rather than deciding anything. An unpaid row says
+  "still working" where it used to say "idle" (`_staff_unpaid_state`), and
+  so does the payday notice. The footer's total says "went unpaid", because
+  "idled" is no longer true of every head it counts. The rules legend and
+  the payday confirmation say "mostly" and "unless its row says it works
+  on", without naming a category, because which categories do is content.
+
+  No save-format change: `unpaid` was already saved, and the flag is
+  content. One wire field, `StaffCategorySnapshot::works_in_arrears`.
+
 - 2026-10-20: **A pipe run several machines wait on serves them together
   (issue #93).**
   Building the BBQ branch onto a running ketchup line cut the ketchup bottler
@@ -3874,9 +3928,10 @@ matches what code comments and data files cite.
   not got; the reference line takes ~2200 ticks to ship its first box, so a
   player who enters the spiral before their first delivery has no way back
   even with every machine switched off. The acceptance test asserts that
-  honestly rather than claiming a recovery it did not see. That residue is
-  issue #85 (a contract lapsing during a shutdown), which stays OPEN — it
-  is a contract-board question, not a payroll one.
+  honestly rather than claiming a recovery it did not see. That residue was
+  issue #85. On 2026-10-24 it closed for the commonest miss, a few coins
+  short, where the clerk now works a period in arrears and the order is
+  kept; a deeper miss still loses it, by design (see that entry).
 
   **`crewed`, and why it is not the last tick.** `PlacementSnapshot.crewed`
   and `MachineLoadEntry.crewed` come from `World::uncrewed_placements`,

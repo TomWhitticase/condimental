@@ -542,6 +542,12 @@ var _understaffed := false
 ## fed reference line, so the footer's shortfall sentence is what the shot
 ## reviews rather than the meters `--staff` already covers.
 var _staff_shortfall := false
+## `--missed-payday` (issue #85) is `--staff-shortfall`'s line run one tick
+## past the payday it cannot meet, so the staff panel shows what that payday
+## did: the cooks paid, the two packers unpaid and IDLE, and the shipping
+## clerk unpaid and STILL WORKING (`works_in_arrears`, `data/staff.ron`) —
+## the two rows side by side are the review.
+var _missed_payday := false
 ## `--payday-warning` (2026-09-26) opens the build menu over a line funded to
 ## one unit less than its bill plus a belt, then BUYS a belt through the real
 ## funnel (`_buy_slot`), so the frame is the confirmation panel as a click
@@ -789,6 +795,10 @@ func _initialize() -> void:
 	_staff_shortfall = args.has("--staff-shortfall")
 	if _staff_shortfall:
 		_pick_fixture("shortfall", "--staff-shortfall")
+		_populate = true
+	_missed_payday = args.has("--missed-payday")
+	if _missed_payday:
+		_pick_fixture("shortfall", "--missed-payday")
 		_populate = true
 	_short_staffed = args.has("--short-staffed")
 	if _short_staffed:
@@ -2215,6 +2225,16 @@ func _run_contract_cycles() -> void:
 ## `stock_larder` buys only the solids, so the vinegar is bought explicitly
 ## here. A line that stalls halfway photographs as a factory with nothing on
 ## its dock and no payout at all.
+## Ticks through the next payday and one tick past it, then re-polls the staff
+## wire, so the panel opened over it reads that payday's outcome.
+func _run_past_payday() -> void:
+	var due := int(JSON.parse_string(_main.sim.staff_snapshot_json()).get("next_payday_tick", 0))
+	while _main.sim.current_tick() <= due:
+		_main.sim.tick()
+	_main._apply_dirty_chunks()
+	_main._poll_staff()
+
+
 func _run_to_payout() -> void:
 	Layouts.fund(_main.sim, 30000)
 	Layouts.stock(_main.sim, "vinegar", 1000)
@@ -2770,6 +2790,9 @@ func _process(delta: float) -> bool:
 		if not _hover_over_tile(Layouts.STALLED_RUN_TILE):
 			return true
 	if _frames == 2 and _staff_shortfall:
+		_main._set_staff_open(true)
+	if _frames == 2 and _missed_payday:
+		_run_past_payday()
 		_main._set_staff_open(true)
 	if _frames == 2 and _contracts:
 		_run_contract_cycles()

@@ -202,6 +202,11 @@
 # than the meters --staff already covers (the quality pass, ticket 4). It
 # implies --populate.
 #
+# Pass --missed-payday for that same underfunded line run one tick past the
+# payday it cannot meet, with the STAFF panel open: the packers' row reads
+# `▲ 2 unpaid, idle until payday` and the clerk's `▲ 1 unpaid, still
+# working until payday` (issue #85's works_in_arrears). It implies --populate.
+#
 # Pass --payday-warning to photograph THE PAYDAY CONFIRMATION (2026-09-26) as a
 # click raises it: the shipped line funded to its next bill plus a belt less
 # one (test_layouts.gd's `build_payday_warning_line`), the build menu open, and
@@ -457,7 +462,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--bbq] [--mustard] [--stalled-run] [--staff] [--staff-shortfall] [--payday-warning] [--production] [--cookbook|--cookbook-page [ID]|--cookbook-basics [ID]] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--split-docks [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--settings] [--debug] [--set KEY=VALUE] [--shop] [--market] [--board [--board-end] [--board-filter all|open|signed|locked|ITEM]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--ctrl] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy] [--on-screen]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--bbq] [--mustard] [--stalled-run] [--staff] [--staff-shortfall] [--missed-payday] [--payday-warning] [--production] [--cookbook|--cookbook-page [ID]|--cookbook-basics [ID]] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--split-docks [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--settings] [--debug] [--set KEY=VALUE] [--shop] [--market] [--board [--board-end] [--board-filter all|open|signed|locked|ITEM]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--ctrl] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy] [--on-screen]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
