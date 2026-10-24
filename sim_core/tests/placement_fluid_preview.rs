@@ -121,8 +121,9 @@ fn a_kind_that_draws_no_fluid_or_touches_no_pipe_warns_nothing() {
         world.placement_fluid_preview("mixer", (40, 40), Direction::East),
         vec![]
     );
-    // A lone pipe on open ground, and one beside a single machine: each
-    // makes a run at most one machine draws from, which is no share at all.
+    // A lone pipe on open ground, and one on the empty tile the BBQ mixer
+    // would stand on (beside the joint pipe, which joins it to the run the
+    // bottler alone draws from): neither puts a second machine on a run.
     // Only `pipe_join_preview`'s fewer-than-two check answers these.
     assert_eq!(
         world.placement_fluid_preview("pipe", (40, 40), Direction::East),
