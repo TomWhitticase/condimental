@@ -121,13 +121,18 @@ fn a_kind_that_draws_no_fluid_or_touches_no_pipe_warns_nothing() {
         world.placement_fluid_preview("mixer", (40, 40), Direction::East),
         vec![]
     );
-    // A pipe on ground it cannot be laid on — the empty tile the mixer would
-    // stand on is free, so ask for the tile the shipped crusher occupies.
-    let crusher = tile_of(&world, "crusher");
+    // A lone pipe on open ground, and one beside a single machine: each
+    // makes a run at most one machine draws from, which is no share at all.
+    // Only `pipe_join_preview`'s fewer-than-two check answers these.
     assert_eq!(
-        world.placement_fluid_preview("pipe", crusher, Direction::East),
+        world.placement_fluid_preview("pipe", (40, 40), Direction::East),
         vec![],
-        "a pipe the ground refuses previews nothing"
+        "a lone pipe on open ground joins nobody"
+    );
+    assert_eq!(
+        world.placement_fluid_preview("pipe", BBQ_MIXER, Direction::East),
+        vec![],
+        "a pipe where the mixer would stand touches no machine that draws"
     );
 }
 
@@ -243,5 +248,43 @@ fn a_pipe_that_lengthens_an_already_shared_run_warns_nothing() {
         world.placement_fluid_preview("pipe", (13, -1), Direction::East),
         vec![],
         "the run already serves the mixer and the bottler; one more tile adds no one"
+    );
+}
+
+/// A pipe the ground refuses previews nothing, because the click it
+/// describes would build nothing — `plan_place_on_ground`'s answer. Asked on
+/// the one tile where nothing else would stop the warning: the BBQ joint,
+/// which on free ground joins the mixer and the bottler, here occupied by a
+/// hopper the player put down first.
+#[test]
+fn a_pipe_the_ground_refuses_previews_nothing() {
+    let mut world = reference_chain_with_budget(recipes(), BUDGET);
+    build(&mut world, "mixer", BBQ_MIXER, Some("bbq_mix"));
+    assert_eq!(
+        world
+            .placement_fluid_preview("pipe", BBQ_TAP, Direction::East)
+            .len(),
+        1,
+        "on free ground the joint warns, so the assertion below is the refusal's"
+    );
+    world.issue_command(PlayerCommand::Purchase {
+        kind: "hopper".to_string(),
+        quantity: 1,
+    });
+    world.issue_command(PlayerCommand::Place {
+        kind: "hopper".to_string(),
+        tile: BBQ_TAP,
+        direction: Direction::East,
+        item: Some("spice_mix".to_string()),
+        recipe: None,
+    });
+    assert!(
+        world.query_tile(BBQ_TAP).is_some(),
+        "the hopper stands on the joint's tile"
+    );
+    assert_eq!(
+        world.placement_fluid_preview("pipe", BBQ_TAP, Direction::East),
+        vec![],
+        "a pipe on an occupied tile is refused, and warns nothing"
     );
 }
