@@ -132,6 +132,31 @@ pub struct StaffCategory {
     /// here. `#[serde(default)]` — a category never renamed lists nothing.
     #[serde(default)]
     pub renamed_from: Vec<String>,
+    /// Whether a head in arrears here still turns up for the period it
+    /// was not paid for (issue #85). The two-strike rule is unchanged — an
+    /// unpaid head leaves at the next payday that misses it too — so this
+    /// is one period's grace, not credit. It exists for the category that
+    /// stands between the product and the money: the line rule leaves the
+    /// LAST category in the file unpaid first, and if those heads stop
+    /// work the whole factory's income stops with them, so a single missed
+    /// payday could never be earned back. `#[serde(default)]` — false, the
+    /// ordinary rule.
+    #[serde(default)]
+    pub works_in_arrears: bool,
+}
+
+/// Heads of a category that turn up this period: `headcount - unpaid`,
+/// or the whole `headcount` for a category that [works in
+/// arrears](StaffCategory::works_in_arrears). The one reading both
+/// [`StaffPools::reset`] and `World::uncrewed_placements` take, so the
+/// crew a machine is offered and the crew the HUD says it has never
+/// disagree.
+pub fn at_work(category: &StaffCategory, pool: &CategoryPool) -> u32 {
+    if category.works_in_arrears {
+        pool.headcount
+    } else {
+        pool.headcount.saturating_sub(pool.unpaid)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -445,7 +470,8 @@ pub struct EstablishmentEntry {
 pub struct CategoryPool {
     pub headcount: u32,
     /// Heads in arrears: hired, unpaid at the last payday, and **not
-    /// working** until they are paid. Never more than `headcount`. Paid at
+    /// working** until they are paid — unless the category
+    /// [works in arrears](StaffCategory::works_in_arrears). Never more than `headcount`. Paid at
     /// the next payday they go back to work; unpaid again, they leave.
     pub unpaid: u32,
     /// Heads the NEXT payday bills: everyone employed for any part of the
@@ -456,7 +482,7 @@ pub struct CategoryPool {
     /// Heads who left at the last payday — unpaid there and at the one
     /// before. Zero until a payday, and zero again after the next one.
     pub left_last_payday: u32,
-    /// Heads not yet claimed this tick (`headcount - unpaid` at reset).
+    /// Heads not yet claimed this tick ([`at_work`] at reset).
     pub available: u32,
     /// Every head asked for this tick, whether or not the ask succeeded.
     pub demand: u32,
@@ -817,10 +843,11 @@ impl StaffPools {
 
     /// Step 2 of `World::tick`: everyone who is being paid is back at
     /// their post, nobody has asked for anyone yet. A head in arrears is
-    /// not at their post: `available` is `headcount - unpaid`.
+    /// not at their post unless the category works in arrears:
+    /// `available` is [`at_work`].
     pub fn reset(&mut self) {
-        for pool in &mut self.pools {
-            pool.available = pool.headcount.saturating_sub(pool.unpaid);
+        for (category, pool) in self.catalog.categories.iter().zip(&mut self.pools) {
+            pool.available = at_work(category, pool);
             pool.demand = 0;
             pool.assigned = 0;
         }
@@ -1033,6 +1060,7 @@ impl StaffPools {
                     wage: c.wage,
                     owed: p.owed,
                     unpaid: p.unpaid,
+                    works_in_arrears: c.works_in_arrears,
                     left_last_payday: p.left_last_payday,
                     hire_warns: self.hire_warns(&c.id, money),
                     demand: p.demand,
@@ -1217,6 +1245,10 @@ pub struct StaffCategorySnapshot {
     pub wage: u32,
     pub owed: u32,
     pub unpaid: u32,
+    /// The category's [`StaffCategory::works_in_arrears`]: whether its
+    /// `unpaid` heads are still at work this period, so the row can say
+    /// which of "idle" and "working unpaid" is true.
+    pub works_in_arrears: bool,
     pub left_last_payday: u32,
     /// Whether hiring one more head here would leave the next payday short
     /// ([`StaffPools::hire_warns`]). **Advice, not a gate**: the HIRE button

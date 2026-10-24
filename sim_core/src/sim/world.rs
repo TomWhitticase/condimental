@@ -4002,7 +4002,8 @@ impl World {
     /// (`Machine::refused_by`), and the two are meant to be read together.
     ///
     /// It allocates against the heads that would actually turn up —
-    /// `headcount - unpaid` — and **not** against `headcount`. A head in
+    /// `staff::at_work`, `headcount - unpaid` for any category that does
+    /// not work in arrears — and **not** against `headcount`. A head in
     /// arrears is on the books but is not at their post
     /// (`StaffPools::reset`), so a factory that missed a payday has
     /// machines standing idle for want of a crew, which is precisely what
@@ -4032,10 +4033,7 @@ impl World {
             .iter()
             .zip(self.staff.pools())
             .map(|(category, pool)| {
-                (
-                    category.id.as_str(),
-                    pool.headcount.saturating_sub(pool.unpaid),
-                )
+                (category.id.as_str(), super::staff::at_work(category, pool))
             })
             .collect();
         let mut uncrewed = BTreeSet::new();
