@@ -464,8 +464,10 @@ scrutiny than one-sided changes.
 
 ## 5. Presentation layer (Godot)
 
-- 3D isometric scene rebuilt from `world_layout_json` on every
-  place/remove/rotate, never per tick (a full rebuild, mirroring §3.8).
+- 3D isometric scene rebuilt from `world_layout_entries` (one JSON text per
+  placement of `world_layout_json`'s array, so an unchanged entry is not
+  re-parsed) on every place/remove/rotate, never per tick (a full rebuild,
+  mirroring §3.8).
 - Interpolate "warm" entities between snapshots (future).
 - UI is generated from the same data files (`shop.ron` drives the build
   menu and hotbar).

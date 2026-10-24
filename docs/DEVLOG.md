@@ -266,6 +266,21 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-23 — a rebuild re-parses only the placements that changed
+
+Issue #3. Every place, remove and rotate re-read the world layout by
+`JSON.parse_string`-ing the whole `world_layout_json` — ~12 ms of a ~16 ms
+read on the 1500-tile stress line, release build, against ~1 ms for Rust to
+write it. `SimBridge.world_layout_entries` now hands the same array over as
+one JSON text per placement, and `_read_world_layout` keeps the last read's
+parsed entries keyed by that text, so only entries that changed are parsed.
+After one rotate the read is ~4 ms, down from ~16; under the same heavy machine load
+`test_perf.gd` read 22-52 ms before and ~10 ms after. Keying on the whole text means nothing
+has to say *what* changed — a neighbour's `links` or `crewed` flipping
+everywhere is just new text. A cold read (load, new game) is ~5 ms slower,
+paid once. The read is still whole-world; the remaining ~75% of a warm
+rebuild is node construction, which stays milestone 8's.
+
 ### 2026-10-20 — a shared pipe run serves its consumers together
 
 Issue #93, the simulation half of #55. A BBQ branch built onto a running

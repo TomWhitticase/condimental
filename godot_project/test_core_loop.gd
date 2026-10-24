@@ -67,6 +67,15 @@ func _initialize() -> void:
 	if layout.size() != 15:
 		_fail("expected the 15-piece demo line, got %d placements" % layout.size())
 		return
+	# `world_layout_entries` is the same wire one placement at a time — what
+	# the scene's rebuild reads (issue #3) — so it must say exactly what the
+	# whole array says, in the same order.
+	var entries: Array = []
+	for text in sim.world_layout_entries():
+		entries.append(JSON.parse_string(text))
+	if entries != layout:
+		_fail("world_layout_entries must be world_layout_json's array entry for entry:\n%s\n%s" % [str(entries), str(layout)])
+		return
 	var directions_seen := {}
 	for placement in layout:
 		for field in ["kind", "tile", "direction", "footprint", "occupies", "recipe"]:

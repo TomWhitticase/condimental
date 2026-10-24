@@ -17,8 +17,10 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
 
 ## Wire and rebuild invariants
 
-- The 3D World subtree is rebuilt from `world_layout_json` on every
-  place/remove/rotate — **never per tick** (`_rebuild_world`).
+- The 3D World subtree is rebuilt from `world_layout_entries` on every
+  place/remove/rotate — **never per tick** (`_rebuild_world`). Each entry is
+  one placement's JSON, parsed only when its text changed since the last
+  read (`_layout_cache`, issue #3); the read is still whole-world.
 - A rebuild re-reads **every occupied chunk's FULL** `chunk_snapshot_json`
   (`_reread_every_chunk`). Re-reading only the dirty chunk made items on
   belts elsewhere vanish, permanently on a backed-up belt.
