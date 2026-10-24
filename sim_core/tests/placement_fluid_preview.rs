@@ -22,6 +22,9 @@ fn recipes() -> RecipeRegistry {
 /// stands on it — `sim::bbq_branch`'s joint 1.
 const BBQ_TAP: (i32, i32) = (14, -1);
 const BBQ_MIXER: (i32, i32) = (14, -3);
+/// The tile between the two, which the 1x2 mixer's footprint also covers
+/// when it stands at [`BBQ_MIXER`]: a pipe here joins the tap's run.
+const ABOVE_THE_TAP: (i32, i32) = (14, -2);
 
 fn build(world: &mut World, kind: &str, tile: (i32, i32), recipe: Option<&str>) {
     world.issue_command(PlayerCommand::Purchase {
@@ -121,20 +124,34 @@ fn a_kind_that_draws_no_fluid_or_touches_no_pipe_warns_nothing() {
         world.placement_fluid_preview("mixer", (40, 40), Direction::East),
         vec![]
     );
-    // A lone pipe on open ground, and one on the empty tile the BBQ mixer
-    // would stand on (beside the joint pipe, which joins it to the run the
-    // bottler alone draws from): neither puts a second machine on a run.
-    // Only `pipe_join_preview`'s fewer-than-two check answers these.
+    // A lone pipe on open ground, and one at (14, -2), directly above the
+    // joint pipe, which joins it to the ketchup run the bottler alone draws
+    // from: neither puts a second machine on a run. Only
+    // `pipe_join_preview`'s fewer-than-two check answers these.
     assert_eq!(
         world.placement_fluid_preview("pipe", (40, 40), Direction::East),
         vec![],
         "a lone pipe on open ground joins nobody"
     );
     assert_eq!(
-        world.placement_fluid_preview("pipe", BBQ_MIXER, Direction::East),
+        world.placement_fluid_preview("pipe", ABOVE_THE_TAP, Direction::East),
         vec![],
-        "a pipe where the mixer would stand touches no machine that draws"
+        "a pipe that lengthens the bottler's run adds no second machine to it"
     );
+    // And it really does join that run, so the case above is the
+    // lengthening it claims rather than a second lone pipe.
+    let mut world = world;
+    build(&mut world, "pipe", ABOVE_THE_TAP, None);
+    let run = world
+        .fluid_snapshots()
+        .into_iter()
+        .find(|run| run.segments.iter().any(|s| s.tile == ABOVE_THE_TAP))
+        .expect("the pipe is on a run");
+    assert!(
+        run.segments.iter().any(|s| s.tile == BBQ_TAP),
+        "the pipe above the tap is on the tap's run"
+    );
+    assert_eq!(run.fluid.as_deref(), Some("ketchup"));
 }
 
 #[test]
