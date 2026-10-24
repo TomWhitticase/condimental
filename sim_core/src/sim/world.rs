@@ -4032,9 +4032,7 @@ impl World {
             .categories()
             .iter()
             .zip(self.staff.pools())
-            .map(|(category, pool)| {
-                (category.id.as_str(), super::staff::at_work(category, pool))
-            })
+            .map(|(category, pool)| (category.id.as_str(), super::staff::at_work(category, pool)))
             .collect();
         let mut uncrewed = BTreeSet::new();
         let ordered = self.topology.machines.iter().chain(&self.topology.docks);
@@ -4696,9 +4694,11 @@ impl World {
     ///    [`super::splitter`]), so product crosses one at belt speed.
     ///
     ///    **2b. Staff pools reset** (the staff pools MVP epic): every
-    ///    category is back at its headcount less its heads in arrears (the
-    ///    quality pass: an unpaid head stays hired but does not work), with
-    ///    nothing asked for yet. It reads as a paragraph of step 2 rather
+    ///    category is back at the heads at work ([`super::staff::at_work`]:
+    ///    its headcount less its heads in arrears — the quality pass, an
+    ///    unpaid head stays hired but does not work — or its whole headcount
+    ///    for a category that works in arrears, logistics since issue #85),
+    ///    with nothing asked for yet. It reads as a paragraph of step 2 rather
     ///    than a list item of its own because `2b.` is not a list marker
     ///    any markdown parser recognises — and renumbering is not the way
     ///    out: `dock.rs` and the tick body itself cite these steps by
@@ -4741,9 +4741,10 @@ impl World {
     ///    `next_payday_tick`, every head owed for the period — fired ones
     ///    included, notice pay first — is paid one at a time out of the one
     ///    money counter. The first head the money does not reach, and every
-    ///    one after it, is UNPAID: still hired, idle until the next payday,
-    ///    and gone if that one cannot pay it either (the quality pass; see
-    ///    `staff.rs`'s module doc).
+    ///    one after it, is UNPAID: still hired, idle until the next payday
+    ///    (or at work anyway, in a category that works in arrears — issue
+    ///    #85), and gone if that one cannot pay it either (the quality pass;
+    ///    see `staff.rs`'s module doc).
     ///
     /// Steps 4 and 5 are the same two phases the fixed chain always had
     /// ("belt to machine, then everything onto a belt"); what changed is

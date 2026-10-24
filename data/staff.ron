@@ -42,7 +42,8 @@
 //
 // WHAT AN UNPAID HEAD DOES (the quality pass, 2026-09-13; the rule is
 // `sim_core/src/sim/staff.rs`'s, this is the summary). It stays hired but
-// does not work the period it was not paid for, so the machines it crewed
+// does not work the period it was not paid for (unless its category works
+// in arrears — see below), so the machines it crewed
 // starve with a `staff` stall and the staff panel says how many are
 // unpaid; it leaves only if the NEXT payday cannot pay it either, and a
 // payday that covers it clears the arrears. Two strikes, like a contract.

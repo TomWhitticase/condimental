@@ -40,9 +40,13 @@
 //! money does not reach — and every head after it down the file, the line
 //! rule — is not fired: it is **unpaid** ([`CategoryPool::unpaid`]), still
 //! hired, but it does not work the period it was not paid for (the pools
-//! [`reset`](StaffPools::reset) to `headcount - unpaid`), so the factory
-//! that spent its wages sees machines starve with a `staff` stall and a
-//! panel that says how many are unpaid, not a crew that vanished. A head
+//! [`reset`](StaffPools::reset) to [`at_work`], `headcount - unpaid`), so
+//! the factory that spent its wages sees machines starve with a `staff`
+//! stall and a panel that says how many are unpaid, not a crew that
+//! vanished. The exception is a category that
+//! [works in arrears](StaffCategory::works_in_arrears) — logistics, since
+//! issue #85 — whose unpaid heads work that period anyway, so the dock
+//! keeps earning the next payday. A head
 //! unpaid at the NEXT payday as well leaves ([`CategoryPool::
 //! left_last_payday`]); a paid payday clears the arrears. Two strikes,
 //! mirroring the contract board. Before any of that, the wire says what
@@ -53,8 +57,11 @@
 //! a cliff. A zero-wage head is never unpaid and never leaves.
 //!
 //! **The way out of arrears is MOTHBALLING** (issue #19). Unpaid heads idle
-//! the machines they crew, which cuts the income that would have paid them,
-//! so before mothballing existed a factory that missed one payday could
+//! the machines they crew, which cuts the income that would have paid them.
+//! (Since issue #85 a payday short only of the clerk, or of the clerk and
+//! one packer, no longer does: the clerk works on and the cases still
+//! ship. A deeper miss idles packaging, and nothing reaches the dock.)
+//! So before mothballing existed a factory that missed one payday could
 //! only watch the next one miss harder, and the only lever it had was
 //! FIRING — which takes the trained crew away as the price of keeping the
 //! factory, and leaves a broke factory hiring them back only into arrears
@@ -1129,8 +1136,8 @@ impl StaffPools {
                 });
             }
         }
-        for p in &mut pools.pools {
-            p.available = p.headcount.saturating_sub(p.unpaid);
+        for (category, pool) in pools.catalog.categories.iter().zip(&mut pools.pools) {
+            pool.available = at_work(category, pool);
         }
         // The establishment is deliberately NOT synced here. It is not in
         // the save: `World::recompute_establishment` re-sums it from the

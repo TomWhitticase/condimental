@@ -397,7 +397,8 @@ implementation history (epics, tickets, balancing passes) behind each one.
   reason (understaffed is a kind of starved, no fourth state). Payday pays
   one head at a time in `staff.ron` order out of the one money counter; the
   first unpayable head, and every one after it, goes **unpaid** — still
-  hired, idle until the next payday, gone only if unpaid there too, and a
+  hired, idle until the next payday (unless its category works in arrears,
+  as the shipping clerk does — issue #85), gone only if unpaid there too, and a
   covered payday clears the arrears (the contract board's strikes, applied
   to people). A head is billed for any period it was employed in any part
   of (notice pay, so firing before payday saves nothing), so nobody works a
