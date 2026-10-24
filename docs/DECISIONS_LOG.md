@@ -18,6 +18,19 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-24 **A shipping clerk works one period in arrears.** A staff
+  category may set `works_in_arrears` in `data/staff.ron`; logistics does.
+  Its unpaid heads still turn up for the period they were not paid for
+  (`staff::at_work`, read by both `StaffPools::reset` and
+  `World::uncrewed_placements`), so a payday a few coins short no longer
+  stops the dock, the factory's only income, and the next payday is met.
+  It is one period's grace, not credit: the two-strike rule is unchanged,
+  and the payday order (logistics paid last) is untouched. A miss deep
+  enough to idle packaging still spirals, because nothing is bottled for the
+  clerk to ship, and mothballing stays that factory's way out. Content plus
+  one wire field (`StaffCategorySnapshot::works_in_arrears`); no save-format
+  change, since `unpaid` was already saved. Issue #85. Full record in
+  `docs/DECISIONS.md`.
 - 2026-10-20 **A pipe run several machines wait on serves them together.**
   A run is *held* on any tick a machine on it is waiting for that run alone
   (idle, switched on, recipe chosen, every solid and every other fluid in
@@ -1120,8 +1133,9 @@ See [WORKFLOW.md](WORKFLOW.md).
   is the click-to-configure panel; **not** a keybind — Q, SPACE and V were
   retired for acting on a building the player could not see. What
   mothballing does NOT do is conjure income: a standing order lost to three
-  missed windows during a shutdown still costs money to re-sign, which is
-  issue #85 and stays open.
+  missed windows during a shutdown still costs money to re-sign. (Issue #85
+  closed that for the commonest miss, a few coins short, on 2026-10-24:
+  see the entry at the top.)
   > Full record in `docs/DECISIONS.md`.
 
 - 2026-09-20 **`crewed` on a placement is the ESTABLISHMENT's answer, not a

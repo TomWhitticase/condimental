@@ -651,7 +651,9 @@ world. Full record in `docs/DECISIONS.md` (2026-09-16).
   cannot hire — 8 in hand, 14 due, 2 / period`). Last, the payday rules are
   stated in plain words at the foot of the scrolled list (`STAFF_RULES`):
   every head employed for any part of a period is billed for it; an unpaid
-  head idles until the next payday and leaves only if unpaid twice. The
+  head idles until the next payday, unless its category works in arrears
+  (the row then says "still working", issue #85), and leaves only if unpaid
+  twice. The
   legend sits **inside** the scroll rather than under the footer for §2b
   point 32's reason — `_fit_grid_scroll` takes its cap from the panel's
   height, so four lines of chrome cost a whole category row — with one

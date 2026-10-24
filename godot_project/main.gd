@@ -2201,7 +2201,7 @@ const STAFF_CATEGORY_BLURBS := {
 const STAFF_RULES := [
 	"a machine that cannot get its WHOLE crew stops — it never runs short-handed",
 	"payday bills every head employed for any part of the period, so firing just before one saves nothing",
-	"a head the money does not reach goes unpaid and idles until the next payday — unpaid twice and they leave",
+	"an unpaid head idles until the next payday unless its row says it works on — unpaid twice, they leave",
 ]
 ## The active contract ids the clipboard saw on its last poll. The wire has
 ## no "contract lost" event — a lost contract simply stops being listed and
@@ -2466,7 +2466,7 @@ const PAYDAY_CONFIRM_WIDTH := 380.0 * UI_SCALE
 
 ## What being unpaid actually does, quoted from the simulation's rule rather
 ## than dramatised: two strikes, and the first one is recoverable.
-const PAYDAY_CONFIRM_CONSEQUENCE := "Heads the payday cannot pay are idled for a period, and leave only if the payday after that misses too. Mothballing a line takes its crew off the payroll without losing them."
+const PAYDAY_CONFIRM_CONSEQUENCE := "Heads the payday cannot pay are mostly idled for a period, and leave only if the payday after that misses too. Mothballing a line takes its crew off the payroll without losing them."
 
 ## Which slot this session is saving to by default: the one it was loaded
 ## from, or `DEFAULT_SLOT` for a new game. Kept in step with `GameSession`
@@ -10595,10 +10595,19 @@ func _staff_status_text(category: Dictionary) -> String:
 	var left := int(category.get("left_last_payday", 0))
 	var parts: Array[String] = []
 	if unpaid > 0:
-		parts.append("▲ %d unpaid, idle until payday" % unpaid)
+		parts.append("▲ %d unpaid, %s until payday" % [unpaid, _staff_unpaid_state(category)])
 	if left > 0:
 		parts.append("▲ %d left last payday" % left)
 	return "  ·  ".join(parts)
+
+
+## What an unpaid head of `category` is doing this period, in the words the
+## row and the payday notice share. The SIM decides it (`works_in_arrears`,
+## `data/staff.ron`, issue #85): a category that works in arrears is still at
+## its post, so "idle" would send a player to fix a dock that is shipping.
+## Absent on a pre-field snapshot, which means the ordinary rule.
+func _staff_unpaid_state(category: Dictionary) -> String:
+	return "still working" if bool(category.get("works_in_arrears", false)) else "idle"
 
 
 ## The pure half of a row (a test drives it with a category dictionary):
@@ -11033,7 +11042,7 @@ func _staff_footer_text(snapshot: Dictionary, current_tick: int) -> String:
 		lines.append("balance after payday: %s" % Money.amount(int(floor(money)) - bill))
 	var unpaid_last := int(snapshot.get("unpaid_last_payday", 0))
 	if unpaid_last > 0:
-		lines.append("✗ %d idled unpaid last payday" % unpaid_last)
+		lines.append("✗ %d went unpaid last payday" % unpaid_last)
 	var walked_out := int(snapshot.get("walked_out_last_payday", 0))
 	if walked_out > 0:
 		lines.append("✗ %d left unpaid last payday" % walked_out)
@@ -11059,7 +11068,7 @@ func _staff_payday_notice_text(snapshot: Dictionary) -> String:
 		var name := String(category.get("name", category.get("id", ""))).to_lower()
 		var unpaid := int(category.get("unpaid", 0))
 		if unpaid > 0:
-			lines.append("▲ PAYDAY: %d %s unpaid, idle until next payday" % [unpaid, name])
+			lines.append("▲ PAYDAY: %d %s unpaid, %s until next payday" % [unpaid, name, _staff_unpaid_state(category)])
 		var left := int(category.get("left_last_payday", 0))
 		if left > 0:
 			lines.append("✗ PAYDAY: %d %s left — unpaid two paydays running" % [left, name])

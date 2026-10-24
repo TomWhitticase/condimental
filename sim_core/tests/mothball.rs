@@ -325,6 +325,10 @@ fn returning_a_machine_to_service_resumes_the_craft_it_was_part_way_through() {
 /// The shipped line's own wage bill: manufacturing 4, packaging 2,
 /// logistics 1, every head at wage 2.
 const SHIPPED_BILL: u32 = 14;
+/// What the shipped line's four manufacturing heads cost a period, and so a
+/// balance that pays the cooks and no one after them down `data/staff.ron`:
+/// packaging and the shipping clerk go unpaid.
+const MANUFACTURING_WAGES: u32 = 8;
 
 /// **The state issue #19 describes**, built the way a player reaches it:
 /// the shipped line, running and fed, with the balance stated at `money`
@@ -463,29 +467,38 @@ fn four_paydays_with_and_without_mothballing_end_on_different_balances() {
 /// an empty factory it has no money to re-staff.
 #[test]
 fn mothballing_is_what_takes_a_broke_factory_out_of_arrears_and_a_control_proves_it() {
-    // One coin short of the bill, on payday eve.
-    let mut world = broke_on_payday_eve(SHIPPED_BILL - 1);
+    // Enough for the cooks and nobody after them, on payday eve. A payday
+    // only a few coins short is no longer a spiral at all — the clerk
+    // works a period in arrears and the dock earns the next payday (issue
+    // #85, `a_payday_missed_by_one_coin_leaves_the_clerk_shipping_and_the_next_is_met`)
+    // — so the state this test needs is the deeper miss, where packaging
+    // goes unpaid as well.
+    let mut world = broke_on_payday_eve(MANUFACTURING_WAGES);
     ticks(&mut world, 1);
     assert_eq!(
         world.staff().unpaid_last_payday(),
-        1,
-        "the money reaches all but the last head down staff.ron — the shipping clerk"
+        3,
+        "the money reaches the four cooks and stops: two packers and the clerk go unpaid"
     );
     assert_eq!(world.staff().pool("logistics").unwrap().unpaid, 1);
+    let mut idle = uncrewed(&world);
+    idle.sort();
+    let mut packaging = vec![tile_of(&world, "bottler"), tile_of(&world, "packer")];
+    packaging.sort();
     assert_eq!(
-        uncrewed(&world),
-        vec![tile_of(&world, "dock")],
-        "issue #20's headline case: the dock is the placement going without"
+        idle, packaging,
+        "the packers' machines go without; the clerk in arrears is still at the dock"
     );
 
-    // The spiral: the clerk in arrears does not work, so the dock ships
-    // nothing, so nothing is earned towards the payday that follows.
+    // The spiral: nothing is bottled, so the dock has nothing to ship
+    // however hard its clerk works, so nothing is earned towards the payday
+    // that follows.
     let shipped_before = shipped(&world);
     ticks(&mut world, 400);
     assert_eq!(
         shipped(&world),
         shipped_before,
-        "an unpaid clerk is the whole income of this factory, and they are not at work"
+        "with packaging idle no case reaches the dock, so this factory earns nothing"
     );
 
     // Both futures start HERE, from one save, so nothing but the switch
@@ -514,8 +527,8 @@ fn mothballing_is_what_takes_a_broke_factory_out_of_arrears_and_a_control_proves
          which is what stops mothballing on payday eve being a free period of labour"
     );
 
-    // The payday the two-strike rule takes the clerk at — the one head
-    // already a period in arrears. The shutdown is still inside its notice
+    // The payday the two-strike rule takes the packers and the clerk at —
+    // the three heads already a period in arrears. The shutdown is still inside its notice
     // period here, so it is billed the full 14 it cannot pay; the
     // difference is that a stood-down head is never the one shown the
     // door, so nobody leaves.
@@ -528,8 +541,9 @@ fn mothballing_is_what_takes_a_broke_factory_out_of_arrears_and_a_control_proves
     );
     assert_eq!(
         control.staff().walked_out_last_payday(),
-        1,
-        "the control's clerk, unpaid twice, is gone"
+        3,
+        "the control's packers and clerk, unpaid twice, are gone — a period's grace \
+         is not credit"
     );
     assert_eq!(
         (
@@ -541,7 +555,7 @@ fn mothballing_is_what_takes_a_broke_factory_out_of_arrears_and_a_control_proves
 
     // And the payday after it. For the shutdown: nobody on the payroll, so
     // nothing billed, so nobody unpaid — the arrears are gone and the crew
-    // is intact. For the control: the six heads it could not pay last time
+    // is intact. For the control: the four cooks it could not pay last time
     // are on their second strike, and they all walk.
     to_next_payday(&mut world);
     to_next_payday(&mut control);
@@ -561,7 +575,7 @@ fn mothballing_is_what_takes_a_broke_factory_out_of_arrears_and_a_control_proves
     );
     assert_eq!(
         control.staff().walked_out_last_payday(),
-        6,
+        4,
         "the control loses the rest of its crew on their second strike"
     );
     assert_eq!(headcount(&control, "manufacturing"), 0);
@@ -616,8 +630,11 @@ fn mothballing_is_what_takes_a_broke_factory_out_of_arrears_and_a_control_proves
     // the standing order was lost to missed windows while the line stood
     // still, and signing it again costs money this balance has not got
     // (`data/contracts.ron`: "a lost contract is never free to recover").
-    // That residue is issue #85, filed against this same work and left
-    // open deliberately — mothballing is the bill escape, not a cash one.
+    // Mothballing is the bill escape, not a cash one. (Issue #85 was this
+    // residue for the commonest miss, a few coins short, which now keeps
+    // its order because the clerk works a period in arrears; a miss this
+    // deep idles packaging, and no grace on the dock can ship what was
+    // never bottled.)
     assert_eq!(
         world
             .economy_snapshot()
@@ -626,7 +643,7 @@ fn mothballing_is_what_takes_a_broke_factory_out_of_arrears_and_a_control_proves
             .filter(|offer| offer.active)
             .count(),
         0,
-        "the standing order did not survive the shutdown — issue #85"
+        "the standing order did not survive the shutdown"
     );
 }
 
@@ -647,7 +664,9 @@ fn mothballing_is_what_takes_a_broke_factory_out_of_arrears_and_a_control_proves
 /// that identity was the proof that mothballing did nothing at all.
 #[test]
 fn mothballing_and_firing_are_not_the_same_move() {
-    let mut broke = broke_on_payday_eve(SHIPPED_BILL - 1);
+    // The deeper miss, for the reason the acceptance test above gives: a
+    // coin short is no longer broke (issue #85).
+    let mut broke = broke_on_payday_eve(MANUFACTURING_WAGES);
     ticks(&mut broke, 401);
 
     let mut mothballed = World::from_save_ron(&broke.to_save_ron(), recipes()).expect("clone");
@@ -973,4 +992,66 @@ fn the_fixture_still_describes_the_shipped_content() {
         "an empty world needs nobody"
     );
     assert!(uncrewed(&empty).is_empty());
+}
+
+/// **Issue #85: a payday missed by one shipping clerk is not terminal.**
+///
+/// The payday order pays logistics last (`data/staff.ron`, on purpose), so a
+/// payday a coin short always leaves the clerk unpaid — and the clerk is the
+/// whole income of a factory, because the dock is the only road from product
+/// to money. When an unpaid head did not work, that one coin stopped every
+/// sale, the next bill came round at the full figure with nothing earned
+/// towards it, and the clerk walked at the second strike: a spiral nothing
+/// could climb out of. Logistics now `works_in_arrears` — one period's grace,
+/// not credit — so the clerk keeps shipping through the period they were not
+/// paid for, and that is what pays the next payday.
+///
+/// The test bites: set `works_in_arrears` back to false in `data/staff.ron`
+/// and the dock is uncrewed on the first assertion below.
+#[test]
+fn a_payday_missed_by_one_coin_leaves_the_clerk_shipping_and_the_next_is_met() {
+    let mut world = broke_on_payday_eve(SHIPPED_BILL - 1);
+    ticks(&mut world, 1);
+    assert_eq!(
+        world.staff().unpaid_last_payday(),
+        1,
+        "the money reaches all but the last head down staff.ron — the shipping clerk"
+    );
+    assert_eq!(world.staff().pool("logistics").unwrap().unpaid, 1);
+    assert!(
+        uncrewed(&world).is_empty(),
+        "the clerk is in arrears and at the dock anyway: nothing goes without"
+    );
+    let signed = world.economy_snapshot().contracts.len();
+    assert!(signed > 0, "the fixture ships against a standing order");
+
+    let shipped_before = shipped(&world);
+    to_next_payday(&mut world);
+    assert!(
+        shipped(&world) > shipped_before,
+        "the dock ships through the period its clerk was not paid for"
+    );
+    assert_eq!(
+        (
+            world.staff().unpaid_last_payday(),
+            world.staff().walked_out_last_payday()
+        ),
+        (0, 0),
+        "what the dock earned meets the next payday, so nobody is unpaid and nobody leaves"
+    );
+    assert_eq!(world.staff().unpaid(), 0, "the arrears are cleared");
+    assert_eq!(
+        (
+            headcount(&world, "manufacturing"),
+            headcount(&world, "packaging"),
+            headcount(&world, "logistics")
+        ),
+        (4, 2, 1),
+        "the whole crew comes through it"
+    );
+    assert_eq!(
+        world.economy_snapshot().contracts.len(),
+        signed,
+        "and the standing order with it"
+    );
 }
