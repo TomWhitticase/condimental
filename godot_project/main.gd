@@ -16826,7 +16826,7 @@ func _shared_runs_text(shared_runs: Array, joining := false) -> String:
 
 
 ## One shared run, worded: "▲ shares the Ketchup run with Bottler" for a
-## machine ghost, which is the new mouth; "▲ joins Bottler, Mixer on the
+## machine ghost, which is the new mouth; "▲ joins Mixer, Bottler on the
 ## Ketchup run" for a pipe ghost (`joining`), which adds no machine but puts
 ## placed ones on one run — the BBQ branch's joint, laid after its mixer.
 ## Several machines of one kind read as a count ("2 × Bottler"), distinct

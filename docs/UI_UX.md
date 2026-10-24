@@ -825,7 +825,7 @@ one-line larder strip that used to sit above the sockets.
    2026-10-24): a machine ghost that would draw from a run a placed machine
    already draws from reads "▲ shares the Ketchup run with Bottler", and a
    pipe ghost that would put placed machines on one run reads "▲ joins
-   Bottler, Mixer on the Ketchup run". The line stands between the click line
+   Mixer, Bottler on the Ketchup run". The line stands between the click line
    and the SHIFT line, a glyph and words rather than colour. The SIM decides
    it (`placement_fluid_preview_json`, asked of the command the ghost
    already previews); the prompt only words the answer.

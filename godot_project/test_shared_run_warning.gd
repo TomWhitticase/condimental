@@ -11,7 +11,7 @@
 #     Bottler" — the fluid and the machine named from the WIRE
 #     (`placement_fluid_preview_json` and the display names), not from here,
 #   * built in the issue's own order — mixer first, joint pipe second — the
-#     PIPE's ghost reads "▲ joins Bottler, Mixer on the Ketchup run", since
+#     PIPE's ghost reads "▲ joins Mixer, Bottler on the Ketchup run", since
 #     it is that click which puts the two on one run,
 #   * the same mixer away from any pipe, and a first consumer on a run
 #     nobody draws from yet, read no warning at all,

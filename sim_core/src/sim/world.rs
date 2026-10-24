@@ -2330,7 +2330,8 @@ pub struct SharedRunPreview {
     /// What the run carries now — `None` while nothing has named it.
     pub fluid: Option<FluidId>,
     /// The kind of every placed machine that would be drawing from it beside
-    /// another, in tile order, one entry per machine. For a machine ghost
+    /// another, one entry per machine, in the order the topology pass lists
+    /// machines (stable across calls, so a prompt does not reshuffle). For a machine ghost
     /// that is the machines already on the run (the ghost is the other); for
     /// a pipe ghost, which joins machines that are each placed already, it
     /// is every machine the joined run would serve.

@@ -121,10 +121,13 @@ fn a_kind_that_draws_no_fluid_or_touches_no_pipe_warns_nothing() {
         world.placement_fluid_preview("mixer", (40, 40), Direction::East),
         vec![]
     );
-    // Not a machine at all.
+    // A pipe on ground it cannot be laid on — the empty tile the mixer would
+    // stand on is free, so ask for the tile the shipped crusher occupies.
+    let crusher = tile_of(&world, "crusher");
     assert_eq!(
-        world.placement_fluid_preview("pipe", BBQ_MIXER, Direction::East),
-        vec![]
+        world.placement_fluid_preview("pipe", crusher, Direction::East),
+        vec![],
+        "a pipe the ground refuses previews nothing"
     );
 }
 
@@ -177,6 +180,31 @@ fn the_pipe_that_joins_a_placed_mixer_to_the_bottler_s_run_is_warned() {
 
     // And the click does exactly that: both now draw from one run.
     build(&mut world, "pipe", BBQ_TAP, None);
+    let run = world
+        .fluid_snapshots()
+        .into_iter()
+        .find(|run| run.segments.iter().any(|s| s.tile == BBQ_TAP))
+        .expect("the joint pipe is on a run");
+    assert_eq!(run.fluid.as_deref(), Some("ketchup"));
+    let layout = world.world_layout();
+    let kind_at = |tile: (i32, i32)| {
+        layout
+            .iter()
+            .find(|placement| placement.tile == tile)
+            .map(|placement| placement.kind.clone())
+            .unwrap_or_default()
+    };
+    let mut drawers: Vec<String> = run
+        .taps
+        .iter()
+        .map(|tap| kind_at(tap.machine_tile))
+        .collect();
+    drawers.sort();
+    drawers.dedup();
+    assert!(
+        drawers.contains(&"mixer".to_string()) && drawers.contains(&"bottler".to_string()),
+        "the run the warning named now taps both: {drawers:?}"
+    );
     assert_eq!(
         world.placement_fluid_preview("pipe", BBQ_TAP, Direction::East),
         vec![],
@@ -198,5 +226,22 @@ fn a_pipe_that_extends_a_run_without_adding_a_consumer_warns_nothing() {
         world.placement_fluid_preview("pipe", (13, -1), Direction::East),
         vec![],
         "the bottler alone still drinks from it"
+    );
+}
+
+/// Once the branch exists the mixer and the bottler already share the
+/// ketchup run. Lengthening that run puts nobody new on it, so it must not
+/// read as "joins Mixer, Bottler" all over again — `pipe_join_preview`'s
+/// `already_shared` is what says so, and this is the test that bites if it
+/// goes.
+#[test]
+fn a_pipe_that_lengthens_an_already_shared_run_warns_nothing() {
+    let mut world = reference_chain_with_budget(recipes(), BUDGET);
+    build(&mut world, "mixer", BBQ_MIXER, Some("bbq_mix"));
+    build(&mut world, "pipe", BBQ_TAP, None);
+    assert_eq!(
+        world.placement_fluid_preview("pipe", (13, -1), Direction::East),
+        vec![],
+        "the run already serves the mixer and the bottler; one more tile adds no one"
     );
 }
