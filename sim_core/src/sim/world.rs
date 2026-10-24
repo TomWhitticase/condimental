@@ -4453,82 +4453,40 @@ impl World {
             let placement = self.placement_of(machine);
             let origin = self.position_of(machine);
             let kind = placement.kind.clone();
-            // Whether this kind plumbs at all is a property of the *kind*,
-            // not of whichever recipe it happens to be running: a machine
-            // that can draw a fluid under any of its recipes gets its taps,
-            // so switching recipe never changes which runs it touches —
-            // only what the resolver below names them.
-            let (mut draws, mut deposits) = (false, false);
-            for recipe in self.recipes.for_machine(&kind) {
-                draws |= !recipe.fluid_inputs.is_empty();
-                deposits |= !recipe.fluid_outputs.is_empty();
+            let taps = machine_taps(
+                &placement.footprint,
+                origin,
+                placement.direction,
+                self.kind_plumbs(&kind),
+                &opens,
+                &topology.pipe_index,
+            );
+            let output_network = taps.output.map(|(_, (network, _))| network);
+            if let Some((tile, (network, segment))) = taps.output {
+                topology
+                    .machine_output_taps
+                    .push((machine, network, segment));
+                let (pipe, _, _, _) = pipe_tiles[&tile];
+                pipe_links(&mut links, pipe)
+                    .connections
+                    .push(PipeConnection {
+                        to: placement.direction.opposite(),
+                        kind: LinkKind::Machine,
+                    });
             }
-
-            let mut output_network: Option<usize> = None;
-            if deposits {
-                // The pipe stands off the outlet face, so from the pipe the
-                // machine is back the way the machine points — the side the
-                // pipe has to be open on.
-                let tap = placement
-                    .footprint
-                    .outlet_neighbours(origin, placement.direction)
-                    .into_iter()
-                    .filter(|&tile| opens(tile, placement.direction.opposite()))
-                    .find_map(|tile| topology.pipe_index.get(&tile).map(|&index| (tile, index)));
-                if let Some((tile, (network, segment))) = tap {
-                    output_network = Some(network);
-                    topology
-                        .machine_output_taps
-                        .push((machine, network, segment));
-                    let (pipe, _, _, _) = pipe_tiles[&tile];
-                    pipe_links(&mut links, pipe)
-                        .connections
-                        .push(PipeConnection {
-                            to: placement.direction.opposite(),
-                            kind: LinkKind::Machine,
-                        });
-                }
-            }
-
-            // Every network touching the footprint, not just the first:
-            // a recipe may draw several fluids, and which tap supplies
-            // which is matched by fluid id in `Machine::tick`. One entry
-            // per *network*, so the taps a machine is handed are pairwise
-            // distinct and can be borrowed mutably all at once.
-            let mut input_networks: Vec<usize> = Vec::new();
-            if draws {
-                let touching = placement
-                    .tiles(origin)
-                    .into_iter()
-                    .flat_map(|tile| Direction::ALL.map(|dir| (dir, dir.step(tile))))
-                    // A crossing's pipe is closed across the belt, so a
-                    // machine beside it on that side is not plumbed into it.
-                    .filter(|&(dir, neighbour)| opens(neighbour, dir.opposite()))
-                    .filter_map(|(dir, neighbour)| {
-                        topology
-                            .pipe_index
-                            .get(&neighbour)
-                            .map(|&index| (dir, neighbour, index))
-                    })
-                    // A machine never draws from the run it fills: that is
-                    // not plumbing, it is a machine feeding itself.
-                    .filter(|&(_, _, (network, _))| Some(network) != output_network);
-                for (dir, tile, (network, segment)) in touching {
-                    if input_networks.contains(&network) {
-                        continue;
-                    }
-                    input_networks.push(network);
-                    topology.machine_taps.push((machine, network, segment));
-                    // `dir` stepped from the footprint to the pipe; the
-                    // wire names the side from the pipe's point of view.
-                    let (pipe, _, _, _) = pipe_tiles[&tile];
-                    pipe_links(&mut links, pipe)
-                        .connections
-                        .push(PipeConnection {
-                            to: dir.opposite(),
-                            kind: LinkKind::Machine,
-                        });
-                }
+            let mut input_networks: Vec<usize> = Vec::with_capacity(taps.inputs.len());
+            for (dir, tile, (network, segment)) in taps.inputs {
+                input_networks.push(network);
+                topology.machine_taps.push((machine, network, segment));
+                // `dir` stepped from the footprint to the pipe; the
+                // wire names the side from the pipe's point of view.
+                let (pipe, _, _, _) = pipe_tiles[&tile];
+                pipe_links(&mut links, pipe)
+                    .connections
+                    .push(PipeConnection {
+                        to: dir.opposite(),
+                        kind: LinkKind::Machine,
+                    });
             }
 
             let recipe = self
