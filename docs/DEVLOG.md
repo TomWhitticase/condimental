@@ -266,6 +266,20 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-24 — a shipping clerk works a period unpaid, so a missed payday can be earned back
+
+Issue #85. The payday pays logistics last, so a payday a few coins short left
+the shipping clerk unpaid. An unpaid head did not work, and the dock is the
+only road to money, so that payday stopped all income and the factory could
+never meet the next one. Logistics now `works_in_arrears` in `data/staff.ron`:
+the clerk ships through the unpaid period, and that pays the next payday. It
+is grace, not credit, since unpaid twice they still leave. Measured on the
+shipped line, a payday up to four coins short of the bill of 14 now recovers
+with the whole crew and the standing order. A miss deep enough to idle both
+packers still spirals, and mothballing is still its way out. The staff row
+and payday notice say "still working" instead of "idle" for such a head, and
+`screenshot-scene.sh --missed-payday` photographs both rows side by side.
+
 ### 2026-10-23 — a rebuild re-parses only the placements that changed
 
 Issue #3. Every place, remove and rotate re-read the world layout by

@@ -223,6 +223,15 @@ func _run_checks() -> void:
 	})
 	if idled["status_text"] != "▲ 2 unpaid, idle until payday":
 		_fail("an idled row says '▲ 2 unpaid, idle until payday', got '%s'" % idled["status_text"])
+	# A category the SIM says works in arrears (issue #85) is unpaid and at
+	# its post, and the row must not send the player to fix an idle dock.
+	var grace: Dictionary = main._staff_row_state({
+		"id": "logistics", "name": "Logistics", "headcount": 1, "wage": 2,
+		"demand": 1, "assigned": 1, "required": 1, "short": 0, "unpaid": 1,
+		"works_in_arrears": true,
+	})
+	if grace["status_text"] != "▲ 1 unpaid, still working until payday":
+		_fail("a works-in-arrears row says '▲ 1 unpaid, still working until payday', got '%s'" % grace["status_text"])
 	var left_row: Dictionary = main._staff_row_state({
 		"id": "logistics", "name": "Logistics", "headcount": 0, "wage": 2,
 		"demand": 0, "assigned": 0, "required": 0, "short": 0, "left_last_payday": 1,
@@ -422,8 +431,8 @@ func _run_checks() -> void:
 	snapshot["walked_out_last_payday"] = 0
 	snapshot["unpaid_last_payday"] = 2
 	var idled_footer: String = main._staff_footer_text(snapshot, 1700)
-	if idled_footer.find("✗ 2 idled unpaid last payday") < 0:
-		_fail("two idled last payday reads '✗ 2 idled unpaid last payday' (distinct from 'left'), got:\n%s" % idled_footer)
+	if idled_footer.find("✗ 2 went unpaid last payday") < 0:
+		_fail("two unpaid last payday reads '✗ 2 went unpaid last payday' (distinct from 'left'; not 'idled', since a works-in-arrears head is not), got:\n%s" % idled_footer)
 	snapshot["unpaid_last_payday"] = 0
 
 	# --- 2a. the BEFORE-payday warning and the covered-payday balance,
@@ -538,11 +547,14 @@ func _run_checks() -> void:
 		"categories": [
 			{"id": "packaging", "name": "Packaging", "unpaid": 3},
 			{"id": "logistics", "name": "Logistics", "left_last_payday": 1},
+			{"id": "engineering", "name": "Engineering", "unpaid": 1, "works_in_arrears": true},
 		],
 	}
 	var notice_text: String = main._staff_payday_notice_text(payday_snapshot)
 	if notice_text.find("▲ PAYDAY: 3 packaging unpaid, idle until next payday") < 0:
 		_fail("the notice names the category and count for unpaid heads, got:\n%s" % notice_text)
+	if notice_text.find("▲ PAYDAY: 1 engineering unpaid, still working until next payday") < 0:
+		_fail("a works-in-arrears category's notice says it is still working, got:\n%s" % notice_text)
 	if notice_text.find("✗ PAYDAY: 1 logistics left — unpaid two paydays running") < 0:
 		_fail("the notice names the category and count for a lost head, got:\n%s" % notice_text)
 	var covered_payday := {"next_payday_tick": 3000, "categories": [{"id": "manufacturing", "name": "Manufacturing"}]}

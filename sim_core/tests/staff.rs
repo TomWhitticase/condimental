@@ -1095,11 +1095,18 @@ fn a_factory_that_cannot_pay_is_warned_then_idled_and_loses_its_crew_only_at_the
     );
     assert!(snapshot.categories.iter().all(|c| c.left_last_payday == 0));
 
-    // The unpaid do not work: next tick only the paid heads are at their post.
+    // The unpaid do not work: next tick only the paid heads are at their post
+    // — except the shipping clerk, whose category works one period in
+    // arrears (`works_in_arrears`, issue #85), so the dock keeps earning the
+    // money the next payday needs.
     world.tick();
     assert_eq!(available(&world, "manufacturing"), 2);
     assert_eq!(available(&world, "packaging"), 0);
-    assert_eq!(available(&world, "logistics"), 0);
+    assert_eq!(
+        (unpaid(&world, "logistics"), available(&world, "logistics")),
+        (1, 1),
+        "unpaid, and at work anyway"
+    );
 
     // A hire the next payday could not pay is WARNED about, not refused
     // (2026-09-26): the wire says so and the hire still happens, costing
@@ -1479,8 +1486,14 @@ fn staff_snapshot_json_has_the_documented_shape_in_staff_ron_order() {
                 "sources",
                 "stood_down",
                 "unpaid",
-                "wage"
+                "wage",
+                "works_in_arrears"
             ]
+        );
+        assert_eq!(
+            c["works_in_arrears"],
+            c["id"] == "logistics",
+            "only the shipping clerk works a period in arrears (data/staff.ron, issue #85)"
         );
         assert_eq!(
             c["owed"], c["headcount"],
