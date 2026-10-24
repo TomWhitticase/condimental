@@ -1351,6 +1351,11 @@ var _ghost_result_kind := ""
 ## revision, so a ghost held still asks once per change rather than per frame.
 var _ghost_preview_key := ""
 var _ghost_preview: Dictionary = {}
+## The pipe runs the ghost's machine would draw from that a placed machine
+## already draws from — `placement_fluid_preview_json`, asked of the same
+## command under the same cache key (issue #92). The SIM decides which runs
+## those are; the prompt only words them (`_shared_run_text`).
+var _ghost_shared_runs: Array = []
 var _owned_counts: Dictionary = {} # kind -> owned count, repolled while building
 var _shop_prices: Dictionary = {} # kind -> price, from the same poll
 var _shop_affordable: Dictionary = {} # kind -> can the balance cover one, same poll
@@ -16453,6 +16458,8 @@ func _preview_place(kind: String, tile: Vector2i, direction: String) -> Dictiona
 	if key != _ghost_preview_key:
 		var parsed = JSON.parse_string(sim.preview_command_json(command_json))
 		_ghost_preview = parsed if parsed is Dictionary else {}
+		var shared = JSON.parse_string(sim.placement_fluid_preview_json(command_json))
+		_ghost_shared_runs = shared if shared is Array else []
 		_ghost_preview_key = key
 	return _ghost_preview
 
@@ -16797,9 +16804,55 @@ func _placement_prompt_text() -> String:
 		kind_name = "%s %s %s" % [
 			kind_name, "over" if _build_kind == PIPE_KIND else "under", _kind_display_name(other)
 		]
-	return "✔ PLACE  %s  ·  facing %s\nclick to build    %d left to place\n%s\nR: rotate    ESC: cancel%s" % [
-		kind_name, _build_direction, owned, _auto_buy_hint_text(), contents_hint
+	return "✔ PLACE  %s  ·  facing %s\nclick to build    %d left to place\n%s%s\nR: rotate    ESC: cancel%s" % [
+		kind_name, _build_direction, owned, _shared_runs_text(_ghost_shared_runs, _build_kind == PIPE_KIND),
+		_auto_buy_hint_text(),
+		contents_hint
 	]
+
+
+## The ghost's sharing warning (issue #92): one line per pipe run the machine
+## would draw from that a placed machine already draws from, each ending in a
+## newline so it stands between the click line and the SHIFT line, or "" for
+## none. A glyph and words, never colour alone (UI_UX.md §7). Since issue #93
+## the machines on such a run take turns rather than one starving, so the
+## sentence is about a SHARE — the line already living on the run will get
+## less of it — which is what a lost contract later would otherwise teach.
+func _shared_runs_text(shared_runs: Array, joining := false) -> String:
+	var lines := ""
+	for run in shared_runs:
+		lines += "%s\n" % _shared_run_text(run, joining)
+	return lines
+
+
+## One shared run, worded: "▲ shares the Ketchup run with Bottler" for a
+## machine ghost, which is the new mouth; "▲ joins Mixer, Bottler on the
+## Ketchup run" for a pipe ghost (`joining`), which adds no machine but puts
+## placed ones on one run — the BBQ branch's joint, laid after its mixer.
+## Several machines of one kind read as a count ("2 × Bottler"), distinct
+## kinds in the order the wire lists them; a run nothing has named yet is
+## "an unnamed run" rather than a guessed fluid.
+func _shared_run_text(run: Dictionary, joining := false) -> String:
+	var counts := {}
+	var order: Array[String] = []
+	for kind in run.get("drawn_by", []):
+		var k := String(kind)
+		if not counts.has(k):
+			order.append(k)
+			counts[k] = 0
+		counts[k] += 1
+	var names: Array[String] = []
+	for k in order:
+		var name := _kind_display_name(k)
+		names.append(name if int(counts[k]) == 1 else "%d × %s" % [int(counts[k]), name])
+	var fluid = run.get("fluid", null)
+	var subject := (
+		"the %s run" % _item_display_name(String(fluid)) if fluid != null and String(fluid) != ""
+		else "an unnamed run"
+	)
+	if joining:
+		return "▲ joins %s on %s" % [", ".join(names), subject]
+	return "▲ shares %s with %s" % [subject, ", ".join(names)]
 
 
 ## The prompt's SHIFT line. Held or not, it is always there while a valid

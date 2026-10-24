@@ -266,6 +266,24 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-24 — the build ghost warns before a machine shares a running pipe run
+
+Issue #92. Building the BBQ branch onto a running ketchup line gave no warning
+at any point: the ghost went green, and the first sign was a CONTRACT LOST
+banner thousands of ticks later. Since #93 the two machines on the run take
+turns instead of one starving, but a turn is still a share. On main, with the
+three starter orders signed, the branch halves what the ketchup line bottles
+and two of the three orders are lost within 40 000 ticks. Now the ghost of a
+machine that would draw from a run a placed machine already draws from says
+"▲ shares the Ketchup run with Bottler", and a pipe that would join placed
+machines on one run (the branch's joint, laid after its mixer) says
+"▲ joins Mixer, Bottler on the Ketchup run". The sim decides it
+(`World::placement_fluid_preview`, asked through `placement_fluid_preview_json`
+with the same command the ghost already previews), and its taps come from
+`machine_taps`, the one rule `recompute_topology` now plumbs placed machines
+by, so the warning and the plumbing the click gets cannot disagree.
+`screenshot-scene.sh --fixture bbq_tap --ghost mixer --ghost-at 14,-3` shows it.
+
 ### 2026-10-24 — a shipping clerk works a period unpaid, so a missed payday can be earned back
 
 Issue #85. The payday pays logistics last, so a payday a few coins short left

@@ -1512,6 +1512,31 @@ static func unclerked_dock_is_silent(sim) -> bool:
 	return true
 
 
+## THE BBQ BRANCH'S FIRST STEP (issue #92) — the fixture
+## `screenshot-scene.sh --fixture bbq_tap --ghost mixer --ghost-at 14,-3`
+## photographs: the shipped line with the branch's joint pipe laid at
+## (14, -1) on top of the ketchup run, and one mixer bought and not placed.
+## The mixer ghost held where `build_bbq_branch` puts it reads the sharing
+## warning, because the bottler already draws from that run.
+static func build_bbq_tap_line(sim) -> void:
+	build_reference_line(sim)
+	fund(sim, 5000)
+	place(sim, "pipe", Vector2i(14, -1), "east")
+	sim.issue_command_json(JSON.stringify({"type": "purchase", "kind": "mixer"}))
+
+
+## The same first step in the issue's OWN order, as `build_bbq_branch` lays
+## it — `--fixture bbq_joint --ghost pipe --ghost-at 14,-1`: the BBQ mixer
+## placed first and touching no pipe, and one pipe bought. It is the joint
+## pipe's click that puts the mixer and the bottler on one run, so that ghost
+## reads "▲ joins ... on the Ketchup run".
+static func build_bbq_joint_line(sim) -> void:
+	build_reference_line(sim)
+	fund(sim, 5000)
+	place(sim, "mixer", Vector2i(14, -3), "east", "", "bbq_mix")
+	sim.issue_command_json(JSON.stringify({"type": "purchase", "kind": "pipe"}))
+
+
 ## THE UNDERFUNDED LINE (the quality pass, ticket 4) — the fixture that
 ## CANNOT pay its next bill, for `test_staff_panel.gd`'s BEFORE-payday
 ## warning and `screenshot-scene.sh --staff-shortfall`. The shipped line's

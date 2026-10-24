@@ -199,7 +199,15 @@ transient cost**, and a balance pass that moved the gate back would restore
 the trap without touching anything that looks like it. The right ones are a warning at placement
 time, before the player commits, and a fluid network that does not let a
 brand-new consumer take 100% of a network the old one is living on. Both are
-still to build (issues #92, #93); the measured table and the protocol behind
+built now: a shared run serves its consumers in turns (issue #93,
+2026-10-20), and the build ghost of a machine that would draw from a run a
+placed machine already draws from says so before the click — "▲ shares the
+Ketchup run with Bottler" (issue #92, 2026-10-24, `World::placement_fluid_preview`).
+Turns are still a share: the branch on a line serving all three starter
+orders halves what that line bottles (measured 2026-10-24: orders signed at
+tick 6 000 of a running line, the branch built 10 000 ticks later, then
+40 000 ticks run — 1320 bottles and three orders kept without it, 656 and
+one with it). The measured table and the protocol behind
 it are in `data/unlocks.ron`'s comment and the full record is in
 `docs/DECISIONS.md`.
 
