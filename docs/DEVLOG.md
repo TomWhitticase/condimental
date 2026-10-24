@@ -266,6 +266,33 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-23 — a rebuild re-parses only the placements that changed
+
+Issue #3. Every place, remove and rotate re-read the world layout by
+`JSON.parse_string`-ing the whole `world_layout_json` — ~12 ms of a ~16 ms
+read on the 1500-tile stress line, release build, against ~1 ms for Rust to
+write it. `SimBridge.world_layout_entries` now hands the same array over as
+one JSON text per placement, and `_read_world_layout` keeps the last read's
+parsed entries keyed by that text, so only entries that changed are parsed.
+After one rotate the read is ~4 ms, down from ~16; under the same heavy machine load
+`test_perf.gd` read 22-52 ms before and ~10 ms after. Keying on the whole text means nothing
+has to say *what* changed — a neighbour's `links` or `crewed` flipping
+everywhere is just new text. A cold read (load, new game) is ~5 ms slower,
+paid once. The read is still whole-world; the remaining ~75% of a warm
+rebuild is node construction, which stays milestone 8's.
+
+### 2026-10-20 — a shared pipe run serves its consumers together
+
+Issue #93, the simulation half of #55. A BBQ branch built onto a running
+ketchup line used to take every unit of ketchup the vat made for ~8 000 ticks,
+and the ketchup bottler made nothing. The cause was not new pipework priming.
+It was a race on the shared run that one tile won every time, decided by link
+order. Now a run is held while any machine on it is waiting for it alone, so
+its consumers start together and the old line keeps half the vat while the
+branch primes (`World::held_networks`). The rule is derived, never saved, so
+there is no save-format change. Steady state and the 3:2 split are unchanged.
+Full record: DECISIONS.md, 2026-10-20.
+
 ### 2026-10-19 — ketchup mix is a pale coral, apart from BBQ mix by value
 
 Issue #131. The two mixers' outputs, `ketchup_mix` and `bbq_mix`, were 7.7/255

@@ -19,7 +19,7 @@ extends Node3D
 ## **The world starts EMPTY and the player builds it** (the "Real Placement"
 ## epic). This script no longer learns a chain's shape once from
 ## `chain_layout_json` — there is no chain, and nothing is built for free. It
-## re-reads `world_layout_json` and rebuilds its whole "World" subtree after
+## re-reads the world layout and rebuilds its whole "World" subtree after
 ## every place, remove and rotate, draws each tile at the facing the player
 ## gave it, and carries a real build mode: a translucent ghost that follows
 ## the cursor and says whether the click will work, **R** to turn things,
@@ -1192,7 +1192,7 @@ var _hud_clock_msec := 0.0
 # every belt tile, pipe tile, machine and building in it is something the
 # player bought and put down, facing a direction they chose.
 #
-# So the shape is live state. `world_layout_json` is re-read and the whole
+# So the shape is live state. The layout is re-read and the whole
 # "World" subtree rebuilt after every place/remove/rotate — a FULL rebuild
 # rather than an incremental patch, deliberately, for exactly the reason
 # `World::recompute_topology` rebuilds its whole adjacency graph rather than
@@ -1200,9 +1200,12 @@ var _hud_clock_msec := 0.0
 # rebuilding a few hundred nodes costs less than the bookkeeping an
 # incremental update needs, and it cannot drift out of step with the
 # simulation. A rebuild happens on a player action, never per tick.
-var _placements: Array = [] # world_layout_json, parsed, in the simulation's own tile order
+var _placements: Array = [] # world_layout_entries, parsed, in the simulation's own tile order
 var _by_origin: Dictionary = {} # "x,y" of a placement's ORIGIN -> its layout dict
 var _occupancy: Dictionary = {} # "x,y" of ANY covered tile -> that placement's origin key
+## Last read's `world_layout_entries` text -> its `_layout_entry`, so the
+## next read parses only what changed (issue #3).
+var _layout_cache: Dictionary = {}
 var _world_root: Node3D
 var _floor_node: Node3D # parent of one MultiMeshInstance3D per floor variant
 var _floor_bounds := Rect2i(0, 0, -1, -1) # tile bounds the floor mesh currently covers
@@ -2945,9 +2948,9 @@ func _placement_tiles(origin: Vector2i, size: Vector2i, direction: String) -> Ar
 	return tiles
 
 
-## Re-reads `world_layout_json` into the three indexes the rest of this file
-## asks questions of: the placements themselves, a lookup by origin tile, and
-## an occupancy map from *every* covered tile back to the placement's origin.
+## Re-reads the world layout (`world_layout_entries`) into the three
+## indexes the rest of this file asks questions of: the placements
+## themselves, a lookup by origin tile, and an occupancy map from *every* covered tile back to the placement's origin.
 ##
 ## The occupancy map is what makes "point at a machine, not at its corner"
 ## work here the way it already does in the simulation (`World::query_tile`,
@@ -2957,28 +2960,62 @@ func _placement_tiles(origin: Vector2i, size: Vector2i, direction: String) -> Ar
 ## `occupies` comes straight off the wire rather than being re-derived from
 ## `footprint` + `direction`: the simulation reports both precisely so a
 ## consumer can take whichever it needs (see `sim::PlacementSnapshot`).
+##
+## Each entry arrives as its own JSON text (`world_layout_entries`) and is
+## parsed only if that exact text was not in the last read — see
+## `_layout_cache`. Every rebuild still re-reads the whole world; it just
+## stops re-parsing the part a place, remove or rotate did not touch.
 func _read_world_layout() -> void:
 	_placements.clear()
 	_by_origin.clear()
 	_occupancy.clear()
-	var parsed = JSON.parse_string(sim.world_layout_json())
-	if not (parsed is Array):
-		return
-	for placement in parsed:
-		if not (placement is Dictionary):
-			continue
+	var cache := {}
+	for text in sim.world_layout_entries():
+		var entry: Array = _layout_cache.get(text, [])
+		if entry.is_empty():
+			entry = _layout_entry(text)
+			if entry.is_empty():
+				continue
+		cache[text] = entry
+		var placement: Dictionary = entry[0]
+		var key: String = entry[1]
 		_placements.append(placement)
-		var origin := _placement_origin(placement)
-		var key := _tile_key(origin)
 		_by_origin[key] = placement
 		# A kind's declared footprint is content (data/machines.ron) and the
 		# only place it reaches this scene is on a placement — so every
 		# placement teaches it, for the ghost of a kind nothing has placed
 		# yet to fall back on. See `_kind_footprint`.
-		_kind_footprints[String(placement.get("kind", ""))] = _footprint_size(placement.get("footprint"))
-		for pair in placement.get("occupies", []):
-			if pair is Array and pair.size() >= 2:
-				_occupancy[_tile_key(Vector2i(int(pair[0]), int(pair[1])))] = key
+		_kind_footprints[entry[2]] = entry[3]
+		for tile_key in entry[4]:
+			_occupancy[tile_key] = key
+	# Replaced rather than added to, so it holds exactly this read's entries
+	# and a removed placement's text does not outlive it.
+	_layout_cache = cache
+
+
+## One `world_layout_entries` text, parsed into what `_read_world_layout`
+## indexes it by: `[placement, origin key, kind, footprint size, the keys
+## of every tile it occupies]`. `[]` for text that is not a placement.
+##
+## The placement is made read-only because `_layout_cache` hands the same
+## Dictionary to every later read: a write to it would otherwise survive
+## into the next rebuild as if the simulation had said it.
+func _layout_entry(text: String) -> Array:
+	var placement = JSON.parse_string(text)
+	if not (placement is Dictionary):
+		return []
+	placement.make_read_only()
+	var occupied := PackedStringArray()
+	for pair in placement.get("occupies", []):
+		if pair is Array and pair.size() >= 2:
+			occupied.append(_tile_key(Vector2i(int(pair[0]), int(pair[1]))))
+	return [
+		placement,
+		_tile_key(_placement_origin(placement)),
+		String(placement.get("kind", "")),
+		_footprint_size(placement.get("footprint")),
+		occupied,
+	]
 
 
 func _placement_origin(placement: Dictionary) -> Vector2i:
@@ -3551,7 +3588,7 @@ const SPLITTER_KIND := "splitter"
 const CROSSING_KIND := "crossing"
 
 
-## Rebuilds the entire rendered world from `world_layout_json` plus the
+## Rebuilds the entire rendered world from `world_layout_entries` plus the
 ## buffer/fluid snapshots — the one function every place, remove and rotate
 ## goes through, and the one `_ready` calls to draw the (empty) starting
 ## state. See `_placements`'s doc for why this is a full rebuild.

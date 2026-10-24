@@ -4668,7 +4668,9 @@ impl World {
     ///    first claims its kind's whole crew from the pools; a refused
     ///    machine takes nothing, does nothing and reads `starved` with a
     ///    `staff` stall (see `Machine::tick`). Stable order is what makes
-    ///    the *same* machine the one that goes short every tick.
+    ///    the *same* machine the one that goes short every tick. A pipe run
+    ///    another machine is still waiting on supplies nobody this tick
+    ///    (`held_networks`, issue #93).
     /// 4. **Consumers pull** off a belt's end: into a machine's input
     ///    buffer, or onto a dock.
     /// 5. **Producers push** onto a belt's start: a hopper meters one raw
@@ -4788,7 +4790,9 @@ impl World {
         self.topology.belt_ahead = belt_ahead;
         self.topology.splitters = splitters;
 
-        // 3. Machines.
+        // 3. Machines. A run some machine is still waiting on serves nobody
+        // this tick (`held_networks`), so its consumers start together.
+        let held = self.held_networks();
         let machines = std::mem::take(&mut self.topology.machines);
         let taps = std::mem::take(&mut self.topology.machine_taps);
         let output_taps = std::mem::take(&mut self.topology.machine_output_taps);
@@ -4799,7 +4803,7 @@ impl World {
             // its recipe's fluid inputs by id.
             let tapped: Vec<(usize, usize)> = taps
                 .iter()
-                .filter(|&&(entity, _, _)| entity == machine)
+                .filter(|&&(entity, network, _)| entity == machine && !held[network])
                 .map(|&(_, network, inlet)| (network, inlet))
                 .collect();
             let pushing = output_taps
@@ -6675,6 +6679,91 @@ impl World {
         }
     }
 
+    /// Which pipe runs are **held** this tick, by network index: no machine
+    /// may draw from a held run, however much its own tile holds (issue #93).
+    ///
+    /// A run is held while some machine on it is *waiting for it alone* —
+    /// idle, switched on, a recipe chosen, every solid and every other fluid
+    /// in hand — and the tile it draws from is short. Then nobody draws
+    /// until that tile has filled too, and every machine waiting on the run
+    /// starts on the same tick. Without it a run shared by two consumers is
+    /// winner-take-all: volume spreads toward equal pressure, so every tile
+    /// crosses one unit at nearly the same moment and the same tile — the
+    /// first in the fixed link order — crosses first every time. That is how
+    /// a BBQ branch off a running ketchup line took every unit the vat made
+    /// for the ~8 000 ticks it spent filling its own pipes, and the ketchup
+    /// bottler beside it made nothing.
+    ///
+    /// A run with one consumer is never held against anyone: its only
+    /// waiting machine is short on that very tile. So the rule changes only
+    /// a run several machines drink from, and there it shares the supply
+    /// one unit each while they all want it, and leaves it alone once any
+    /// of them is busy or backed up. Derived from the tick's state, never
+    /// stored, so a loaded save holds exactly the runs the original does.
+    /// The cost is a few units standing in a shared run that is running dry,
+    /// which the next tank fill or deposit reaches.
+    fn held_networks(&self) -> Vec<bool> {
+        let mut held = vec![false; self.topology.networks.len()];
+        for &machine in &self.topology.machines {
+            let Ok(body) = self.ecs.get::<&Machine>(machine) else {
+                continue;
+            };
+            if body.mothballed || body.process.is_some() {
+                continue;
+            }
+            let Some(recipe) = body.recipe.as_ref().and_then(|id| self.recipes.get(id)) else {
+                continue;
+            };
+            if recipe
+                .inputs
+                .iter()
+                .any(|(item, qty)| !body.input.has_at_least(item, *qty))
+            {
+                continue;
+            }
+            let taps: Vec<(usize, usize)> = self
+                .topology
+                .machine_taps
+                .iter()
+                .filter(|&&(entity, _, _)| entity == machine)
+                .map(|&(_, network, segment)| (network, segment))
+                .collect();
+            // The same first-fit matching `Machine::tick` does; the one
+            // fluid it cannot match is what this machine is waiting for.
+            let mut claimed: Vec<usize> = Vec::new();
+            let mut short = None;
+            for (fluid, units) in &recipe.fluid_inputs {
+                let supplier = taps.iter().find(|(network, segment)| {
+                    !claimed.contains(network)
+                        && self.topology.networks[*network].can_supply_at(
+                            *segment,
+                            fluid,
+                            Fx::from_num(*units),
+                        )
+                });
+                match supplier {
+                    Some(&(network, _)) => claimed.push(network),
+                    None if short.is_none() => short = Some(fluid),
+                    None => {
+                        short = None;
+                        break;
+                    }
+                }
+            }
+            let Some(fluid) = short else {
+                continue;
+            };
+            for &(network, _) in &taps {
+                if !claimed.contains(&network)
+                    && self.topology.networks[network].fluid.as_deref() == Some(fluid.as_str())
+                {
+                    held[network] = true;
+                }
+            }
+        }
+        held
+    }
+
     /// Why `machine` is waiting at this moment, if it is — see [`Stall`] for
     /// the rule. Read-only: it asks the same questions `Machine::tick` asks
     /// (enough input? a tap that can supply? room to deposit?) against the
@@ -6738,6 +6827,11 @@ impl World {
                 }
                 let taps = taps_of(&self.topology.machine_taps);
                 let mut claimed: Vec<usize> = Vec::new();
+                // A held run supplies nobody (`held_networks`), so a machine
+                // whose own tile is full reads `FluidInput` while a neighbour
+                // on the run waits for its share. Asked for only once a run
+                // has answered "yes", which is the rare case.
+                let mut held: Option<Vec<bool>> = None;
                 for (fluid, units) in &recipe.fluid_inputs {
                     // The same first-fit matching `Machine::tick` does, so
                     // the reason shown is the reason it stalled. A run
@@ -6752,6 +6846,7 @@ impl World {
                                 fluid,
                                 Fx::from_num(*units),
                             )
+                            && !held.get_or_insert_with(|| self.held_networks())[*network]
                     });
                     match supplier {
                         Some(&(network, _)) => claimed.push(network),

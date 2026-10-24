@@ -348,7 +348,10 @@ reading this doc; the prose here stays as the evidence behind it.
 - **`_read_world_layout` is ~40 ms of an 80 ms rebuild on 1500 tiles** (a
   336 KB layout parse per placement). Milestone 8 scope, with the rest of
   the scale-up work.
-  ([#3](https://github.com/TomWhitticase/sauce-factory/issues/3).)
+  ([#3](https://github.com/TomWhitticase/sauce-factory/issues/3).) **Fixed
+  2026-10-23:** a re-read parses only the placements whose JSON changed,
+  ~4 ms after a rotate on a release build; the rest of the rebuild (node
+  construction) is still milestone 8's.
 - All performance figures anywhere in this doc are measured on a **debug**
   `sim_core`, which is what `cargo xtask` builds.
 
