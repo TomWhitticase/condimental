@@ -245,6 +245,34 @@ func _initialize() -> void:
 			_fail("tile MultiMesh '%s' must carry the same per-class vertex-colour material a node would" % mmi.name)
 			return
 
+	# --- A re-read parses only what changed, and still says what the sim says
+	# `_read_world_layout` keeps last read's parsed entries keyed by their
+	# text (issue #3). A rotate must reach `_placements` anyway, an untouched
+	# placement must be the very Dictionary the last read parsed, and that
+	# Dictionary must refuse writes, or one would leak into every later read.
+	main._read_world_layout()
+	var turned := Vector2i(int(layout[1]["tile"][0]), int(layout[1]["tile"][1]))
+	var untouched_before: Dictionary = main._by_origin[main._tile_key(Vector2i(int(layout[0]["tile"][0]), int(layout[0]["tile"][1])))]
+	main.sim.issue_command_json(JSON.stringify({"type": "rotate", "tile": [turned.x, turned.y]}))
+	main._read_world_layout()
+	var reread: Array = JSON.parse_string(main.sim.world_layout_json())
+	if main._placements != reread:
+		_fail("after a rotate, _read_world_layout's placements differ from world_layout_json — a stale cached entry survived")
+		return
+	if String(main._placement_at_tile(turned)["direction"]) == String(layout[1]["direction"]):
+		_fail("the rotated %s at %s still reads as facing %s" % [layout[1]["kind"], str(turned), layout[1]["direction"]])
+		return
+	if not is_same(main._placements[0], untouched_before):
+		_fail("an untouched placement was re-parsed — the layout cache is not being used")
+		return
+	if not untouched_before.is_read_only():
+		_fail("a cached placement must be read-only, or a write to it survives into the next rebuild")
+		return
+	main.sim.issue_command_json(JSON.stringify({"type": "rotate", "tile": [turned.x, turned.y]}))
+	main.sim.issue_command_json(JSON.stringify({"type": "rotate", "tile": [turned.x, turned.y]}))
+	main.sim.issue_command_json(JSON.stringify({"type": "rotate", "tile": [turned.x, turned.y]}))
+	main._read_world_layout()
+
 	if main.get_node_or_null("Floor") == null:
 		_fail("no Floor node — the factory floor didn't build")
 		return

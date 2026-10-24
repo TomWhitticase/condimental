@@ -187,6 +187,17 @@ mustard mixers both drink vinegar — which the earlier rule, when a machine
 picked its own recipe and claimed for every recipe of its kind, forbade
 (`docs/DECISIONS_LOG.md`, 2026-09-26 and 2026-10-03).
 
+**A run several machines drink from serves them together** (2026-10-20,
+issue #93). Equalization brings every tile of a run toward the same
+pressure, and the per-tick pass walks its links in a fixed order. So with
+discrete one-unit draws, one tile of a shared run used to cross the
+threshold first every time, and its machine took the whole supply. Now a
+run is *held*, supplying nobody, on any tick a machine on it is waiting for
+it alone and that machine's tile is short (`World::held_networks`). The
+waiting consumers then start on the same tick. It is derived from the tick's
+state and never stored, and a run with one consumer is never held against
+anyone.
+
 ### 3.5 Long-running / timed processes
 
 A **tick-counted state machine** `TimedProcess { start_tick, required_ticks }`
@@ -453,8 +464,10 @@ scrutiny than one-sided changes.
 
 ## 5. Presentation layer (Godot)
 
-- 3D isometric scene rebuilt from `world_layout_json` on every
-  place/remove/rotate, never per tick (a full rebuild, mirroring §3.8).
+- 3D isometric scene rebuilt from `world_layout_entries` (one JSON text per
+  placement of `world_layout_json`'s array, so an unchanged entry is not
+  re-parsed) on every place/remove/rotate, never per tick (a full rebuild,
+  mirroring §3.8).
 - Interpolate "warm" entities between snapshots (future).
 - UI is generated from the same data files (`shop.ron` drives the build
   menu and hotbar).
