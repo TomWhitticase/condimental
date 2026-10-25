@@ -265,7 +265,9 @@
 #
 # `--pause` builds a factory, runs it, and opens the in-game pause menu over
 # it. Like `--ghost` and `--hotbar`, it is the only way to review a panel that
-# only exists in response to a keypress.
+# only exists in response to a keypress. `--pause-status TEXT` opens it with
+# that line in the status slot under the buttons, as a press of SAVE leaves
+# it, without writing any save.
 #
 # `--settings` opens the SETTINGS page of whichever menu this run is
 # rendering: the pause menu's by itself, or the main menu's with `--menu`.
@@ -674,6 +676,13 @@ var _title := false
 ## every other menu shot jumps past. Seconds from the screen coming up.
 var _intro_at := ""
 var _pause := false
+## `--pause-status TEXT` opens the pause menu with that line in its status
+## slot, the way SAVE leaves it — "Saved to factory", or a refusal. Written
+## straight to the status rather than by pressing SAVE, because a review
+## render must never write the player's own slot. The line is where the
+## plate's height comes from, so this is the frame that shows whether the
+## note above the buttons has stood down for it (`_position_pause_menu`).
+var _pause_status := ""
 ## `--settings` opens the settings page of whichever menu is being rendered;
 ## `--debug` opens the F3 development panel over the game. `--set key=value`
 ## moves one knob off its default for the render (`_reset_settings`).
@@ -916,7 +925,8 @@ func _initialize() -> void:
 	_title = args.has("--title")
 	_intro_at = _string_arg(args, "--intro-at")
 	_menu = args.has("--menu") or _title
-	_pause = args.has("--pause")
+	_pause_status = _string_arg(args, "--pause-status")
+	_pause = args.has("--pause") or _pause_status != ""
 	_settings = args.has("--settings")
 	_debug = args.has("--debug")
 	if not _reset_settings(args):
@@ -2570,8 +2580,11 @@ func _frame_crossing_first_person() -> void:
 
 
 ## `--pause`: the in-game menu, over a factory that has been running.
+## `--pause-status` then puts its line where SAVE would have.
 func _open_pause_menu() -> void:
 	_main._set_pause_open(true)
+	if _pause_status != "":
+		_main._set_pause_status(_pause_status)
 
 
 ## Puts `Settings` back to its shipped defaults for the duration of this run,

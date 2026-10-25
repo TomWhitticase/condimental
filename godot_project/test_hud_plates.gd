@@ -104,13 +104,28 @@ const DOCKET_CASES := [
 ## other layout rule (issue #62: the staff panel's own minimum width was
 ## 1350px, so at 1280x720 it hung off both edges and FIRE −1 could not be
 ## clicked at all).
+## The pause menu is not one of the five (ESC opens it over any of them), but
+## it is a plate with buttons on it and the same rule applies. A fourth
+## element is the status line SAVE writes under its buttons: the plate is
+## measured bare and with that line up, because the line is where its height
+## comes from. On 2026-10-24 the plate was 747px tall at 1280x720 with
+## nothing in the status at all — an empty wrapping Label still costs a line
+## — so its bottom border was off the window at the one size §5c names as
+## the acceptance.
 const MODAL_CASES := [
 	["E", "_set_shop_menu_open", "_shop_menu"],
 	["M", "_set_market_open", "_market_panel"],
 	["C", "_set_contract_board_open", "_board_panel"],
 	["P", "_set_production_open", "_production_panel"],
 	["H", "_set_staff_open", "_staff_panel"],
+	["ESC", "_set_pause_open", "_pause_menu"],
+	["ESC after SAVE", "_set_pause_open", "_pause_menu", "Saved to factory"],
+	["ESC after a refused SAVE", "_set_pause_open", "_pause_menu", REFUSED_SAVE_STATUS],
 ]
+
+## The longest line SAVE can put on the pause menu, as `_save_to_slot` words
+## it — two lines at the plate's pinned width.
+const REFUSED_SAVE_STATUS := "'autosave' is the autosave's own slot — pick another name."
 
 ## The tile the docket sweep's own hopper stands on (`_run_checks` places it),
 ## reused by the configuration sweep: the panel that opens on a click has to
@@ -1330,6 +1345,11 @@ func _modal_step() -> bool:
 	var case: Array = MODAL_CASES[_modal / 2]
 	var window: Vector2i = BIG if _modal % 2 == 0 else SMALL
 	_open_only(String(case[1]))
+	# The pause menu's status line, as SAVE leaves it. Written straight to
+	# the label, the way the panel's own handlers do, so the sweep measures
+	# the plate with the line in it rather than a helper's idea of it.
+	if String(case[2]) == "_pause_menu":
+		main._pause_status.text = String(case[3]) if case.size() > 3 else ""
 	_resize(window)
 	_reposition_modals()
 	_frame += 1
@@ -1506,6 +1526,7 @@ func _reposition_modals() -> void:
 	main._position_contract_board()
 	main._position_production_panel()
 	main._position_staff_panel()
+	main._position_pause_menu()
 
 
 ## False when the case failed (`_fail` has already asked to quit).
@@ -1540,6 +1561,41 @@ func _check_modal_case(key: String, panel_name: String, window: Vector2i) -> boo
 		_fail("%s puts %s ('%s') outside the window at %s — the player cannot click it" % [
 			where, stray.name, stray.text, str(stray.get_global_rect())
 		])
+		return false
+	if panel_name == "_pause_menu":
+		return _check_pause_lines(where, window)
+	return true
+
+
+## What is on the pause plate, given the window: the status line exactly when
+## it has text (an empty one used to cost a blank line), and the note above
+## the buttons whenever the window holds both — it stands down for the status
+## only where it must (1280x720), never at the shipped 1600x900.
+func _check_pause_lines(where: String, window: Vector2i) -> bool:
+	var status: Label = main._pause_status
+	var note: Label = main._pause_note
+	if status == null or note == null:
+		_fail("%s: the pause menu has no status line or no note" % where)
+		return false
+	if status.visible != (status.text != ""):
+		_fail("%s shows the pause status line %s while its text is '%s'" % [
+			where, "with nothing on it" if status.visible else "hidden", status.text
+		])
+		return false
+	var wanted_with_note: float = main._pause_menu.get_combined_minimum_size().y
+	if not note.visible:
+		var body: Control = note.get_parent() as Control
+		wanted_with_note += note.get_combined_minimum_size().y + float(body.get_theme_constant("separation"))
+	var both_fit: bool = wanted_with_note <= float(window.y) + 0.5
+	if note.visible != both_fit:
+		_fail("%s %s the pause note with the status '%s' up, though the plate %s (%.0fpx with both in a %dpx window)" % [
+			where, "shows" if note.visible else "hides", status.text,
+			"does not fit with both" if note.visible else "fits with both",
+			wanted_with_note, window.y
+		])
+		return false
+	if window == BIG and not note.visible:
+		_fail("%s hid the pause note at the shipped window size" % where)
 		return false
 	return true
 

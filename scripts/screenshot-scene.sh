@@ -371,7 +371,11 @@
 # Pass --menu to photograph the MAIN MENU instead of the game — it renders
 # menu.tscn, having first written a real save so its load list has a row in
 # it, and removes that save again afterwards. Pass --pause to open the
-# in-game pause menu (ESC) over whatever else was built.
+# in-game pause menu (ESC) over whatever else was built, or
+# --pause-status TEXT to open it with that line in the status slot under its
+# buttons, as a press of SAVE leaves it (no save is written): the line is
+# where the plate's height comes from, so this is the frame that shows the
+# "stopped" note standing down for it at 1280x720.
 #
 # Pass --settings to open the SETTINGS page of whichever menu is being
 # rendered — the pause menu's on its own, the main menu's with --menu. It is
@@ -464,7 +468,7 @@
 #
 #   scripts/screenshot-scene.sh out.png 1100x800 --build --closeup 0.5,0.3,10
 #
-# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--bbq] [--mustard] [--stalled-run] [--staff] [--staff-shortfall] [--missed-payday] [--payday-warning] [--production] [--cookbook|--cookbook-page [ID]|--cookbook-basics [ID]] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--split-docks [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause] [--settings] [--debug] [--set KEY=VALUE] [--shop] [--market] [--board [--board-end] [--board-filter all|open|signed|locked|ITEM]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--ctrl] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy] [--on-screen]
+# Usage: scripts/screenshot-scene.sh [output.png] [WIDTHxHEIGHT] [--build] [--fixture NAME] [--stress] [--pipe-gallery] [--belt-gallery] [--fluid-gallery] [--item-gallery] [--warehouse] [--bottleneck] [--bbq] [--mustard] [--stalled-run] [--staff] [--staff-shortfall] [--missed-payday] [--payday-warning] [--production] [--cookbook|--cookbook-page [ID]|--cookbook-basics [ID]] [--understaffed] [--short-staffed] [--mothballed] [--unclerked-dock] [--full-dock [--dock-lamp dark]] [--split-docks [--dock-lamp dark]] [--contracts] [--payout] [--crushing] [--populate] [--first-person] [--ghost KIND|--ghost-blocked KIND|--remove-mode] [--hover|--hover-pipe|--hover-vat|--hover-hopper|--hover-tank|--hover-dock|--hover-splitter] [--title] [--menu] [--pause|--pause-status TEXT] [--settings] [--debug] [--set KEY=VALUE] [--shop] [--market] [--board [--board-end] [--board-filter all|open|signed|locked|ITEM]] [--unlocked] [--unlock-toast] [--no-hud] [--stock] [--at-capacity] [--hotbar N] [--ctrl] [--legend-collapsed] [--config TX,TY [--contents N [--contents-refill]]] [--closeup TX,TY[,SIZE]] [--allow-unhealthy] [--on-screen]
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
