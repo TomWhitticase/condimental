@@ -18,6 +18,22 @@ See [WORKFLOW.md](WORKFLOW.md).
 
 ---
 
+- 2026-10-25 **A pipe tile remembers what it holds, so a rebuilt run never
+  relabels its volume.** `PipeSegment::holds` and `FluidTank::holds` (an
+  undeclared tank's) are what the standing volume IS: the run's name while
+  it has one, kept while it reads `None`, carried across every
+  `recompute_topology` by tile like the volume. A tile or undeclared tank
+  holding volume whose memory names a different fluid from the run's new
+  name is EMPTIED, never relabelled — the `try_set_tank_fluid` and
+  `try_set_machine_recipe` rule, now reached by `Place`, `Remove` and
+  `Rotate` through the unnamed state those two never pass through (thirty
+  units of bought vinegar read as liquid smoke after a mixer was swapped
+  for a BBQ vat). Memory that agrees loses nothing: moving a machine and
+  putting it back, swapping in a consumer of the same fluid, or cutting and
+  rejoining a pipe costs no fluid. Derived, never saved — the load's final
+  pass LEARNS each run's name as its memory instead of judging
+  (`FluidMemory::Learn`), so a run saved unnamed forgets what it held.
+  `tests/fluid_relabel.rs`. Full record in `docs/DECISIONS.md`.
 - 2026-10-24 **A shipping clerk works one period in arrears.** A staff
   category may set `works_in_arrears` in `data/staff.ron`; logistics does.
   Its unpaid heads still turn up for the period they were not paid for

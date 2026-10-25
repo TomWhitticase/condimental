@@ -45,6 +45,16 @@ the plan is `docs/ARCHITECTURE.md` §3/§4/§6/§10.
   destroys nothing (`declaration_settles_what_is_there`). That, not the
   switch, is the commoner click — reading this rule as being only about
   *changing* a declaration is what hid #121.
+- **Every pipe tile and undeclared tank remembers what its volume IS**
+  (`PipeSegment::holds`, `FluidTank::holds`, 2026-10-25): the run's name
+  while it has one, kept while it reads `None`, carried across
+  `recompute_topology` by tile like the volume. A run renamed to a
+  different fluid empties the tiles and tank that remember another —
+  destroyed, never relabelled — which is how `Place`/`Remove`/`Rotate` meet
+  the rule above (they rename a run through an unnamed state the two
+  commands never see); memory that agrees loses nothing. Derived, not
+  saved: the load's final pass runs `FluidMemory::Learn`, writing names
+  into memory and judging nothing.
 - **`sim::reference_chain` is the shared test fixture**, built only through the
   public command API — it can do nothing a player cannot; all placements `East`.
 - **`Direction::East` = `+X` is the regression anchor** and `default()`;

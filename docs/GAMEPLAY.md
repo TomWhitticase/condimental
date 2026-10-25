@@ -373,7 +373,13 @@ implementation history (epics, tickets, balancing passes) behind each one.
   when it points through the inlet face — a belt into a flank, or back into
   the outlet face, feeds nothing (enforced 2026-10-01, issue #1); a fluid connection is made by
   touching, not facing, since a pressure network is not a conveyor. Flow is
-  derived from adjacency, recomputed only on placement changes. The hopper,
+  derived from adjacency, recomputed only on placement changes. **A run's
+  name is recomputed with it, but what stands in the pipes keeps its
+  identity** (2026-10-25): a rebuilt run whose new name is a different fluid
+  from the one its tiles (or the undeclared tank behind it) remember holding
+  is emptied, never relabelled — bought vinegar does not become gated liquid
+  smoke because a BBQ vat replaced the mixer — while a run that comes back
+  under the same name keeps every drop. Full record in `docs/DECISIONS.md`. The hopper,
   fluid tank and delivery dock are ordinary placeable kinds — a world may
   hold any number of each, and contracts settle against every dock's stock
   together.
