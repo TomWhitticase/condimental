@@ -266,6 +266,26 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-25 — a rebuilt pipe run no longer relabels the fluid standing in it
+
+An adversarial pass over the simulation (save round trips on the owner's
+saves, a command fuzzer with mass-conservation and staff invariants, and a
+read of every rule in GAMEPLAY §7/§9 against the code) found one real hole.
+A run's name is recomputed from what touches it on every `Place`, `Remove`
+and `Rotate`, and its volume is carried across by tile; pull the ketchup
+mixer off a vinegar run and drop a BBQ vat on it, and 120 units of bought
+vinegar in the run and tank became 120 units of liquid smoke, a gated fluid
+the player never bought, which the vat would have cooked. `SetTankFluid`
+and `SetMachineRecipe` already purge the run they rename; the three
+placement commands rename it through an unnamed state neither of those
+sees. Every pipe tile and undeclared tank now remembers what its volume is
+(`PipeSegment::holds`, `FluidTank::holds`), carried across the rebuild
+like the volume, and a run renamed to something else empties what remembers
+a different fluid — destroyed, never relabelled — while putting the same
+machine back, swapping in a consumer of the same fluid, or cutting and
+rejoining a pipe costs nothing. Not saved: a load learns the memory from
+each run's name. `tests/fluid_relabel.rs`; record in `docs/DECISIONS.md`.
+
 ### 2026-10-24 — the build ghost warns before a machine shares a running pipe run
 
 Issue #92. Building the BBQ branch onto a running ketchup line gave no warning

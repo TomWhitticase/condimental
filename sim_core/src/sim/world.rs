@@ -3906,8 +3906,16 @@ impl World {
     /// pass carries pipe
     /// volumes across by tile, which is what lets it run on a live world at
     /// all.
+    ///
+    /// **It judges no volume** (`FluidMemory::Learn`): the volumes it
+    /// carries were just written from the save and the names the bulk pass
+    /// derived for them came from half-restored machines, so the pass
+    /// writes each run's final name into its tiles' memory rather than
+    /// purging a tile whose stale memory disagrees with it. A run saved
+    /// unnamed comes back with no memory, which is the one gap in the
+    /// relabel guard — see `PipeSegment::holds`.
     pub(super) fn recompute_topology_after_restore(&mut self) {
-        self.recompute_topology();
+        self.recompute_topology_with(FluidMemory::Learn);
     }
 
     /// Starts the save loader's structure rebuild: until
@@ -4146,12 +4154,30 @@ impl World {
     /// its contents with it, which is [`PlayerCommand::Remove`]'s documented
     /// behaviour.
     fn recompute_topology(&mut self) {
-        let carried_volumes: BTreeMap<TileCoord, Fx> = self
+        self.recompute_topology_with(FluidMemory::Judge);
+    }
+
+    /// [`Self::recompute_topology`] with the fluid-memory rule spelled out —
+    /// see [`FluidMemory`]. Every live change judges; the load's final pass
+    /// learns.
+    fn recompute_topology_with(&mut self, memory: FluidMemory) {
+        // The volume standing on each pipe tile, and what that volume IS:
+        // the run's name while it had one, else the tile's own memory of
+        // the last name it stood under (`PipeSegment::holds`). Both are
+        // carried across the rebuild by tile, so a topology change never
+        // spills a run — and never forgets what was in it either.
+        let carried: BTreeMap<TileCoord, (Fx, Option<FluidId>)> = self
             .topology
             .networks
             .iter()
-            .flat_map(|n| n.segments())
-            .map(|s| (s.tile, s.volume))
+            .flat_map(|n| {
+                n.segments().iter().map(move |s| {
+                    (
+                        s.tile,
+                        (s.volume, n.fluid.clone().or_else(|| s.holds.clone())),
+                    )
+                })
+            })
             .collect();
 
         let mut placements: Vec<(TileCoord, u32, Entity, BodyKind)> = self
@@ -4446,7 +4472,15 @@ impl World {
                 .map(|&tile| {
                     let (_, capacity, direction, _) = pipe_tiles[&tile];
                     let mut segment = PipeSegment::new(tile, direction, capacity);
-                    segment.volume = carried_volumes.get(&tile).copied().unwrap_or(Fx::ZERO);
+                    if let Some((volume, holds)) = carried.get(&tile) {
+                        segment.volume = *volume;
+                        segment.holds = match memory {
+                            FluidMemory::Judge => holds.clone(),
+                            // Restored volume is of unknown provenance; the
+                            // name this pass derives becomes its memory.
+                            FluidMemory::Learn => None,
+                        };
+                    }
                     segment
                 })
                 .collect();
@@ -4606,6 +4640,60 @@ impl World {
             &declared,
         );
 
+        // --- what each run holds, against what it is now called.
+        //
+        // The names above were derived from what touches each run; the
+        // volumes were carried across by tile. Where a tile is holding
+        // something it remembers as one fluid and the run it now stands in
+        // is named another, the volume is DESTROYED rather than relabelled
+        // (`PipeSegment::holds`): the same rule `try_set_tank_fluid` and
+        // `try_set_machine_recipe` apply to the run they rename, reached
+        // here by `Place`, `Remove` and `Rotate` through the unnamed state
+        // those two never pass through. A tile whose memory agrees with
+        // the new name, or that has none, loses nothing; a run that stays
+        // unnamed keeps every tile's memory for next time. An undeclared
+        // tank is judged the same way against the run it discharges into,
+        // because its contents take that run's name (`tank_fluid`). The
+        // load's final pass learns instead of judging (`FluidMemory`).
+        let mut drained: Vec<TileCoord> = Vec::new();
+        for network in &mut topology.networks {
+            let Some(name) = network.fluid.clone() else {
+                continue;
+            };
+            for segment in network.segments_mut() {
+                if matches!(memory, FluidMemory::Judge)
+                    && segment.volume > Fx::ZERO
+                    && segment.holds.as_ref().is_some_and(|held| *held != name)
+                {
+                    segment.volume = Fx::ZERO;
+                    drained.push(segment.tile);
+                }
+                segment.holds = Some(name.clone());
+            }
+        }
+        let mut drained_tanks: Vec<Entity> = Vec::new();
+        for &(tank, network, _) in &topology.tank_discharges {
+            let Some(name) = topology.networks[network].fluid.clone() else {
+                continue;
+            };
+            let Ok(mut body) = self.ecs.get::<&mut FluidTank>(tank) else {
+                continue;
+            };
+            if body.declared().is_some() {
+                // Its memory is its declaration, and `declare` empties on a
+                // change; the run is named from it, so they cannot disagree.
+                continue;
+            }
+            if matches!(memory, FluidMemory::Judge)
+                && !body.is_empty()
+                && body.holds().is_some_and(|held| *held != name)
+                && body.purge() > Fx::ZERO
+            {
+                drained_tanks.push(tank);
+            }
+            body.set_holds(name);
+        }
+
         // A side order that is a property of the geometry (north, east,
         // south, west — `Direction`'s own order), not of which placement the
         // pass walked first. At most one thing can stand on each side of a
@@ -4626,6 +4714,16 @@ impl World {
         topology.links = links;
 
         self.topology = topology;
+        // Purged volume is a discrete change to what a tile shows, so the
+        // tiles reach the screen the way `purge_runs_fed_by`'s do.
+        for tile in drained {
+            if let Some(&pipe) = self.topology.grid.get(&tile) {
+                self.mark_placement_dirty(pipe);
+            }
+        }
+        for tank in drained_tanks {
+            self.mark_placement_dirty(tank);
+        }
         // Last, and only here: the establishment walks `topology.all`, so
         // it has to see the topology this pass just built rather than the
         // one it replaced.
@@ -8268,6 +8366,21 @@ fn footprint_chunks(origin: TileCoord, footprint: Footprint) -> Vec<ChunkId> {
 /// a splitter. The single answer to "can this thing be handed an item the
 /// way a belt can", so belt linking, machine/hopper discharge and a
 /// splitter's own outputs cannot disagree about it.
+/// How a topology pass treats the memory a pipe tile or an undeclared tank
+/// carries of what its volume is (`PipeSegment::holds`, `FluidTank::holds`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FluidMemory {
+    /// A live change (a placement, a removal, a rotation, a splitter mode, a
+    /// declaration, a recipe): a tile or tank holding volume it remembers as
+    /// one fluid, standing in a run now named another, is emptied rather
+    /// than relabelled.
+    Judge,
+    /// The load's final pass: the volumes were just restored and nothing is
+    /// known about them, so each run's name is written into its tiles' and
+    /// tanks' memory and nothing is emptied.
+    Learn,
+}
+
 fn is_belt_like(body: BodyKind) -> bool {
     matches!(
         body,

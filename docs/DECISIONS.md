@@ -25,6 +25,77 @@ matches what code comments and data files cite.
 
 ## Part A — CLAUDE.md decisions log (verbatim, newest first)
 
+- 2026-10-25: **A pipe tile remembers what it holds, so a rebuilt run never
+  relabels its volume.**
+  Found by an adversarial pass over the simulation, through the public
+  commands on shipped content. A fluid tank discharging down three pipe
+  tiles into a ketchup mixer, filled with 120 units of bought vinegar and run
+  until the pipes held 30 of them. `Remove` the mixer: the run reads
+  `Unnameable` (a tank-fed run nothing draws from), its 30 units standing.
+  `Place` a cooking vat where the mixer was and pick `bbq`: the run reads
+  `Carries(liquid_smoke)` with the same 30 units in it, and the undeclared
+  tank — whose contents are named by its run (`World::tank_fluid`) — reads
+  90 units of liquid smoke. `owned_ingredient("liquid_smoke")` was 0 the
+  whole time; liquid smoke is behind the BBQ gate and priced above vinegar.
+  The vat would have cooked it. Removing the run's last pipe tile instead of
+  the mixer and laying the vat beside the shortened run does the same thing.
+  That is the exact relabelling `try_set_tank_fluid` (2026-09-22, issue
+  #121's neighbour) and `try_set_machine_recipe` (2026-10-03) were taught
+  to prevent, reached by a third door: both of those purge the run they
+  rename, but `Place`, `Remove` and `Rotate` rename a run through an
+  intermediate *unnamed* state, and when the final name arrives nothing
+  remembers what the carried volume was.
+
+  Options weighed:
+  - **Purge on every rename the three commands cause, including to
+    `None`** — the recipe switch's rule, verbatim. It closes the hole but
+    turns the commonest rearrangement into a spill: lifting a mixer to move
+    it one tile, or cutting a pipe to re-route it, would empty the vinegar
+    run and (to be complete) the undeclared tank behind it, 120 units for a
+    layout tweak. The recipe switch can afford that rule because a switch
+    is a deliberate choice a picker warns about; a removal is not.
+  - **Refuse to name a run holding volume anything but what it held**, i.e.
+    make a contradiction `Unnameable`. Needs the same memory as the chosen
+    option and then leaves the player a stuck run with no picker to clear
+    it — the tank picker is the only purge the UI offers, and only for a
+    tank-fed run.
+  - **Remember what the volume is, and purge only a contradiction.** Chosen.
+    `PipeSegment::holds` is the run's name while it has one, kept while it
+    reads `None`, carried across `recompute_topology` by tile exactly as the
+    volume is; after `resolve_network_fluids` a tile holding volume whose
+    memory names a different fluid from the run's new name is emptied and
+    every tile of a named run takes that name as its memory. An undeclared
+    `FluidTank` carries the same memory against the run it discharges into
+    (a declared one's memory is its declaration, which `declare` already
+    empties on a change). A tile whose memory agrees, or has none, loses
+    nothing: put the same mixer back, swap in a mustard mixer (vinegar too),
+    cut and rejoin a pipe — no drop moves. The two existing purge paths are
+    left as they are; this is the floor under all three doors, not a
+    replacement for the rules at two of them.
+
+  What it does not do, on purpose:
+  - **It is not saved.** The format is v8 and this is derived state. The
+    load's two passes would otherwise judge restored volume against names
+    the bulk pass derived from half-restored machines, so the final pass
+    runs in `FluidMemory::Learn`: it writes each run's name into its tiles'
+    and tanks' memory and empties nothing. A run saved *unnamed* therefore
+    comes back with no memory and its volume can still be renamed once —
+    the one gap, accepted over a save-format bump for a case that needs a
+    consumer removed, a save taken, and a different consumer placed.
+  - **Two unnamed runs that merge keep per-tile memory**, and equalization
+    mixes their volumes before any name arrives; the later purge empties the
+    tiles labelled for the other fluid, which by then hold a blend. Strictly
+    better than today's relabel of all of it, and an exotic layout.
+  - It records nothing in the production ledger: destroyed fluid was never
+    used, the same stance as the two existing purges.
+
+  Pinned by `sim_core/tests/fluid_relabel.rs`: the mixer-to-vat swap and
+  the pipe-cut variant both end with the run and tank at zero and no liquid
+  smoke owned; the same mixer back, a mustard mixer, and a cut-and-rejoined
+  pipe all keep every drop; and the guard still bites after a save and a
+  load. The relabel reproduced on main before the fix and the suite's
+  save-round-trip, fluid and tank tests are unchanged.
+
 - 2026-10-24: **A shipping clerk works one period in arrears (issue #85).**
   Three shipped rules compounded into a spiral nothing could leave. The
   payday pays `data/staff.ron` top to bottom and logistics is last, on

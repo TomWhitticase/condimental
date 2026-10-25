@@ -130,6 +130,33 @@ pub struct PipeSegment {
     /// it is carried here so a snapshot can report the rotation the player
     /// chose without a second lookup.
     pub direction: Direction,
+    /// **What the volume standing here IS** — the id the run was named when
+    /// this tile last stood in a named run, or `None` when nothing is
+    /// known about it.
+    ///
+    /// A run's name is derived from what touches it and is recomputed on
+    /// every topology change, while its volume is carried across that
+    /// rebuild tile by tile (`World::recompute_topology`). Without this
+    /// field the two can come apart: pull the mixer off a vinegar run, put
+    /// a BBQ vat on it, and the run is renamed `liquid_smoke` with thirty
+    /// units of bought vinegar standing in it — thirty units of a gated
+    /// fluid nobody paid for, which `data/ingredients.ron`'s "nothing
+    /// enters the factory that wasn't paid for" forbids. `SetTankFluid` and
+    /// `SetMachineRecipe` already answer that by purging the run they
+    /// rename; this is the same answer for `Place`, `Remove` and `Rotate`,
+    /// which rename runs just as surely but through an *unnamed*
+    /// intermediate state the renaming command never sees. So the tile
+    /// remembers: carried across every rebuild like the volume, kept while
+    /// the run reads `None`, and compared against the run's new name — a
+    /// tile holding volume whose memory names a different fluid is emptied
+    /// rather than relabelled, and one whose memory agrees loses nothing,
+    /// so moving a machine one tile and putting it back costs no fluid.
+    ///
+    /// Derived state, never saved: a loaded run takes its name as its
+    /// memory, so a run saved unnamed forgets what it held (its volume is
+    /// then of unknown provenance and is left alone). Set only by the
+    /// topology pass.
+    pub holds: Option<FluidId>,
 }
 
 impl PipeSegment {
@@ -144,6 +171,7 @@ impl PipeSegment {
             capacity,
             is_source: false,
             direction,
+            holds: None,
         }
     }
 
@@ -240,6 +268,18 @@ pub struct FluidTank {
     capacity: Fx,
     auto_fill: bool,
     fluid: Option<FluidId>,
+    /// What the volume in here IS, for an undeclared tank —
+    /// [`PipeSegment::holds`]'s twin, and for its reason. An undeclared
+    /// tank's contents are named by the run it discharges into
+    /// (`World::tank_fluid`), so when that run is renamed the tank's
+    /// ninety units of vinegar would read as ninety of whatever the run
+    /// says now. The topology pass writes the run's name here whenever it
+    /// has one, keeps it while the run reads `None`, and empties a tank
+    /// whose memory contradicts the run's new name. A declared tank's
+    /// memory is its declaration, which [`Self::declare`] already empties
+    /// on a change. Derived, never saved: a loaded tank takes its run's
+    /// name as its memory.
+    holds: Option<FluidId>,
 }
 
 impl FluidTank {
@@ -254,6 +294,7 @@ impl FluidTank {
             // ...and says nothing about what it holds until asked, which is
             // the behaviour every tank had before it could be asked.
             fluid: None,
+            holds: None,
         }
     }
 
@@ -274,8 +315,36 @@ impl FluidTank {
             volume: volume.max(Fx::ZERO).min(capacity),
             capacity,
             auto_fill,
+            // What a declared tank holds is what it declares; an undeclared
+            // one learns it from its run on the load's final topology pass.
+            holds: fluid.clone(),
             fluid,
         }
+    }
+
+    /// What the volume in here is known to be — see the `holds` field. The
+    /// declaration when there is one, otherwise the last name the run this
+    /// tank discharges into resolved to while the tank stood on it.
+    pub fn holds(&self) -> Option<&FluidId> {
+        self.holds.as_ref()
+    }
+
+    /// The topology pass's write to [`Self::holds`]: the run this tank
+    /// discharges into has resolved to `fluid`. `pub(crate)` because only
+    /// that pass knows the run.
+    pub(crate) fn set_holds(&mut self, fluid: FluidId) {
+        self.holds = Some(fluid);
+    }
+
+    /// Destroys what this tank holds, reporting how much — the tank half of
+    /// [`FluidNetwork::purge`], called by the topology pass when the run an
+    /// undeclared tank discharges into is renamed to something other than
+    /// what the tank's volume is (`holds`). The volume is destroyed, not
+    /// moved or credited, exactly as a declaration change destroys it.
+    pub(crate) fn purge(&mut self) -> Fx {
+        let destroyed = self.volume;
+        self.volume = Fx::ZERO;
+        destroyed
     }
 
     /// What the player has said this tank holds, or `None` if they have not
@@ -305,6 +374,7 @@ impl FluidTank {
         if self.fluid.as_deref() == Some(fluid.as_str()) {
             return false;
         }
+        self.holds = Some(fluid.clone());
         self.fluid = Some(fluid);
         self.volume = Fx::ZERO;
         true
@@ -330,6 +400,7 @@ impl FluidTank {
         if self.fluid.as_deref() == Some(fluid.as_str()) {
             return false;
         }
+        self.holds = Some(fluid.clone());
         self.fluid = Some(fluid);
         true
     }
@@ -578,6 +649,14 @@ impl FluidNetwork {
 
     pub fn segments(&self) -> &[PipeSegment] {
         &self.segments
+    }
+
+    /// The topology pass's write access to every segment, for judging what
+    /// each tile holds against the run's new name (`PipeSegment::holds`).
+    /// `pub(crate)`: volume otherwise moves only through the metered paths
+    /// this type's doc lists.
+    pub(crate) fn segments_mut(&mut self) -> &mut [PipeSegment] {
+        &mut self.segments
     }
 
     /// Records what `world.rs`'s narrowing pass left this run with:
@@ -1034,6 +1113,7 @@ mod tests {
                 capacity: cap(),
                 is_source: false,
                 direction: Direction::East,
+                holds: None,
             })
             .collect();
         let inlet = segments.len() - 1;
