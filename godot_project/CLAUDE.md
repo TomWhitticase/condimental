@@ -31,8 +31,13 @@ Godot-side derivation is legitimate for *drawing*: belt/pipe shape from
   open-modal bitmask. Wall-clock fades (`_update_money_flyout`,
   `_update_hotbar_flyout`) run in the **`else` branch** so nothing freezes
   under the pause menu.
-- Fluid and tank auto-fill dirty nothing — polled (`fluid_snapshot_json`).
-  Machine load, staff and production are polled on their own tick cadence.
+- Fluid and tank auto-fill dirty nothing — polled. The fluid poll has two
+  shapes: the full `fluid_snapshots_json` only when `sim.command_revision()`
+  has moved (the plumbing's shape and naming change on commands and loads,
+  never on a tick), and the flat `fluid_levels` on the ticks between, written
+  into the held shape (`_apply_fluid_levels`; a size mismatch falls back to
+  the full read). Machine load, staff and production are polled on their own
+  tick cadence.
 - `_advance_simulation` caps catch-up at `MAX_TICKS_PER_FRAME` and
   **discards** the backlog; paused means no ticks and no accumulation.
 

@@ -349,7 +349,10 @@ never guessed valid — until it gets its own shared `plan_*` function.
 Also on the wire today (`economy_snapshot_json` carries the whole contract
 `board` beside the active `contracts` since the contract-board epic, and
 `sign_contract` is a command): `world_layout_json`, `economy_snapshot_json`,
-`shop_snapshot_json`, `ingredients_snapshot_json`, `fluid_snapshot_json`,
+`shop_snapshot_json`, `ingredients_snapshot_json`, `fluid_snapshots_json`
+(with `fluid_levels` and `command_revision` beside it since 2026-10-24: the
+flat per-tick levels, and the count of commands and loads that says when the
+snapshot's shape has to be re-read — a tick never recomputes topology),
 `dock_snapshot_json`, `machine_load_snapshots_json` (the machine-load epic,
 2026-09-11: every recipe-running machine's rolling load window, `status`
 and `stall` reason, polled because it changes every tick and dirties
