@@ -266,6 +266,23 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-24 — the machine pass looks its pipes up instead of searching for them
+
+A release-build profile of `World::tick` on the owner's 656-tile factory
+(267 pipes, 71 machines, macOS `sample`) put about a quarter of the tick in
+step 3: for every machine, every tick, the pass filtered the whole
+`machine_taps` list twice (once in `held_networks`, once to borrow its
+networks), cloned its `Placement` out of the ECS to read the kind's `String`,
+and built five or six short `Vec`s for the answer — malloc/free alone was
+~18% of samples. `Topology::machine_plumbing` now records each machine's tap
+range and deposit when the topology is rebuilt (the `belt_ahead` idea applied
+to pipes), the kind is read in place, the two scratch lists live on `World`
+like `room_ahead`, and `disjoint_networks_mut` peels without sorting. Measured
+as user-CPU per tick over 200 000 ticks of that save, interleaved A/B, three
+rounds each: 44.8–47.3 µs before, 32.2–34.0 µs after (about 28% less); the
+save's text hash after the run is identical. The remaining big slice is
+hecs `get::<BeltSegment>` in the belt passes (~18%), untouched here.
+
 ### 2026-10-24 — the build ghost warns before a machine shares a running pipe run
 
 Issue #92. Building the BBQ branch onto a running ketchup line gave no warning

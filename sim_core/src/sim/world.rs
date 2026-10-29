@@ -2512,6 +2512,15 @@ struct Topology {
     /// derived by different rules (touching vs. facing — see this module's
     /// doc) and a machine may have either, both or neither.
     machine_output_taps: Vec<(Entity, usize, usize)>,
+    /// Where in the two lists above each machine's taps sit, indexed like
+    /// `machines`. The machine pass runs every tick for every machine, and
+    /// a per-machine scan of `machine_taps` (plus a `Vec` to hold what it
+    /// found) made that pass quadratic in the factory's plumbing and the
+    /// tick's biggest allocator — the same reasoning as `belt_ahead`, which
+    /// indexes `belt_to_belt` like `belts` so the belt tick never searches.
+    /// Both lists are filled machine by machine in `machines` order, which
+    /// is what makes a machine's draws one contiguous range.
+    machine_plumbing: Vec<MachinePlumbing>,
     /// `(tank, network index, segment index)` for every tank discharging
     /// into a pipe.
     tank_discharges: Vec<(Entity, usize, usize)>,
@@ -2523,6 +2532,18 @@ struct Topology {
     /// and never rescanned: `world_layout` and `query_tile` look it up.
     /// Every belt-like entity and every pipe has an entry, empty or not.
     links: BTreeMap<Entity, Links>,
+}
+
+/// One machine's entries in `Topology::machine_taps` and
+/// `Topology::machine_output_taps` — see `Topology::machine_plumbing`.
+#[derive(Debug, Clone, Copy, Default)]
+struct MachinePlumbing {
+    /// `machine_taps[draws.0..draws.1]` are this machine's draws, in the
+    /// tile order the topology pass found them.
+    draws: (usize, usize),
+    /// `(network, outlet segment)` of the run it deposits into, if it has
+    /// one — the same pair `machine_output_taps` records for it.
+    deposit: Option<(usize, usize)>,
 }
 
 pub struct World {
@@ -2561,6 +2582,13 @@ pub struct World {
     /// rule). Indexed like `topology.belts` then `topology.splitters`;
     /// cleared, not reallocated, every tick, like `dirty`.
     room_ahead: Vec<Fx>,
+    /// Scratch for the machine pass, kept for the same reason as
+    /// `room_ahead`: which networks a machine is still waiting on this
+    /// tick (`fill_held_networks`, indexed like `topology.networks`), and
+    /// the networks the machine in hand borrows (`disjoint_networks_mut`'s
+    /// argument). Each is cleared, not reallocated, every tick.
+    held_scratch: Vec<bool>,
+    wanted_scratch: Vec<usize>,
     /// Chunks touched since the start of the current `tick()` call. Cleared
     /// (not reallocated) at the start of every `tick()` — see `tick`'s doc
     /// comment and ARCHITECTURE.md §4's "Delta granularity" note. A
@@ -2779,6 +2807,8 @@ impl World {
             tick_count: 0,
             belt_speed: Fx::from_num(BELT_SPEED_TILES_PER_TICK),
             room_ahead: Vec::new(),
+            held_scratch: Vec::new(),
+            wanted_scratch: Vec::new(),
             dirty: Vec::new(),
             dirty_tiles: HashSet::new(),
             dirty_entities: HashSet::new(),
@@ -4522,6 +4552,15 @@ impl World {
                 &topology.pipe_index,
             );
             let output_network = taps.output.map(|(_, (network, _))| network);
+            // Recorded before the pushes below, so the range is exactly
+            // what this machine adds to `machine_taps`.
+            topology.machine_plumbing.push(MachinePlumbing {
+                draws: (
+                    topology.machine_taps.len(),
+                    topology.machine_taps.len() + taps.inputs.len(),
+                ),
+                deposit: taps.output.map(|(_, tap)| tap),
+            });
             if let Some((tile, (network, segment))) = taps.output {
                 topology
                     .machine_output_taps
@@ -4561,6 +4600,38 @@ impl World {
                 inputs: input_networks,
             });
         }
+        // `machine_plumbing` is what the tick reads instead of searching
+        // `machine_taps` and `machine_output_taps`, so the three must agree
+        // tap for tap. Cross-checked here, where every fixture in the
+        // suite rebuilds its topology, rather than trusted: a reordering of
+        // the loop above would otherwise hand a machine its neighbour's
+        // pipes and no test would name the cause.
+        debug_assert!(
+            topology.machine_plumbing.len() == topology.machines.len()
+                && topology
+                    .machines
+                    .iter()
+                    .zip(&topology.machine_plumbing)
+                    .all(|(&machine, plumbing)| {
+                        let (first, end) = plumbing.draws;
+                        let own_draws = topology.machine_taps[first..end]
+                            .iter()
+                            .all(|&(entity, _, _)| entity == machine);
+                        let every_draw = topology
+                            .machine_taps
+                            .iter()
+                            .filter(|&&(entity, _, _)| entity == machine)
+                            .count()
+                            == end - first;
+                        let deposit = topology
+                            .machine_output_taps
+                            .iter()
+                            .find(|&&(entity, _, _)| entity == machine)
+                            .map(|&(_, network, outlet)| (network, outlet));
+                        own_draws && every_draw && deposit == plumbing.deposit
+                    }),
+            "Topology::machine_plumbing disagrees with machine_taps/machine_output_taps"
+        );
         for &tank in &topology.tanks {
             let placement = self.placement_of(tank);
             let origin = self.position_of(tank);
@@ -4855,51 +4926,65 @@ impl World {
 
         // 3. Machines. A run some machine is still waiting on serves nobody
         // this tick (`held_networks`), so its consumers start together.
-        let held = self.held_networks();
+        //
+        // Everything the pass reads per machine is looked up, never
+        // searched: its taps are the range `machine_plumbing` recorded for
+        // it, its kind is read in place rather than cloned out, and the
+        // scratch lists are the world's own (`held_scratch`,
+        // `wanted_scratch`), so the only allocation a tick makes here is
+        // the `Vec<FluidTap>` a machine with pipes hands to `Machine::tick`.
+        let mut held = std::mem::take(&mut self.held_scratch);
+        self.fill_held_networks(&mut held);
         let machines = std::mem::take(&mut self.topology.machines);
         let taps = std::mem::take(&mut self.topology.machine_taps);
-        let output_taps = std::mem::take(&mut self.topology.machine_output_taps);
-        for &machine in &machines {
-            let kind = self.placement_of(machine).kind;
-            // Every network this machine can draw from, in the tile order
-            // the topology pass found them; `Machine::tick` matches them to
-            // its recipe's fluid inputs by id.
-            let tapped: Vec<(usize, usize)> = taps
+        let plumbing = std::mem::take(&mut self.topology.machine_plumbing);
+        let mut wanted = std::mem::take(&mut self.wanted_scratch);
+        for (index, &machine) in machines.iter().enumerate() {
+            let MachinePlumbing {
+                draws: (first, end),
+                deposit,
+            } = plumbing[index];
+            // Every network this machine can draw from this tick, in the
+            // tile order the topology pass found them; `Machine::tick`
+            // matches them to its recipe's fluid inputs by id.
+            let tapped = taps[first..end]
                 .iter()
-                .filter(|&&(entity, network, _)| entity == machine && !held[network])
-                .map(|&(_, network, inlet)| (network, inlet))
-                .collect();
-            let pushing = output_taps
-                .iter()
-                .find(|&&(entity, _, _)| entity == machine)
-                .map(|&(_, network, outlet)| (network, outlet));
+                .filter(|&&(_, network, _)| !held[network]);
+            // The topology pass guarantees these networks are pairwise
+            // different (see `recompute_topology`), which is what makes
+            // holding every mutable borrow at once sound — and what
+            // `disjoint_networks_mut` asserts rather than assumes. The
+            // deposit borrow goes last, so popping it off the end leaves
+            // the draws in tap order.
+            wanted.clear();
+            wanted.extend(tapped.clone().map(|&(_, network, _)| network));
+            wanted.extend(deposit.map(|(network, _)| network));
             let changed = {
+                let placement = self
+                    .ecs
+                    .get::<&Placement>(machine)
+                    .expect("a placed entity always has a Placement");
                 let mut body = self
                     .ecs
                     .get::<&mut Machine>(machine)
                     .expect("a machine placement carries a Machine");
-                // The topology pass guarantees these networks are pairwise
-                // different (see `recompute_topology`), which is what makes
-                // holding every mutable borrow at once sound — and what
-                // `disjoint_networks_mut` asserts rather than assumes. The
-                // deposit borrow goes last, so popping it off the end
-                // leaves the draws in tap order.
-                let mut wanted: Vec<usize> = tapped.iter().map(|&(network, _)| network).collect();
-                wanted.extend(pushing.map(|(network, _)| network));
                 let mut borrowed = disjoint_networks_mut(&mut self.topology.networks, &wanted);
-                let fluid_out = pushing.map(|(_, outlet)| FluidTap {
-                    network: borrowed.pop().expect("pushing added the last borrow"),
+                let fluid_out = deposit.map(|(_, outlet)| FluidTap {
+                    network: borrowed.pop().expect("the deposit added the last borrow"),
                     inlet: outlet,
                 });
                 let fluid_in: Vec<FluidTap<'_>> = borrowed
                     .into_iter()
-                    .zip(tapped.iter())
-                    .map(|(network, &(_, inlet))| FluidTap { network, inlet })
+                    .zip(tapped)
+                    .map(|(network, &(_, _, inlet))| FluidTap { network, inlet })
                     .collect();
                 // The crew is the kind's `machines.ron` list; the claim is
                 // made inside `tick`, only on a tick the machine would work.
                 let crew = CrewRequest {
-                    crew: self.machines.get(&kind).map_or(&[], |k| k.staff.as_slice()),
+                    crew: self
+                        .machines
+                        .get(&placement.kind)
+                        .map_or(&[], |k| k.staff.as_slice()),
                     pools: &mut self.staff,
                 };
                 body.tick(
@@ -4915,8 +5000,10 @@ impl World {
                 self.mark_placement_dirty(machine);
             }
         }
+        self.wanted_scratch = wanted;
+        self.held_scratch = held;
+        self.topology.machine_plumbing = plumbing;
         self.topology.machine_taps = taps;
-        self.topology.machine_output_taps = output_taps;
 
         // 4. Consumers pull off a belt's end.
         //
@@ -4995,8 +5082,13 @@ impl World {
         let docks = std::mem::take(&mut self.topology.docks);
         let wanted = self.economy.wanted();
         for &dock in &docks {
-            let kind = self.placement_of(dock).kind;
             let flag_flipped = {
+                // Read in place, not cloned out: `placement_of` copies the
+                // kind's `String`, and this runs for every dock every tick.
+                let placement = self
+                    .ecs
+                    .get::<&Placement>(dock)
+                    .expect("a placed entity always has a Placement");
                 let mut body = self
                     .ecs
                     .get::<&mut Dock>(dock)
@@ -5016,8 +5108,10 @@ impl World {
                     // product nobody orders hold the only head forever and
                     // starve the dock whose stock was ordered (PR #182
                     // review).
-                    let crew: &[(String, u32)] =
-                        self.machines.get(&kind).map_or(&[], |k| k.staff.as_slice());
+                    let crew: &[(String, u32)] = self
+                        .machines
+                        .get(&placement.kind)
+                        .map_or(&[], |k| k.staff.as_slice());
                     body.set_understaffed(self.staff.claim(crew).is_err());
                 } else if !body.is_empty() {
                     // Holding only what nobody ordered: no work, nobody
@@ -6934,8 +7028,19 @@ impl World {
     /// The cost is a few units standing in a shared run that is running dry,
     /// which the next tank fill or deposit reaches.
     fn held_networks(&self) -> Vec<bool> {
-        let mut held = vec![false; self.topology.networks.len()];
-        for &machine in &self.topology.machines {
+        let mut held = Vec::new();
+        self.fill_held_networks(&mut held);
+        held
+    }
+
+    /// [`World::held_networks`] into a caller's list — the tick's
+    /// `held_scratch`, so the answer costs no allocation on the hot path.
+    /// `held` is cleared first and comes back indexed like
+    /// `topology.networks`.
+    fn fill_held_networks(&self, held: &mut Vec<bool>) {
+        held.clear();
+        held.resize(self.topology.networks.len(), false);
+        for (index, &machine) in self.topology.machines.iter().enumerate() {
             let Ok(body) = self.ecs.get::<&Machine>(machine) else {
                 continue;
             };
@@ -6952,28 +7057,30 @@ impl World {
             {
                 continue;
             }
-            let taps: Vec<(usize, usize)> = self
-                .topology
-                .machine_taps
-                .iter()
-                .filter(|&&(entity, _, _)| entity == machine)
-                .map(|&(_, network, segment)| (network, segment))
-                .collect();
+            let (first, end) = self.topology.machine_plumbing[index].draws;
+            let taps = &self.topology.machine_taps[first..end];
             // The same first-fit matching `Machine::tick` does; the one
             // fluid it cannot match is what this machine is waiting for.
-            let mut claimed: Vec<usize> = Vec::new();
+            // `claimed` is a bit per tap, as `Machine::tick` keeps it: a
+            // machine's taps are pairwise distinct networks
+            // (`disjoint_networks_mut` asserts it), so "this network is
+            // claimed" and "this tap is claimed" are the same question.
+            let mut claimed = 0u64;
             let mut short = None;
             for (fluid, units) in &recipe.fluid_inputs {
-                let supplier = taps.iter().find(|(network, segment)| {
-                    !claimed.contains(network)
-                        && self.topology.networks[*network].can_supply_at(
-                            *segment,
-                            fluid,
-                            Fx::from_num(*units),
-                        )
-                });
+                let supplier = taps
+                    .iter()
+                    .enumerate()
+                    .find(|(position, (_, network, segment))| {
+                        claimed & (1 << position) == 0
+                            && self.topology.networks[*network].can_supply_at(
+                                *segment,
+                                fluid,
+                                Fx::from_num(*units),
+                            )
+                    });
                 match supplier {
-                    Some(&(network, _)) => claimed.push(network),
+                    Some((position, _)) => claimed |= 1 << position,
                     None if short.is_none() => short = Some(fluid),
                     None => {
                         short = None;
@@ -6984,15 +7091,14 @@ impl World {
             let Some(fluid) = short else {
                 continue;
             };
-            for &(network, _) in &taps {
-                if !claimed.contains(&network)
+            for (position, &(_, network, _)) in taps.iter().enumerate() {
+                if claimed & (1 << position) == 0
                     && self.topology.networks[network].fluid.as_deref() == Some(fluid.as_str())
                 {
                     held[network] = true;
                 }
             }
         }
-        held
     }
 
     /// Why `machine` is waiting at this moment, if it is — see [`Stall`] for
@@ -8213,22 +8319,31 @@ fn disjoint_networks_mut<'a>(
         );
     }
     // Peel the slice in ascending index order — each `split_at_mut` hands
-    // back one element and the untouched tail — then put the borrows back
-    // into the caller's order.
-    let mut ascending: Vec<usize> = (0..indices.len()).collect();
-    ascending.sort_by_key(|&slot| indices[slot]);
-    let mut borrows: Vec<(usize, &'a mut FluidNetwork)> = Vec::with_capacity(indices.len());
+    // back one element and the untouched tail — dropping each borrow into
+    // its caller-order slot as it is peeled. The next index to peel is the
+    // smallest still unfilled, found by a scan of `indices`: this runs once
+    // per machine per tick for a list a few taps long, so a scan beats
+    // sorting a second list and shuffling the borrows back afterwards. The
+    // one allocation here is the list returned (the final `collect` reuses
+    // it in place).
+    let mut borrows: Vec<Option<&'a mut FluidNetwork>> = indices.iter().map(|_| None).collect();
     let mut rest = networks;
     let mut consumed = 0usize;
-    for slot in ascending {
+    for _ in 0..indices.len() {
+        let slot = (0..indices.len())
+            .filter(|&slot| borrows[slot].is_none())
+            .min_by_key(|&slot| indices[slot])
+            .expect("one unfilled slot per index remains");
         let (_, tail) = rest.split_at_mut(indices[slot] - consumed);
         let (one, tail) = tail.split_at_mut(1);
         consumed = indices[slot] + 1;
         rest = tail;
-        borrows.push((slot, &mut one[0]));
+        borrows[slot] = Some(&mut one[0]);
     }
-    borrows.sort_by_key(|&(slot, _)| slot);
-    borrows.into_iter().map(|(_, network)| network).collect()
+    borrows
+        .into_iter()
+        .map(|network| network.expect("every slot was filled above"))
+        .collect()
 }
 
 /// Every chunk (ARCHITECTURE.md §3.1's 32x32 grid) a **rotated** footprint
