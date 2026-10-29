@@ -266,6 +266,28 @@ below is history and should only ever be appended to.)*
 
 ## Log
 
+### 2026-10-24 — the fluid poll parses the plumbing's shape only when a command moved it
+
+`_update_fluid_network` re-read `fluid_snapshots_json` on every ticked
+frame: on the owner's 655-placement save that is ~49 KB of JSON built,
+converted to a `GString` and `JSON.parse_string`-ed thirty times a second to
+redraw 276 liquid bodies, of which only `volume`/`pressure` had changed —
+the tiles, directions, names, taps and candidates are the plumbing's shape,
+and the shape is recomputed only by a command or a load (sim_core/CLAUDE.md:
+`recompute_topology` never runs on a tick). `SimBridge.command_revision`
+now counts commands and world replacements — `revision` without the ticks —
+and `fluid_levels` hands the moving numbers over flat, in the snapshot's own
+order. The poll takes the full read only when the count has moved and
+otherwise writes the levels into the shape it holds; a size mismatch falls
+back to the full read. Release build, per ticked frame on that save:
+`_update_fluid_network` 1.9 ms → 0.5 ms, of which the parse alone was
+1.1–1.3 ms; across 240 driven frames it went from 25% of script frame time
+to 11%. `test_fluids.gd` pins that a lean poll leaves `_last_fluid`
+byte-identical to a fresh parse, that ticks do not move the count and a
+command does. The stress line's three pipe runs barely feel it (0.13 → 0.07
+ms/frame); the per-tick chunk render (`_apply_dirty_chunks`, ~1.1 ms/frame)
+is now the largest script cost there and on the owner's save.
+
 ### 2026-10-24 — the build ghost warns before a machine shares a running pipe run
 
 Issue #92. Building the BBQ branch onto a running ketchup line gave no warning

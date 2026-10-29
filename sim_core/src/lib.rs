@@ -39,6 +39,10 @@ struct SimBridge {
     /// for a snapshot that is polled, not dirtied.
     storage_seen: Option<sim::world::StorageKey>,
     storage_revision: i64,
+    /// How many commands this bridge has taken and how many times its world
+    /// has been replaced — `revision` without the ticks. See
+    /// [`Self::command_revision`].
+    command_revision: i64,
 }
 
 #[godot_api]
@@ -234,6 +238,10 @@ impl SimBridge {
     ///   "buy".
     #[func]
     fn issue_command_json(&mut self, command_json: GString) {
+        // Counted before it is parsed, refused or not — the same rule
+        // `World::issue_command` applies to `revision`: a reader cannot tell
+        // a refusal from a no-op without re-reading.
+        self.command_revision += 1;
         if let Some(cmd) = sim::command_from_json(&command_json.to_string()) {
             self.world.issue_command(cmd);
         }
@@ -438,10 +446,15 @@ impl SimBridge {
     /// `naming` so the `pipes` array of a chunk snapshot can be drawn
     /// without stitching the networks back together.
     ///
-    /// Read this every frame you want to redraw fluid, like
-    /// `economy_snapshot_json` and unlike `chunk_snapshot_json`: fluid volume
-    /// changes on nearly every tick and deliberately does *not* dirty its
-    /// chunk, so `dirty_chunk_ids()` will never tell you fluid moved. Pipe
+    /// Fluid volume changes on nearly every tick and deliberately does *not*
+    /// dirty its chunk, so `dirty_chunk_ids()` will never tell you fluid
+    /// moved — unlike `chunk_snapshot_json`, this is polled. But poll it only
+    /// when `command_revision` has moved: everything here except the levels
+    /// is the plumbing's SHAPE — which networks, their segments' tiles and
+    /// directions, what each is named — and the shape is recomputed only by
+    /// a command or a load (`recompute_topology`, sim_core/CLAUDE.md). On the
+    /// ticks between, `fluid_levels` carries the four numbers per network and
+    /// per segment that do move, in this snapshot's own order. Pipe
     /// *geometry* is also carried in `chunk_snapshot_json`'s `pipes` array
     /// for a chunk-driven renderer; the live levels are here.
     #[func]
@@ -449,6 +462,50 @@ impl SimBridge {
         let snapshots = self.world.fluid_snapshots();
         let json = serde_json::to_string(&snapshots).expect("FluidSnapshot list must serialize");
         GString::from(json.as_str())
+    }
+
+    /// What `fluid_snapshots_json` carries that a TICK moves, and nothing
+    /// else: for each network in that snapshot's order, its `total_volume`
+    /// and `pressure`, then for each of its segments in order the segment's
+    /// `volume` and `pressure` — one flat array, `2 + 2 × segments` numbers
+    /// per network. The same `f64`s the JSON would print, read off the same
+    /// `World::fluid_snapshots`, so a reader that already holds the shape
+    /// writes these into it and draws exactly what a full read would have
+    /// drawn. A reader whose shape does not fit the array (the sizes
+    /// disagree) has a stale shape and takes the full read.
+    ///
+    /// Why a second wire for the same facts: on a 650-placement floor the
+    /// full snapshot is ~50 KB of JSON, built, converted and parsed thirty
+    /// times a second to redraw 276 liquid bodies whose tiles never moved.
+    #[func]
+    fn fluid_levels(&self) -> PackedFloat64Array {
+        self.world
+            .fluid_snapshots()
+            .iter()
+            .flat_map(|network| {
+                [network.total_volume, network.pressure].into_iter().chain(
+                    network
+                        .segments
+                        .iter()
+                        .flat_map(|segment| [segment.volume, segment.pressure]),
+                )
+            })
+            .collect()
+    }
+
+    /// How many commands this bridge has taken (`issue_command_json`,
+    /// parsed or not, refused or not) plus how many times its world was
+    /// replaced (`load_ron`, `new_game`) — `revision` with the ticks taken
+    /// out. Two equal readings mean nothing has recomputed the topology in
+    /// between: the floor's layout, the fluid networks and their naming are
+    /// what they were, because every recompute sits in a command handler or
+    /// a load (sim_core/CLAUDE.md, "recompute_topology runs only when the
+    /// factory changes"). What a tick moves — levels, items, processes — is
+    /// not covered, which is the point: it lets a poll tell a tick from a
+    /// command and read only what a tick can change.
+    #[func]
+    fn command_revision(&self) -> i64 {
+        self.command_revision
     }
 
     /// Every raw-ingredient hopper in the world, JSON-serialized as an
@@ -1158,6 +1215,7 @@ impl SimBridge {
     /// the way a `place`/`remove`/`rotate` does.
     #[func]
     fn load_ron(&mut self, ron: GString) -> GString {
+        self.command_revision += 1;
         match World::from_save_ron(&ron.to_string(), load_bundled_recipes()) {
             Ok(world) => {
                 self.world = world;
@@ -1183,6 +1241,7 @@ impl SimBridge {
     /// are none), and `world_layout_json` is empty afterwards.
     #[func]
     fn new_game(&mut self) {
+        self.command_revision += 1;
         self.world = World::new(load_bundled_recipes());
     }
 }

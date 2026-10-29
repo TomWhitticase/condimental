@@ -1274,6 +1274,9 @@ var _pipe_fittings: Dictionary = {} # "x,y" -> Array of fitting records from `_p
 var _pipe_fluid_nodes: Dictionary = {} # "net:seg" -> Node3D, the liquid body in that segment
 var _pipe_fault_nodes: Dictionary = {} # "x,y" -> Node3D, the hazard clamp on a run that cannot be named
 var _last_fluid: Array = [] # last fluid snapshot array; [] when nothing is plumbed
+## `sim.command_revision()` when `_last_fluid` was last read in FULL — the
+## shape it describes is current while that number stands (`_read_fluid_shape`).
+var _fluid_shape_revision := -1
 
 # --- Buffer buildings: hoppers, fluid tanks and delivery docks -------------
 # All three used to be single, always-present buildings with a `_tile`, a
@@ -3630,7 +3633,7 @@ func _rebuild_world() -> void:
 			_pipe_shapes[key] = _pipe_shape_for(faces, _placement_direction(placement))
 		if not fittings.is_empty():
 			_pipe_fittings[key] = fittings
-	_last_fluid = _read_fluid_snapshots()
+	_read_fluid_shape()
 	_pipe_tiles.clear()
 	for n in range(_last_fluid.size()):
 		var segments: Array = _last_fluid[n].get("segments", [])
@@ -4856,12 +4859,29 @@ func _product_material_for(recipe_id: String) -> StandardMaterial3D:
 ## `sim::FluidSnapshot`'s own doc gives: fluid moves on nearly every tick and
 ## deliberately does not dirty its chunk.
 ##
+## **Polled in two shapes.** The snapshot's SHAPE — which networks there are,
+## their segments' tiles and directions, what each run is named — changes
+## only on a command or a load, because every topology recompute sits in a
+## command handler (place, remove, rotate, a recipe, a tank's fluid, a
+## splitter's mode — sim_core/CLAUDE.md), and `sim.command_revision()` counts
+## exactly those. What a TICK moves is the levels. So the full
+## `fluid_snapshots_json` is parsed only when that count has moved
+## (`_read_fluid_shape`); on the ticks between, `fluid_levels` hands over the
+## four numbers per network and segment that did change and
+## `_apply_fluid_levels` writes them into the shape already held. On the
+## owner's 655-placement save that is ~50 KB of JSON built, converted and
+## parsed thirty times a second — 2.3 ms of a 4 ms poll in a release build —
+## to redraw 276 liquid bodies whose tiles had not moved. A levels array the
+## held shape does not fit means the shape is stale after all, and the full
+## read is taken: the fall-back is never wrong, only slower.
+##
 ## The liquid bodies are created here rather than in `_build_placement`,
 ## because which network a pipe tile belongs to is decided by the whole run,
 ## and a network's fluid — which decides the tint — is decided by whichever
 ## machine taps it, so both are only known once the snapshots are read.
 func _update_fluid_network() -> void:
-	_last_fluid = _read_fluid_snapshots()
+	if sim.command_revision() != _fluid_shape_revision or not _apply_fluid_levels(sim.fluid_levels()):
+		_read_fluid_shape()
 	for n in range(_last_fluid.size()):
 		var network: Dictionary = _last_fluid[n]
 		var material := _fluid_material_for(_fluid_id_of(network))
@@ -4874,6 +4894,40 @@ func _update_fluid_network() -> void:
 			var pressure: float = clampf(float(segment.get("pressure", 0.0)), 0.0, 1.0)
 			_apply_level(node, pressure, FLUID_MIN_VISIBLE_PRESSURE, PIPE_BORE_HEIGHT_VOXELS)
 	_update_pipe_fault_markers()
+
+
+## The FULL fluid read: every network, parsed, into `_last_fluid`, and the
+## command revision it describes recorded beside it. The one place
+## `_last_fluid` is replaced — `_rebuild_world` takes it for the pipe index,
+## the poll above whenever the shape may have moved.
+func _read_fluid_shape() -> void:
+	_fluid_shape_revision = sim.command_revision()
+	_last_fluid = _read_fluid_snapshots()
+
+
+## Writes one `fluid_levels` reading into the shape `_last_fluid` holds: per
+## network its `total_volume` and `pressure`, then each segment's `volume`
+## and `pressure`, in the snapshot's own order (`SimBridge::fluid_levels`).
+## The dictionaries are updated in place, so every reader of `_last_fluid` —
+## the bodies, the hover, the panels — sees the tick's figures exactly as a
+## full parse would have handed them. False, with nothing written, when the
+## array is not the size that shape calls for: the caller re-reads in full.
+func _apply_fluid_levels(levels: PackedFloat64Array) -> bool:
+	var expected := 0
+	for network in _last_fluid:
+		expected += 2 + 2 * (network.get("segments", []) as Array).size()
+	if levels.size() != expected:
+		return false
+	var i := 0
+	for network in _last_fluid:
+		network["total_volume"] = levels[i]
+		network["pressure"] = levels[i + 1]
+		i += 2
+		for segment in network.get("segments", []):
+			segment["volume"] = levels[i]
+			segment["pressure"] = levels[i + 1]
+			i += 2
+	return true
 
 
 ## Stands a hazard clamp (`PIPE_FAULT_ASSET`) on every tile of every run the

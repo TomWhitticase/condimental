@@ -186,6 +186,43 @@ func _run_checks() -> void:
 		_fail("the tank was filled and the run ticked, but no liquid is drawn")
 		return
 
+	# --- between commands the poll is the lean one, and holds the same -----
+	# The plumbing's shape moves only on a command, so the ticks between
+	# write `fluid_levels` into the shape already held instead of re-parsing
+	# the whole snapshot (`_update_fluid_network`'s doc). Proved three ways: a
+	# key planted on the held shape survives a ticked poll (nothing was
+	# re-parsed), what it then holds is byte-identical to a fresh parse, and
+	# a command — even one the sim refuses — makes the next poll take the
+	# full read, which loses the planted key.
+	var shape_revision: int = main.sim.command_revision()
+	for i in range(37):
+		main.sim.tick()
+	if main.sim.command_revision() != shape_revision:
+		_fail("ticks moved command_revision (%d -> %d); it must count commands and loads only" % [
+			shape_revision, main.sim.command_revision()])
+		return
+	main._last_fluid[0]["planted"] = true
+	main._update_fluid_network()
+	if not main._last_fluid[0].has("planted"):
+		_fail("a poll with no command in between re-read the whole fluid snapshot instead of taking fluid_levels")
+		return
+	main._last_fluid[0].erase("planted")
+	var held := JSON.stringify(main._last_fluid)
+	var fresh := JSON.stringify(JSON.parse_string(main.sim.fluid_snapshots_json()))
+	if held != fresh:
+		_fail("after a lean poll the held fluid shape differs from a fresh parse:\n%s\n%s" % [held, fresh])
+		return
+	main._last_fluid[0]["planted"] = true
+	main.sim.issue_command_json(JSON.stringify({"type": "rotate", "tile": [999, 999]}))
+	if main.sim.command_revision() != shape_revision + 1:
+		_fail("a refused command must still move command_revision (%d -> %d)" % [
+			shape_revision, main.sim.command_revision()])
+		return
+	main._update_fluid_network()
+	if main._last_fluid[0].has("planted"):
+		_fail("a command moved command_revision, but the next poll kept the shape it held")
+		return
+
 	# --- one material per fluid, not one per network per frame ------------
 	# The poll asks for every network's material on every polled frame;
 	# duplicating a fresh one each time was the largest script cost on a big
