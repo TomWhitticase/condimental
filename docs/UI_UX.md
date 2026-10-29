@@ -1059,7 +1059,16 @@ labelled. An empty list says so in a sentence.
 **Pause menu**: the same plate, more opaque, centred in the whole viewport,
 with the line *"the factory is stopped while this is open"* (§7: never encode
 state invisibly). **Quit to Menu asks first; Save & Quit does not.** The save
-field is a **name**, prefilled with what this session loaded from.
+field is a **name**, prefilled with what this session loaded from. What SAVE
+did — the slot it wrote, or why it refused — is a status line under the
+buttons that **exists only while it has text** (2026-10-24: an empty wrapping
+Label still costs a line, and with it the plate was 756px tall at 1280x720,
+its bottom border off the window). When the status is up and the window has
+no room for both, the *"stopped"* line stands down for it, measured against
+the viewport in `_position_pause_menu` — the status is the newer news, and
+the note said its piece when the panel opened; at 1600x900 both fit and both
+show. `test_hud_plates.gd` sweeps the plate bare, with a one-line status and
+with SAVE's longest refusal (two lines) at both sizes.
 
 **Settings** is one screen hosted twice — `settings_panel.gd`, built by the
 main menu and by the pause menu alike, so a knob cannot exist in one and not

@@ -2404,6 +2404,10 @@ var _stock_base_settings: LabelSettings
 var _pause_menu: PanelContainer
 var _pause_open := false
 var _pause_slot_field: LineEdit
+## "the factory is stopped while this is open" — held so that it can stand
+## down for the status line at a window with no room for both
+## (`_position_pause_menu`).
+var _pause_note: Label
 var _pause_status: Label
 var _pause_confirm_box: VBoxContainer
 var _pause_buttons_box: VBoxContainer
@@ -17443,7 +17447,12 @@ func _build_pause_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	hud.add_child(_pause_menu)
 
 	var body := VBoxContainer.new()
-	body.add_theme_constant_override("separation", _ui_i(12))
+	# 8 and 6 (were 12 and 8): what a 720px window has left once the title,
+	# the note, seven rows and a two-line status are on the plate. The
+	# status is where the height comes from — the longest refusal SAVE can
+	# print wraps to two lines at the plate's width — and with the old gaps
+	# that case was 741px tall even with the note stood down.
+	body.add_theme_constant_override("separation", _ui_i(8))
 	_pause_menu.add_child(body)
 
 	var title_settings := LabelSettings.new()
@@ -17461,15 +17470,16 @@ func _build_pause_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 	# The one line that says the factory has actually stopped. Without it a
 	# player has to infer it from belts not moving, which is exactly the
 	# never-encode-state-invisibly problem UI_UX.md §7 is about.
-	var note := Label.new()
-	note.label_settings = base_settings
-	note.text = "the factory is stopped while this is open"
-	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	body.add_child(note)
+	_pause_note = Label.new()
+	_pause_note.name = "PauseNote"
+	_pause_note.label_settings = base_settings
+	_pause_note.text = "the factory is stopped while this is open"
+	_pause_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	body.add_child(_pause_note)
 
 	_pause_buttons_box = VBoxContainer.new()
 	_pause_buttons_box.name = "PauseButtons"
-	_pause_buttons_box.add_theme_constant_override("separation", _ui_i(8))
+	_pause_buttons_box.add_theme_constant_override("separation", _ui_i(6))
 	body.add_child(_pause_buttons_box)
 
 	var resume := _pause_button("ResumeButton", "RESUME")
@@ -17579,15 +17589,32 @@ func _build_pause_menu(hud: CanvasLayer, base_settings: LabelSettings) -> void:
 
 	# What the last action did — a save's file name, or why one was refused.
 	# Its own line inside this panel rather than the hotbar flyout, because
-	# the flyout sits at the bottom of the screen behind this plate.
+	# the flyout sits at the bottom of the screen behind this plate. Hidden
+	# while it has nothing to say: an empty wrapping Label still costs a
+	# line, and with it the plate was 756px tall in a 720px window
+	# (`_position_pause_menu`).
 	_pause_status = Label.new()
 	_pause_status.name = "PauseStatus"
 	_pause_status.label_settings = base_settings
 	_pause_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_pause_status.custom_minimum_size = Vector2(PAUSE_BUTTON_MIN_SIZE.x, 0.0)
+	# Centred like every other line on this plate (the first render of it
+	# with text in it had the one left-aligned line under a centred column).
+	_pause_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_pause_status.text = ""
+	_pause_status.visible = false
 	body.add_child(_pause_status)
 
+	_position_pause_menu()
+
+
+## Writes the pause menu's status line and re-fits the plate around it. The
+## one door for that line, because showing it changes the plate's height and
+## the plate's height decides whether the note above the buttons stays.
+func _set_pause_status(text: String) -> void:
+	if _pause_status == null:
+		return
+	_pause_status.text = text
 	_position_pause_menu()
 
 
@@ -17607,9 +17634,26 @@ func _pause_button(node_name: String, text: String) -> Button:
 	return button
 
 
+## Centres the plate, and first decides what is on it: the status line only
+## while it has text, and the note above the buttons only while the window
+## has room for both. UI_UX.md §5c ranks a control the player cannot reach
+## above every other fault, and a plate taller than the window is one whose
+## bottom buttons are drawn where nobody can click them. The line that
+## yields is the note, for the reason the main menu's wordmark stands down
+## for the settings rows: the status is the newer news, and the note said
+## its piece when the panel opened. At 1600x900 both fit and both show.
 func _position_pause_menu() -> void:
 	if _pause_menu == null:
 		return
+	if _pause_status != null:
+		_pause_status.visible = _pause_status.text != ""
+	if _pause_note != null:
+		_pause_note.visible = true
+		var vp := get_viewport() if is_inside_tree() else null
+		if vp != null and _pause_status != null and _pause_status.visible:
+			var room: float = vp.get_visible_rect().size.y
+			if _pause_menu.get_combined_minimum_size().y > room:
+				_pause_note.visible = false
 	_pause_menu.set_anchors_and_offsets_preset(Control.PRESET_CENTER, Control.PRESET_MODE_MINSIZE)
 
 
@@ -18117,9 +18161,8 @@ func _set_pause_open(open: bool) -> void:
 		_set_pause_settings(false)
 		_set_pause_cookbook(false)
 		_set_pause_confirm(false)
-		_pause_status.text = ""
 		_pause_slot_field.text = _save_slot
-		_position_pause_menu()
+		_set_pause_status("")
 		# A drag in progress when ESC is pressed never sees its release
 		# (the pause branch of `_unhandled_input` swallows it) — see `_input`.
 		_iso_dragging = false
@@ -18173,9 +18216,9 @@ func _on_pause_save_pressed() -> void:
 	var typed := _pause_slot_field.text if _pause_slot_field != null else _save_slot
 	var error := _save_to_slot(typed)
 	if error != "":
-		_pause_status.text = error
+		_set_pause_status(error)
 		return
-	_pause_status.text = "Saved to %s" % _save_slot
+	_set_pause_status("Saved to %s" % _save_slot)
 	_pause_slot_field.text = _save_slot
 	# The hotbar flyout too, so the confirmation is also there after the
 	# panel closes — the same label every other "that worked" message uses.
@@ -18186,7 +18229,7 @@ func _on_pause_save_and_quit_pressed() -> void:
 	var typed := _pause_slot_field.text if _pause_slot_field != null else _save_slot
 	var error := _save_to_slot(typed)
 	if error != "":
-		_pause_status.text = error
+		_set_pause_status(error)
 		return
 	# No confirm step on this one, deliberately: it cannot lose anything.
 	_quit_to_menu()
